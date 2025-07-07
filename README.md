@@ -25,10 +25,7 @@ export FLEET_API_KEY="sk_your_key_here"
 ```python
 import fleet as flt
 
-# Create environment with explicit version
-env = await flt.env.make("fira:v1.2.5")
-
-# Create environment with latest version
+# Create environment by key
 env = await flt.env.make("fira")
 
 # Reset environment with seed and options

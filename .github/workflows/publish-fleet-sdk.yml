@@ -33,10 +33,12 @@ jobs:
   build-and-publish:
     needs: validate
     runs-on: ubuntu-latest
+    environment: pypi # Optional: use a dedicated environment for publishing
+    permissions:
+      id-token: write # Required for OIDC authentication
+      contents: read # Required to checkout code
 
     env:
-      TWINE_USERNAME: __token__
-      TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
       RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
 
     steps:
@@ -66,6 +68,6 @@ jobs:
           path: fleet-sdk/dist/
           retention-days: 5
       - name: Publish to PyPI
-        working-directory: fleet-sdk
-        run: |
-          twine upload dist/*
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: fleet-sdk/dist/
