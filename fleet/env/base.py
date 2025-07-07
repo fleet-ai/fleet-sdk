@@ -101,6 +101,11 @@ class Environment(ABC):
         """Get the current step count."""
         return self._step_count
     
+    @property
+    def env_key(self) -> Optional[str]:
+        """Get the environment key."""
+        return getattr(self.config, 'environment_type', None)
+    
     def _increment_step(self) -> None:
         """Increment the step counter."""
         self._step_count += 1
@@ -143,6 +148,34 @@ class RemoteEnvironment(Environment):
         
         # Initialize manager client (will be set when instance URLs are available)
         self._manager_client: Optional[FleetManagerClient] = None
+    
+    @property
+    def env_key(self) -> Optional[str]:
+        """Get the environment key from instance response or config."""
+        if self._instance_response:
+            return self._instance_response.env_key
+        return self.config.environment_type
+    
+    @property
+    def region(self) -> Optional[str]:
+        """Get the region from instance response."""
+        if self._instance_response:
+            return self._instance_response.region
+        return self.config.metadata.get('region')
+    
+    @property
+    def status(self) -> Optional[str]:
+        """Get the current instance status."""
+        if self._instance_response:
+            return self._instance_response.status
+        return None
+    
+    @property
+    def subdomain(self) -> Optional[str]:
+        """Get the instance subdomain."""
+        if self._instance_response:
+            return self._instance_response.subdomain
+        return None
         
     async def reset(
         self,

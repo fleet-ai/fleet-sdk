@@ -6,25 +6,15 @@ from .factory import (
     get, 
     list_instances, 
     list_envs, 
-    list_environments,
-    list_categories,
-    list_names,
-    list_versions,
-    is_environment_supported,
-    EnvironmentInstance
+    InstanceInfo
 )
 
 __all__ = [
     "Environment",
     "EnvironmentConfig", 
-    "EnvironmentInstance",
+    "InstanceInfo",
     "make",
     "get",
     "list_instances",
     "list_envs",
-    "list_environments",
-    "list_categories",
-    "list_names",
-    "list_versions",
-    "is_environment_supported",
 ] 

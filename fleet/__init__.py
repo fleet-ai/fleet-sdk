@@ -20,7 +20,7 @@ from .config import get_config, FleetConfig
 from .client import FleetAPIClient, InstanceRequest, InstanceResponse, EnvDetails as APIEnvironment, HealthResponse, ManagerURLs, InstanceURLs
 from .manager_client import FleetManagerClient, ManagerHealthResponse, TimestampResponse
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __all__ = [
     "env",
     "FleetError",

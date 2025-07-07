@@ -10,54 +10,12 @@ from ..config import get_config, FleetConfig
 from ..client import FleetAPIClient, EnvDetails, InstanceRequest
 
 
-# Registry of available environment types with versioning
-ENVIRONMENT_REGISTRY: Dict[str, Dict[str, Dict[str, str]]] = {
-    "browser": {
-        "chrome-desktop": {
-            "v1": "web_browser",
-            "v2": "web_browser",
-            "latest": "v2"
-        },
-        "firefox-desktop": {
-            "v1": "web_browser",
-            "latest": "v1"
-        },
-        "safari-desktop": {
-            "v1": "web_browser",
-            "latest": "v1"
-        },
-        "chrome-mobile": {
-            "v1": "mobile_browser",
-            "latest": "v1"
-        }
-    },
-    "database": {
-        "postgres": {
-            "v1": "database",
-            "latest": "v1"
-        },
-        "mysql": {
-            "v1": "database",
-            "latest": "v1"
-        }
-    },
-    "file-system": {
-        "unix": {
-            "v1": "file_system",
-            "latest": "v1"
-        }
-    },
-    "api": {
-        "rest": {
-            "v1": "api",
-            "latest": "v1"
-        }
-    }
-}
+# All environment information is now fetched via the Fleet API
+# Use list_envs() to get available environments dynamically
 
 
-class EnvironmentInstance:
-    """Represents a live environment instance."""
+class InstanceInfo:
+    """Metadata about a live environment instance."""
     
     def __init__(
         self,
@@ -72,6 +30,31 @@ class EnvironmentInstance:
         self.status = status
         self.created_at = created_at
         self.metadata = metadata or {}
+    
+    @property
+    def version(self) -> Optional[str]:
+        """Get the environment version."""
+        return self.metadata.get("version")
+    
+    @property
+    def region(self) -> Optional[str]:
+        """Get the AWS region."""
+        return self.metadata.get("region")
+    
+    @property
+    def team_id(self) -> Optional[str]:
+        """Get the team ID."""
+        return self.metadata.get("team_id")
+    
+    @property
+    def subdomain(self) -> str:
+        """Get the subdomain for this instance."""
+        return f"{self.instance_id}.fleetai.com"
+    
+    @property
+    def health(self) -> Optional[str]:
+        """Get the health status."""
+        return self.metadata.get("health")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert instance to dictionary representation."""
@@ -245,7 +228,7 @@ async def list_instances(
     status: Optional[str] = None,
     env_key_filter: Optional[str] = None,
     **kwargs: Any,
-) -> List[EnvironmentInstance]:
+) -> List[InstanceInfo]:
     """Get a directory of all live environment instances.
     
     Args:
@@ -253,8 +236,8 @@ async def list_instances(
         env_key_filter: Filter by environment key (e.g., 'fira', 'dropbox')
         **kwargs: Additional query parameters
         
-    Returns:
-        List of EnvironmentInstance objects representing live instances
+            Returns:
+        List of InstanceInfo objects representing live instances
         
     Raises:
         FleetAuthenticationError: If API key is missing or invalid
@@ -282,7 +265,7 @@ async def list_instances(
                 if env_key_filter and instance.env_key != env_key_filter:
                     continue
                 
-                env_instance = EnvironmentInstance(
+                env_instance = InstanceInfo(
                     instance_id=instance.instance_id,
                     env_key=instance.env_key,
                     status=instance.status,
@@ -331,100 +314,8 @@ async def list_envs(**kwargs: Any) -> List[EnvDetails]:
         return environments
 
 
-def list_environments() -> List[str]:
-    """List all available environment specifications.
-    
-    Returns:
-        List of environment specifications in format "category/name:version"
-    """
-    env_specs = []
-    for category, names in ENVIRONMENT_REGISTRY.items():
-        for name, versions in names.items():
-            for version in versions.keys():
-                if version != "latest":  # Don't include "latest" in the list
-                    env_specs.append(f"{category}/{name}:{version}")
-    
-    return sorted(env_specs)
-
-
-def list_categories() -> List[str]:
-    """List all available environment categories.
-    
-    Returns:
-        List of category names
-    """
-    return list(ENVIRONMENT_REGISTRY.keys())
-
-
-def list_names(category: str) -> List[str]:
-    """List all available environment names in a category.
-    
-    Args:
-        category: Environment category
-        
-    Returns:
-        List of environment names in the category
-        
-    Raises:
-        FleetEnvironmentError: If category is not found
-    """
-    if category not in ENVIRONMENT_REGISTRY:
-        available_categories = ", ".join(ENVIRONMENT_REGISTRY.keys())
-        raise FleetEnvironmentError(
-            f"Unknown environment category: {category}. "
-            f"Available categories: {available_categories}"
-        )
-    
-    return list(ENVIRONMENT_REGISTRY[category].keys())
-
-
-def list_versions(category: str, name: str) -> List[str]:
-    """List all available versions for an environment.
-    
-    Args:
-        category: Environment category
-        name: Environment name
-        
-    Returns:
-        List of available versions (excluding "latest")
-        
-    Raises:
-        FleetEnvironmentError: If category or name is not found
-    """
-    if category not in ENVIRONMENT_REGISTRY:
-        available_categories = ", ".join(ENVIRONMENT_REGISTRY.keys())
-        raise FleetEnvironmentError(
-            f"Unknown environment category: {category}. "
-            f"Available categories: {available_categories}"
-        )
-    
-    if name not in ENVIRONMENT_REGISTRY[category]:
-        available_names = ", ".join(ENVIRONMENT_REGISTRY[category].keys())
-        raise FleetEnvironmentError(
-            f"Unknown environment name: {name} in category {category}. "
-            f"Available names: {available_names}"
-        )
-    
-    versions = [v for v in ENVIRONMENT_REGISTRY[category][name].keys() if v != "latest"]
-    return sorted(versions)
-
-
-def is_environment_supported(environment_spec: str) -> bool:
-    """Check if an environment specification is supported.
-    
-    Args:
-        environment_spec: Environment specification to check
-        
-    Returns:
-        True if the environment is supported, False otherwise
-    """
-    try:
-        env_name, version = _parse_environment_spec(environment_spec)
-        # For now, we'll just check if we can parse it successfully
-        # In the future, we could validate against the API
-        return True
-    except FleetEnvironmentError:
-        return False
+# Registry-based functions removed - use API-based list_envs() instead
+# All environment information is now fetched dynamically from the Fleet API
 
 
 async def _initialize_environment(env: Environment) -> None:
