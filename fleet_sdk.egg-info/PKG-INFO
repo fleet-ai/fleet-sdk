@@ -1,0 +1,278 @@
+Metadata-Version: 2.4
+Name: fleet-sdk
+Version: 0.1.0
+Summary: Fleet Python SDK for RL environments
+Author-email: Fleet <nic@fleet.so>
+Project-URL: Homepage, https://github.com/fleet-ai/fleet-sdk
+Project-URL: Documentation, https://docs.fleetai.com
+Project-URL: Repository, https://github.com/fleet-ai/fleet-sdk
+Project-URL: Issues, https://github.com/fleet-ai/fleet-sdk/issues
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Requires-Dist: aiohttp>=3.8.0
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: typing-extensions>=4.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: black>=22.0.0; extra == "dev"
+Requires-Dist: isort>=5.0.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+
+# Fleet Python SDK
+
+A Python SDK for interacting with Fleet's environment-based AI agent platform.
+
+## Installation
+
+```bash
+pip install fleet-python
+```
+
+## API Key Setup
+
+Fleet requires an API key for authentication. You can obtain one from the [Fleet Dashboard](https://app.fleetai.com/dashboard).
+
+Set your API key as an environment variable:
+
+```bash
+export FLEET_API_KEY="flt_your_key_here"
+```
+
+Optionally, you can also configure the following:
+
+```bash
+# No additional configuration needed - base URL is automatically set to https://fleet.new
+```
+
+## Basic Usage
+
+```python
+import fleet as flt
+
+# Create environment with explicit version
+env = await flt.env.make("browser/chrome-desktop:v1")
+
+# Create environment with default (latest) version
+env = await flt.env.make("browser/chrome-desktop")
+
+# Reset environment with seed and options
+obs, info = await env.reset(
+    seed=42,
+    timestamp="2024-01-01T00:00:00Z",
+    options={"viewport": {"width": 1920, "height": 1080}}
+)
+
+# Agent interaction loop
+done = False
+while not done:
+    # Your agent decides what action to take
+    action = agent.act(obs)
+
+    # Execute action in environment
+    obs, reward, done, info = await env.step(action)
+
+# Access environment state through facets
+sql = env.state("sqlite://crm")
+await sql.exec("UPDATE customers SET status = 'active' WHERE id = 123")
+
+# Clean up
+await env.close()
+```
+
+## Environment Management
+
+### Creating Environments
+
+```python
+# Create environment with explicit version
+env = await flt.env.make("browser/chrome-desktop:v1")
+
+# Create environment with default (latest) version
+env = await flt.env.make("browser/chrome-desktop")
+
+# Create database environment
+env = await flt.env.make("database/postgres:v1")
+```
+
+### Connecting to Existing Environments
+
+```python
+# Connect to a running environment
+env = await flt.env.get("env_instance_123")
+
+# List all running instances
+instances = await flt.env.list_instances()
+for instance in instances:
+    print(f"Instance: {instance.instance_id}")
+    print(f"Type: {instance.environment_type}")
+    print(f"Status: {instance.status}")
+
+# Filter instances
+running_instances = await flt.env.list_instances(status_filter="running")
+chrome_instances = await flt.env.list_instances(environment_type_filter="browser/chrome-desktop:v1")
+
+# List available environment types
+available_envs = await flt.env.list_envs()
+print("Available environments:", available_envs)
+# Output: ['browser/chrome-desktop:v1', 'browser/chrome-desktop:v2', 'browser/firefox-desktop:v1', ...]
+```
+
+### Environment Discovery
+
+```python
+# List all categories
+categories = flt.env.list_categories()
+print("Categories:", categories)
+# Output: ['browser', 'database', 'file-system', 'api']
+
+# List environments in a category
+browser_envs = flt.env.list_names("browser")
+print("Browser environments:", browser_envs)
+# Output: ['chrome-desktop', 'firefox-desktop', 'safari-desktop', 'chrome-mobile']
+
+# List versions for a specific environment
+versions = flt.env.list_versions("browser", "chrome-desktop")
+print("Chrome versions:", versions)
+# Output: ['v1', 'v2']
+
+# Check if environment is supported
+if flt.env.is_environment_supported("browser/chrome-desktop:v1"):
+    env = await flt.env.make("browser/chrome-desktop:v1")
+```
+
+## Environment Types
+
+Fleet supports various environment types organized by category:
+
+### Browser Environments
+
+- `browser/chrome-desktop:v1` - Chrome browser on desktop (v1)
+- `browser/chrome-desktop:v2` - Chrome browser on desktop (v2)
+- `browser/firefox-desktop:v1` - Firefox browser on desktop
+- `browser/safari-desktop:v1` - Safari browser on desktop
+- `browser/chrome-mobile:v1` - Chrome browser on mobile
+
+### Database Environments
+
+- `database/postgres:v1` - PostgreSQL database environment
+- `database/mysql:v1` - MySQL database environment
+
+### File System Environments
+
+- `file-system/unix:v1` - Unix file system environment
+
+### API Environments
+
+- `api/rest:v1` - REST API environment
+
+### Version Defaulting
+
+When you omit the version, Fleet defaults to the latest version:
+
+```python
+# These are equivalent:
+env = await flt.env.make("browser/chrome-desktop")
+env = await flt.env.make("browser/chrome-desktop:latest")
+env = await flt.env.make("browser/chrome-desktop:v2")  # v2 is latest for chrome-desktop
+```
+
+## Reset Parameters
+
+The `reset()` method accepts the following parameters:
+
+- `seed`: Integer seed for deterministic RNG in the environment
+- `timestamp`: ISO8601 string or datetime for the "current time" the simulation should use
+- `options`: Dictionary of additional flags the environment supports
+
+```python
+# Reset with specific seed for reproducibility
+obs, info = await env.reset(seed=42)
+
+# Reset with specific timestamp
+obs, info = await env.reset(timestamp="2024-01-01T12:00:00Z")
+
+# Reset with custom options
+obs, info = await env.reset(
+    seed=42,
+    timestamp="2024-01-01T12:00:00Z",
+    options={
+        "viewport": {"width": 1920, "height": 1080},
+        "user_agent": "custom-agent",
+        "locale": "en-US"
+    }
+)
+```
+
+## Error Handling
+
+```python
+import fleet as flt
+from fleet import FleetError, FleetAPIError, FleetAuthenticationError
+
+try:
+    env = await flt.env.make("browser/chrome-desktop:v1")
+    obs, info = await env.reset()
+
+except FleetAuthenticationError:
+    print("API key is missing or invalid")
+except FleetAPIError as e:
+    print(f"API error: {e.message} (status: {e.status_code})")
+except FleetError as e:
+    print(f"Fleet error: {e.message}")
+```
+
+## Security Best Practices
+
+1. **Never commit API keys to version control**
+2. **Use environment variables in production**
+3. **Rotate API keys regularly**
+4. **Use different API keys for different environments**
+5. **Monitor API key usage**
+
+```python
+# Good: Use environment variables
+import os
+api_key = os.getenv("FLEET_API_KEY")
+
+# Bad: Hardcode API keys
+api_key = "flt_your_api_key_here"  # Don't do this!
+```
+
+## Development
+
+### Local Development
+
+```bash
+# Install in development mode
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Format code
+black .
+isort .
+
+# Type checking
+mypy src/fleet
+```
+
+## Support
+
+- [Documentation](https://docs.fleetai.com)
+- [GitHub Issues](https://github.com/fleet-ai/fleet-sdk/issues)
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
