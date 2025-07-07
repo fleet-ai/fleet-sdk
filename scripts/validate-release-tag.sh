@@ -37,7 +37,6 @@ if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "HEAD" ]; then
 fi
 
 # Check if version in pyproject.toml matches tag
-cd fleet-sdk
 PYPROJECT_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
 
 if [ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]; then
