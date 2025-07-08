@@ -4,7 +4,7 @@ import logging
 from typing import Optional, List
 
 from .base import InstanceBase, AsyncWrapper, SyncWrapper
-from .models import InstanceRequest, InstanceResponse, Environment
+from .models import InstanceRequest, InstanceRecord, Environment
 
 from .manager import Manager, AsyncManager
 
@@ -69,9 +69,9 @@ class Fleet:
         response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
         return Instance(**response.json())
 
-    def delete_instance(self, instance_id: str) -> InstanceResponse:
+    def delete_instance(self, instance_id: str) -> InstanceRecord:
         response = self.client.request("DELETE", f"/v1/env/instances/{instance_id}")
-        return InstanceResponse(**response.json())
+        return InstanceRecord(**response.json())
 
 
 class AsyncFleet:
@@ -114,9 +114,8 @@ class AsyncFleet:
         response = await self.client.request("GET", f"/v1/env/instances/{instance_id}")
         return AsyncInstance(**response.json())
 
-    async def delete_instance(self, instance_id: str) -> InstanceResponse:
+    async def delete_instance(self, instance_id: str) -> InstanceRecord:
         response = await self.client.request(
             "DELETE", f"/v1/env/instances/{instance_id}"
         )
-        print(response.json())
-        return InstanceResponse(**response.json())
+        return InstanceRecord(**response.json())
