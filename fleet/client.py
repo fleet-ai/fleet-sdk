@@ -38,7 +38,7 @@ class Fleet:
         base_url: Optional[str] = None,
         httpx_client: Optional[httpx.Client] = None,
     ):
-        self._httpx_client = httpx_client or httpx.Client()
+        self._httpx_client = httpx_client or httpx.Client(timeout=60.0)
         self.client = SyncWrapper(
             api_key=api_key,
             base_url=base_url,
@@ -54,7 +54,7 @@ class Fleet:
         return Environment(**response.json())
 
     def create_instance(self, request: InstanceRequest) -> Instance:
-        response = self.client.request("POST", "/v1/env/", json=request.model_dump())
+        response = self.client.request("POST", "/v1/env/instances", json=request.model_dump())
         return Instance(**response.json())
 
     def list_instances(self, status: Optional[str] = None) -> List[Instance]:
@@ -66,11 +66,11 @@ class Fleet:
         return [Instance(**instance_data) for instance_data in response.json()]
 
     def get_instance(self, instance_id: str) -> Instance:
-        response = self.client.request("GET", f"/v1/env/{instance_id}")
+        response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
         return Instance(**response.json())
 
     def delete_instance(self, instance_id: str) -> Instance:
-        response = self.client.request("DELETE", f"/v1/env/{instance_id}")
+        response = self.client.request("DELETE", f"/v1/env/instances/{instance_id}")
         return Instance(**response.json())
 
 
@@ -81,7 +81,7 @@ class AsyncFleet:
         base_url: Optional[str] = None,
         httpx_client: Optional[httpx.AsyncClient] = None,
     ):
-        self._httpx_client = httpx_client or httpx.AsyncClient()
+        self._httpx_client = httpx_client or httpx.AsyncClient(timeout=60.0)
         self.client = AsyncWrapper(
             api_key=api_key,
             base_url=base_url,
@@ -98,7 +98,7 @@ class AsyncFleet:
 
     async def create_instance(self, request: InstanceRequest) -> AsyncInstance:
         response = await self.client.request(
-            "POST", "/v1/env/", json=request.model_dump()
+            "POST", "/v1/env/instances", json=request.model_dump()
         )
         return AsyncInstance(**response.json())
 
@@ -111,9 +111,11 @@ class AsyncFleet:
         return [AsyncInstance(**instance_data) for instance_data in response.json()]
 
     async def get_instance(self, instance_id: str) -> AsyncInstance:
-        response = await self.client.request("GET", f"/v1/env/{instance_id}")
+        response = await self.client.request("GET", f"/v1/env/instances/{instance_id}")
         return AsyncInstance(**response.json())
 
     async def delete_instance(self, instance_id: str) -> AsyncInstance:
-        response = await self.client.request("DELETE", f"/v1/env/{instance_id}")
+        response = await self.client.request(
+            "DELETE", f"/v1/env/instances/{instance_id}"
+        )
         return AsyncInstance(**response.json())
