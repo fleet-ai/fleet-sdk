@@ -9,7 +9,7 @@ class BaseWrapper:
     def get_headers(self) -> Dict[str, str]:
         headers: Dict[str, str] = {
             "X-Fleet-SDK-Language": "Python",
-            "X-Fleet-SDK-Version": "2.5.3",
+            "X-Fleet-SDK-Version": "1.0.0",
         }
         return headers
 

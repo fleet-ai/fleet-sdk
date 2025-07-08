@@ -3,7 +3,7 @@ from typing import Optional, List, Dict, Any
 
 from .base import SyncWrapper, AsyncWrapper
 from .models import ResetResponse, Resource, ResourceType
-from .facets import SQLiteFacet, AsyncSQLiteFacet, CDPFacet, AsyncCDPFacet
+from .facets import SQLiteFacet, AsyncSQLiteResource, CDPFacet, AsyncBrowserResource
 
 
 class Manager:
@@ -94,21 +94,23 @@ class AsyncManager:
         
         # Facet registry mapping resource types to facet classes
         self._facet_registry = {
-            ResourceType.sqlite: AsyncSQLiteFacet,
-            ResourceType.cdp: AsyncCDPFacet,
+            ResourceType.sqlite: AsyncSQLiteResource,
+            ResourceType.cdp: AsyncBrowserResource,
         }
         
         # Initialize type-based facet collections
-        self._sqlite: Dict[str, AsyncSQLiteFacet] = {}
-        self._cdp: Dict[str, AsyncCDPFacet] = {}
+        self._sqlite: Dict[str, AsyncSQLiteResource] = {}
+        self._cdp: Dict[str, AsyncBrowserResource] = {}
+
+
+    def state(self, uri: str) -> Any:
+        return self._facets[uri]
 
     async def __aenter__(self):
-        """Async context manager entry - load facets."""
         await self._load_facets()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
         return None
 
     async def reset(self) -> ResetResponse:
@@ -144,11 +146,11 @@ class AsyncManager:
         """Get a facet by resource name."""
         return self._facets.get(resource_name)
     
-    def get_sqlite_facets(self) -> Dict[str, AsyncSQLiteFacet]:
+    def get_sqlite_facets(self) -> Dict[str, AsyncSQLiteResource]:
         """Get all SQLite facets indexed by name."""
         return self._sqlite
     
-    def get_cdp_facets(self) -> Dict[str, AsyncCDPFacet]:
+    def get_cdp_facets(self) -> Dict[str, AsyncBrowserResource]:
         """Get all CDP/browser facets indexed by name."""
         return self._cdp
     

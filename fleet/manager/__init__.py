@@ -10,7 +10,7 @@ from .models import (
     ResourceMode,
     TableSchema
 )
-from .facets import SQLiteFacet, AsyncSQLiteFacet, CDPFacet, AsyncCDPFacet
+from .facets import AsyncSQLiteResource, AsyncBrowserResource
 
 __all__ = [
     "Manager", 
@@ -24,8 +24,6 @@ __all__ = [
     "ResourceType",
     "ResourceMode",
     "TableSchema",
-    "SQLiteFacet",
-    "AsyncSQLiteFacet",
-    "CDPFacet",
-    "AsyncCDPFacet"
+    "AsyncSQLiteResource",
+    "AsyncBrowserResource"
 ]
