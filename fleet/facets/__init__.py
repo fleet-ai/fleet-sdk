@@ -1,7 +1,7 @@
 """Fleet SDK Facet Module."""
 
-from .base import Facet
+from .base import Resource
  
 __all__ = [
-    "Facet",
+    "Resource",
 ] 

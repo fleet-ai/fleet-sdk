@@ -1,9 +1,12 @@
 import httpx
 from typing import Optional, List, Dict, Any
+from abc import ABC, abstractmethod
+from urllib.parse import urlparse
 
 from .base import SyncWrapper, AsyncWrapper
-from .models import ResetResponse, Resource, ResourceType
-from .facets import SQLiteFacet, AsyncSQLiteResource, CDPFacet, AsyncBrowserResource
+from .models import ResetResponse, Resource as ResourceModel, ResourceType
+from .facets import AsyncSQLiteResource, AsyncBrowserResource
+from ..facets.base import Resource
 
 
 class Manager:
@@ -12,75 +15,10 @@ class Manager:
         self.client = SyncWrapper(
             url=self.base_url, httpx_client=httpx_client or httpx.Client()
         )
-        self._facets: Dict[str, Any] = {}
-        self._resources_cache: Optional[List[Resource]] = None
-        
-        # Facet registry mapping resource types to facet classes
-        self._facet_registry = {
-            ResourceType.sqlite: SQLiteFacet,
-            ResourceType.cdp: CDPFacet,
-        }
-        
-        # Initialize type-based facet collections
-        self._sqlite: Dict[str, SQLiteFacet] = {}
-        self._cdp: Dict[str, CDPFacet] = {}
-        
-        # Load facets on initialization
-        self._load_facets()
 
     def reset(self) -> ResetResponse:
         response = self.client.request("POST", "/reset")
         return ResetResponse(**response.json())
-
-    @property
-    def resources(self) -> List[Resource]:
-        """Get list of available resources."""
-        if self._resources_cache is None:
-            response = self.client.request("GET", "/resources")
-            self._resources_cache = [Resource(**resource) for resource in response.json()["resources"]]
-        return self._resources_cache
-
-    def _load_facets(self) -> None:
-        """Load facets dynamically based on available resources."""
-        for resource in self.resources:
-            facet_class = self._facet_registry.get(resource.type)
-            if facet_class:
-                facet = facet_class(resource.name, self.client)
-                self._facets[resource.name] = facet
-                
-                # Also set as attribute for direct access
-                setattr(self, resource.name, facet)
-                
-                # Add to type-specific collection
-                if resource.type == ResourceType.sqlite:
-                    self._sqlite[resource.name] = facet
-                elif resource.type == ResourceType.cdp:
-                    self._cdp[resource.name] = facet
-    
-    def get_facet(self, resource_name: str) -> Optional[Any]:
-        """Get a facet by resource name."""
-        return self._facets.get(resource_name)
-    
-    def get_sqlite_facets(self) -> Dict[str, SQLiteFacet]:
-        """Get all SQLite facets indexed by name."""
-        return self._sqlite
-    
-    def get_cdp_facets(self) -> Dict[str, CDPFacet]:
-        """Get all CDP/browser facets indexed by name."""
-        return self._cdp
-    
-    def refresh_facets(self) -> None:
-        """Refresh the facets by re-fetching resources."""
-        self._resources_cache = None
-        self._facets.clear()
-        self._sqlite.clear()
-        self._cdp.clear()
-        
-        # Remove old facet attributes
-        for resource in self.resources:
-            if hasattr(self, resource.name):
-                delattr(self, resource.name)
-        self._load_facets()
 
 
 class AsyncManager:
@@ -89,25 +27,13 @@ class AsyncManager:
         self.client = AsyncWrapper(
             url=self.base_url, httpx_client=httpx_client or httpx.AsyncClient()
         )
-        self._facets: Dict[str, Any] = {}
-        self._resources_cache: Optional[List[Resource]] = None
-        
-        # Facet registry mapping resource types to facet classes
-        self._facet_registry = {
-            ResourceType.sqlite: AsyncSQLiteResource,
-            ResourceType.cdp: AsyncBrowserResource,
+        self._resources: Optional[List[ResourceModel]] = None
+        self._resources_state: Dict[ResourceType, Dict[str, Resource]] = {
+            resource_type: {} for resource_type in ResourceType
         }
-        
-        # Initialize type-based facet collections
-        self._sqlite: Dict[str, AsyncSQLiteResource] = {}
-        self._cdp: Dict[str, AsyncBrowserResource] = {}
-
-
-    def state(self, uri: str) -> Any:
-        return self._facets[uri]
 
     async def __aenter__(self):
-        await self._load_facets()
+        await self._load_resources()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -117,53 +43,30 @@ class AsyncManager:
         response = await self.client.request("POST", "/reset")
         return ResetResponse(**response.json())
 
-    async def get_resources(self) -> List[Resource]:
-        """Get list of available resources."""
-        if self._resources_cache is None:
-            response = await self.client.request("GET", "/resources")
-            self._resources_cache = [Resource(**resource) for resource in response.json()["resources"]]
-        return self._resources_cache
+    def state(self, uri: str) -> Resource:
+        url = urlparse(uri)
+        return self._resources_state[url.scheme][url.netloc]
 
-    async def _load_facets(self) -> None:
-        """Load facets dynamically based on available resources."""
-        resources = await self.get_resources()
-        for resource in resources:
-            facet_class = self._facet_registry.get(resource.type)
-            if facet_class:
-                facet = facet_class(resource.name, self.client)
-                self._facets[resource.name] = facet
-                
-                # Also set as attribute for direct access
-                setattr(self, resource.name, facet)
-                
-                # Add to type-specific collection
-                if resource.type == ResourceType.sqlite:
-                    self._sqlite[resource.name] = facet
-                elif resource.type == ResourceType.cdp:
-                    self._cdp[resource.name] = facet
-    
-    def get_facet(self, resource_name: str) -> Optional[Any]:
-        """Get a facet by resource name."""
-        return self._facets.get(resource_name)
-    
-    def get_sqlite_facets(self) -> Dict[str, AsyncSQLiteResource]:
-        """Get all SQLite facets indexed by name."""
-        return self._sqlite
-    
-    def get_cdp_facets(self) -> Dict[str, AsyncBrowserResource]:
-        """Get all CDP/browser facets indexed by name."""
-        return self._cdp
-    
-    async def refresh_facets(self) -> None:
-        """Refresh the facets by re-fetching resources."""
-        self._resources_cache = None
-        self._facets.clear()
-        self._sqlite.clear()
-        self._cdp.clear()
-        
-        # Remove old facet attributes
-        resources = await self.get_resources()
-        for resource in resources:
-            if hasattr(self, resource.name):
-                delattr(self, resource.name)
-        await self._load_facets()
+    def sqlite(self, name: str) -> AsyncSQLiteResource:
+        return AsyncSQLiteResource(
+            self._resources_state[ResourceType.sqlite][name], self.client
+        )
+
+    def cdp(self, name: str) -> AsyncBrowserResource:
+        return AsyncBrowserResource(
+            self._resources_state[ResourceType.cdp][name], self.client
+        )
+
+    def resources(self) -> List[ResourceModel]:
+        return self._resources
+
+    async def _load_resources(self) -> None:
+        if self._resources is None:
+            response = await self.client.request("GET", "/resources")
+            self._resources = [
+                ResourceModel(**resource) for resource in response.json()["resources"]
+            ]
+            for resource in self._resources:
+                if resource.type not in self._resources_state:
+                    self._resources_state[resource.type] = {}
+                self._resources_state[resource.type][resource.name] = Resource(resource)
