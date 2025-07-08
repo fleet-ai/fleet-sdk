@@ -88,21 +88,21 @@ class AsyncFleet:
             httpx_client=self._httpx_client,
         )
 
-    async def list_environments(self) -> List[Environment]:
+    async def environments(self) -> List[Environment]:
         response = await self.client.request("GET", "/v1/env/")
         return [Environment(**env_data) for env_data in response.json()]
 
-    async def get_environment(self, env_key: str) -> Environment:
+    async def environment(self, env_key: str) -> Environment:
         response = await self.client.request("GET", f"/v1/env/{env_key}")
         return Environment(**response.json())
 
-    async def create_instance(self, request: InstanceRequest) -> AsyncInstance:
+    async def make(self, request: InstanceRequest) -> AsyncInstance:
         response = await self.client.request(
             "POST", "/v1/env/instances", json=request.model_dump()
         )
         return AsyncInstance(**response.json())
 
-    async def list_instances(self, status: Optional[str] = None) -> List[AsyncInstance]:
+    async def instances(self, status: Optional[str] = None) -> List[AsyncInstance]:
         params = {}
         if status:
             params["status"] = status
@@ -110,11 +110,11 @@ class AsyncFleet:
         response = await self.client.request("GET", "/v1/env/instances", params=params)
         return [AsyncInstance(**instance_data) for instance_data in response.json()]
 
-    async def get_instance(self, instance_id: str) -> AsyncInstance:
+    async def instance(self, instance_id: str) -> AsyncInstance:
         response = await self.client.request("GET", f"/v1/env/instances/{instance_id}")
         return AsyncInstance(**response.json())
 
-    async def delete_instance(self, instance_id: str) -> InstanceRecord:
+    async def delete(self, instance_id: str) -> InstanceRecord:
         response = await self.client.request(
             "DELETE", f"/v1/env/instances/{instance_id}"
         )

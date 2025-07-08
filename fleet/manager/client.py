@@ -3,6 +3,7 @@ from typing import Optional
 
 from .base import SyncWrapper, AsyncWrapper
 from .models import ResetResponse
+from .facets import AsyncSQLiteFacet
 
 
 class Manager:
@@ -23,6 +24,7 @@ class AsyncManager:
         self.client = AsyncWrapper(
             url=self.base_url, httpx_client=httpx_client or httpx.AsyncClient()
         )
+        self.sqlite = AsyncSQLiteFacet("sqlite", self.client)
 
     async def reset(self) -> ResetResponse:
         response = await self.client.request("POST", "/reset")
