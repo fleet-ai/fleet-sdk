@@ -27,6 +27,7 @@ class Facet(ABC):
         """Get the URI scheme (e.g., 'sqlite', 'browser', 'file')."""
         return self._scheme
     
+    
     @property
     def netloc(self) -> str:
         """Get the URI network location."""
