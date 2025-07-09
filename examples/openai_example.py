@@ -305,6 +305,9 @@ class Agent:
 
     async def handle_item(self, item):
         """Handle each item; may cause a computer action + screenshot."""
+        if self.debug:
+            print(f"Handling item of type: {item.get('type')}")
+            
         if item["type"] == "message":
             if self.print_steps:
                 print(item["content"][0]["text"])
@@ -386,13 +389,30 @@ class Agent:
             )
             self.debug_print(response)
 
-            if "output" not in response and self.debug:
-                print(response)
-                raise ValueError("No output from model")
+            if "output" not in response:
+                if self.debug:
+                    print("Full response:", response)
+                if "error" in response:
+                    error_msg = response["error"].get("message", "Unknown error")
+                    raise ValueError(f"API Error: {error_msg}")
+                else:
+                    raise ValueError("No output from model")
             else:
-                new_items += response["output"]
+                # Append each item from the model output to conversation history
+                # in the exact order we received them, **without filtering** so that
+                # required pairs such as reasoning → computer_call are preserved.
                 for item in response["output"]:
-                    new_items += await self.handle_item(item)
+                    # First, record the original item itself.
+                    new_items.append(item)
+
+                    # Next, perform any local side-effects (browser actions, etc.).
+                    handled_items = await self.handle_item(item)
+
+                    # If the handler generated additional items (e.g. computer_call_output)
+                    # we append those *immediately* so the order remains:
+                    #   reasoning → computer_call → computer_call_output
+                    if handled_items:
+                        new_items += handled_items
 
         return new_items
 
@@ -420,7 +440,7 @@ async def main():
         while True:
             user_input = await ainput("> ")
             items.append({"role": "user", "content": user_input})
-            output_items = await agent.run_full_turn(items, show_images=False)
+            output_items = await agent.run_full_turn(items, show_images=False, debug=False)
             items += output_items
 
 
