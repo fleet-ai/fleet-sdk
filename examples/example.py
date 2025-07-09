@@ -34,7 +34,7 @@ async def main():
     print("SQLite:", sqlite)
 
     await instance.env.browser("cdp").start(
-        flt.ChromeStartRequest(resolution="1920x1080")
+        flt.ChromeStartRequest(resolution="1920,1080")
     )
 
     browser = await instance.env.browser("cdp").describe()
