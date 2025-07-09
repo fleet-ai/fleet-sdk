@@ -1,5 +1,5 @@
 import base64
-from typing import List, Dict, Callable
+from typing import List, Dict, Callable, Optional
 from playwright.async_api import async_playwright, Browser, Page
 import httpx
 import json
@@ -8,6 +8,7 @@ from io import BytesIO
 from PIL import Image
 import os
 import asyncio
+import fleet as flt
 
 
 def sanitize_message(msg: dict) -> dict:
@@ -34,7 +35,7 @@ async def create_response(**kwargs):
 
     # Configure timeout: 30 seconds for connect, 60 seconds for read
     timeout = httpx.Timeout(connect=60.0, read=60.0, write=60.0, pool=60.0)
-    
+
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(url, headers=headers, json=kwargs)
 
@@ -203,20 +204,43 @@ class BasePlaywrightComputer:
         raise NotImplementedError
 
 
-class LocalPlaywrightBrowser(BasePlaywrightComputer):
+class FleetPlaywrightBrowser(BasePlaywrightComputer):
     """Launches a local Chromium instance using Playwright."""
 
-    def __init__(self, headless: bool = False):
+    def __init__(
+        self,
+        fleet: flt.AsyncFleet,
+        env_key: str,
+        version: Optional[str] = None,
+        headless: bool = False,
+    ):
         super().__init__()
+        self.fleet = fleet
+        self.env_key = env_key
+        self.version = version
         self.headless = headless
 
     async def _get_browser_and_page(self) -> tuple[Browser, Page]:
         width, height = self.get_dimensions()
-        browser = await self._playwright.chromium.connect_over_cdp("wss://fbd0dfae.fleetai.com/cdp/devtools/browser/841e3685-0e59-4d3e-a127-f06573741f62")
 
-        context = browser.contexts[0]
+        # Create an instance of the environment
+        print(f"Creating instance of {self.env_key} {self.version}...")
+        self.instance = await self.fleet.make(
+            flt.InstanceRequest(env_key=self.env_key, version=self.version)
+        )
+
+        # Start the browser
+        print("Starting browser...")
+        await self.instance.env.browser("cdp").start()
+        print("Getting CDP URL...")
+        cdp = await self.instance.env.browser("cdp").describe()
+        print("DevTools URL:", cdp.cdp_devtools_url)
+
+        # Connect to the browser
+        browser = await self._playwright.chromium.connect_over_cdp(cdp.cdp_browser_url)
 
         # Add event listeners for page creation and closure
+        context = browser.contexts[0]
         context.on("page", self._handle_new_page)
 
         page = context.pages[0]
@@ -252,7 +276,7 @@ class Agent:
     def __init__(
         self,
         model="computer-use-preview",
-        computer: LocalPlaywrightBrowser = None,
+        computer: FleetPlaywrightBrowser = None,
         tools: list[dict] = [],
         acknowledge_safety_check_callback: Callable = lambda: False,
     ):
@@ -383,7 +407,9 @@ async def ainput(prompt: str = "") -> str:
 
 
 async def main():
-    async with LocalPlaywrightBrowser() as computer:
+    fleet = flt.AsyncFleet()
+
+    async with FleetPlaywrightBrowser(fleet, "hubspot", "v1.2.7") as computer:
         agent = Agent(computer=computer, tools=tools)
         items = [
             {

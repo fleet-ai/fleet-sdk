@@ -112,7 +112,6 @@ class AsyncEnvironment:
             if response.status_code != 200:
                 self._resources = []
                 return
-            print(response.json())
             self._resources = [
                 ResourceModel(**resource) for resource in response.json()
             ]
