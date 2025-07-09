@@ -1,8 +1,4 @@
-"""Fleet SDK Base Facet Classes."""
-
-from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, TYPE_CHECKING
-from urllib.parse import urlparse
+from abc import ABC
 from ..manager.models import Resource as ResourceModel, ResourceType, ResourceMode
 
 

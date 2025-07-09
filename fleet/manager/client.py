@@ -5,8 +5,9 @@ from urllib.parse import urlparse
 
 from .base import SyncWrapper, AsyncWrapper
 from .models import ResetResponse, Resource as ResourceModel, ResourceType
-from .facets import AsyncSQLiteResource, AsyncBrowserResource
-from ..facets.base import Resource
+from ..resources.sqlite import AsyncSQLiteResource
+from ..resources.browser import AsyncBrowserResource
+from ..resources.base import Resource
 
 
 RESOURCE_TYPES = {
@@ -21,6 +22,7 @@ class Manager:
         self.client = SyncWrapper(
             url=self.base_url, httpx_client=httpx_client or httpx.Client()
         )
+        raise NotImplementedError("SyncManager is not implemented")
 
     def reset(self) -> ResetResponse:
         response = self.client.request("POST", "/reset")
