@@ -9,6 +9,12 @@ from .facets import AsyncSQLiteResource, AsyncBrowserResource
 from ..facets.base import Resource
 
 
+RESOURCE_TYPES = {
+    ResourceType.sqlite: AsyncSQLiteResource,
+    ResourceType.cdp: AsyncBrowserResource,
+}
+
+
 class Manager:
     def __init__(self, url: str, httpx_client: Optional[httpx.Client] = None):
         self.base_url = url
@@ -28,8 +34,8 @@ class AsyncManager:
             url=self.base_url, httpx_client=httpx_client or httpx.AsyncClient()
         )
         self._resources: Optional[List[ResourceModel]] = None
-        self._resources_state: Dict[ResourceType, Dict[str, Resource]] = {
-            resource_type: {} for resource_type in ResourceType
+        self._resources_state: Dict[str, Dict[str, Resource]] = {
+            resource_type.value: {} for resource_type in ResourceType
         }
 
     async def __aenter__(self) -> "AsyncManager":
@@ -49,12 +55,12 @@ class AsyncManager:
 
     def sqlite(self, name: str) -> AsyncSQLiteResource:
         return AsyncSQLiteResource(
-            self._resources_state[ResourceType.sqlite][name], self.client
+            self._resources_state[ResourceType.sqlite.value][name], self.client
         )
 
     def cdp(self, name: str) -> AsyncBrowserResource:
         return AsyncBrowserResource(
-            self._resources_state[ResourceType.cdp][name], self.client
+            self._resources_state[ResourceType.cdp.value][name], self.client
         )
 
     async def resources(self) -> List[ResourceModel]:
@@ -69,5 +75,7 @@ class AsyncManager:
             ]
             for resource in self._resources:
                 if resource.type not in self._resources_state:
-                    self._resources_state[resource.type] = {}
-                self._resources_state[resource.type][resource.name] = Resource(resource)
+                    self._resources_state[resource.type.value] = {}
+                self._resources_state[resource.type.value][resource.name] = (
+                    RESOURCE_TYPES[resource.type](resource, self.client)
+                )
