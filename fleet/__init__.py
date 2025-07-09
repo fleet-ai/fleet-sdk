@@ -14,17 +14,36 @@
 
 """Fleet Python SDK - Environment-based AI agent interactions."""
 
-from .exceptions import FleetError, FleetAPIError, FleetTimeoutError, FleetConfigurationError
+from .exceptions import (
+    FleetError,
+    FleetAPIError,
+    FleetTimeoutError,
+    FleetConfigurationError,
+)
 from .client import Fleet, AsyncFleet, InstanceRequest
+from .env import (
+    ResetRequest,
+    ResetResponse,
+    CDPDescribeResponse,
+    ChromeStartRequest,
+    ChromeStartResponse,
+    ChromeStatusResponse,
+)
 
 __version__ = "0.1.1"
 __all__ = [
     "env",
     "FleetError",
-    "FleetAPIError", 
+    "FleetAPIError",
     "FleetTimeoutError",
     "FleetConfigurationError",
     "Fleet",
     "AsyncFleet",
     "InstanceRequest",
-] 
+    "ResetRequest",
+    "ResetResponse",
+    "CDPDescribeResponse",
+    "ChromeStartRequest",
+    "ChromeStartResponse",
+    "ChromeStatusResponse",
+]

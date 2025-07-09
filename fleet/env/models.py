@@ -74,8 +74,8 @@ class QueryResponse(BaseModel):
 
 
 class ResetRequest(BaseModel):
-    timestamp: Optional[str] = Field(None, title="Timestamp")
-    seed: Optional[str] = Field(None, title="Seed")
+    timestamp: Optional[int] = Field(None, title="Timestamp")
+    seed: Optional[int] = Field(None, title="Seed")
 
 
 class ResetResponse(BaseModel):
@@ -89,7 +89,7 @@ class ResourceMode(Enum):
 
 
 class ResourceType(Enum):
-    sqlite = "sqlite"
+    db = "sqlite"
     cdp = "cdp"
 
 

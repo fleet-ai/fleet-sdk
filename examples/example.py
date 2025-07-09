@@ -20,12 +20,12 @@ async def main():
     environment = await fleet.environment(instance.env_key)
     print("Environment Default Version:", environment.default_version)
 
-    response = await instance.env.reset()
+    response = await instance.env.reset(flt.ResetRequest(seed=42))
     print("Reset response:", response)
 
     print(await instance.env.resources())
 
-    sqlite = instance.env.sqlite("current")
+    sqlite = instance.env.db("current")
     print("SQLite:", await sqlite.describe())
 
     print("Query:", await sqlite.query("SELECT * FROM users"))
@@ -33,9 +33,14 @@ async def main():
     sqlite = await instance.env.state("sqlite://current").describe()
     print("SQLite:", sqlite)
 
+    await instance.env.browser("cdp").start(
+        flt.ChromeStartRequest(resolution="1920x1080")
+    )
+
     browser = await instance.env.browser("cdp").describe()
-    print("CDP URL:", browser.url)
-    print("CDP Devtools URL:", browser.devtools_url)
+    print("CDP Page URL:", browser.cdp_page_url)
+    print("CDP Browser URL:", browser.cdp_browser_url)
+    print("CDP Devtools URL:", browser.cdp_devtools_url)
 
     # Delete the instance
     instance = await fleet.delete(instance.instance_id)

@@ -17,7 +17,7 @@ class AsyncSQLiteResource(Resource):
     async def describe(self) -> DescribeResponse:
         """Describe the SQLite database schema."""
         response = await self.client.request(
-            "GET", f"/resource/sqlite/{self.resource.name}/describe"
+            "GET", f"/resources/sqlite/{self.resource.name}/describe"
         )
         return DescribeResponse(**response.json())
 
@@ -35,7 +35,7 @@ class AsyncSQLiteResource(Resource):
         request = QueryRequest(query=query, args=args, read_only=read_only)
         response = await self.client.request(
             "POST",
-            f"/resource/sqlite/{self.resource.name}/query",
+            f"/resources/sqlite/{self.resource.name}/query",
             json=request.model_dump(),
         )
         return QueryResponse(**response.json())

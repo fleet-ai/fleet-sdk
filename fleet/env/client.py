@@ -15,6 +15,7 @@ from ..exceptions import FleetEnvironmentError, FleetAPIError
 
 from .base import SyncWrapper, AsyncWrapper
 from .models import (
+    ResetRequest,
     ResetResponse,
     Resource as ResourceModel,
     ResourceType,
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 RESOURCE_TYPES = {
-    ResourceType.sqlite: AsyncSQLiteResource,
+    ResourceType.db: AsyncSQLiteResource,
     ResourceType.cdp: AsyncBrowserResource,
 }
 
@@ -66,17 +67,30 @@ class AsyncEnvironment:
     async def load(self) -> None:
         await self._load_resources()
 
-    async def reset(self) -> ResetResponse:
-        response = await self.client.request("POST", "/reset")
+    async def reset(
+        self, reset_request: Optional[ResetRequest] = None
+    ) -> ResetResponse:
+        response = await self.client.request(
+            "POST", "/reset", json=reset_request.model_dump() if reset_request else None
+        )
         return ResetResponse(**response.json())
 
     def state(self, uri: str) -> Resource:
         url = urlparse(uri)
         return self._resources_state[url.scheme][url.netloc]
 
-    def sqlite(self, name: str) -> AsyncSQLiteResource:
+    def db(self, name: str) -> AsyncSQLiteResource:
+        """
+        Returns an AsyncSQLiteResource object for the given SQLite database name.
+
+        Args:
+            name: The name of the SQLite database to return
+
+        Returns:
+            An AsyncSQLiteResource object for the given SQLite database name
+        """
         return AsyncSQLiteResource(
-            self._resources_state[ResourceType.sqlite.value][name], self.client
+            self._resources_state[ResourceType.db.value][name], self.client
         )
 
     def browser(self, name: str) -> AsyncBrowserResource:
@@ -84,9 +98,13 @@ class AsyncEnvironment:
             self._resources_state[ResourceType.cdp.value][name], self.client
         )
 
-    async def resources(self) -> List[ResourceModel]:
+    async def resources(self) -> List[Resource]:
         await self._load_resources()
-        return self._resources
+        return [
+            resource
+            for resources_by_name in self._resources_state.values()
+            for resource in resources_by_name.values()
+        ]
 
     async def _load_resources(self) -> None:
         if self._resources is None:
