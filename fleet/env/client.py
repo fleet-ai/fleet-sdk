@@ -1,8 +1,6 @@
 """Fleet SDK Base Environment Classes."""
 
-from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, Union
-from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 import asyncio
 import httpx
 import time
@@ -15,7 +13,7 @@ from ..resources.base import Resource
 
 from ..exceptions import FleetEnvironmentError, FleetAPIError
 
-from .base import BaseWrapper, SyncWrapper, AsyncWrapper
+from .base import SyncWrapper, AsyncWrapper
 from .models import ResetResponse, Resource as ResourceModel, ResourceType
 
 
@@ -29,7 +27,11 @@ RESOURCE_TYPES = {
 
 
 class Environment:
-    def __init__(self, url: str, httpx_client: Optional[httpx.Client] = None):
+    def __init__(
+        self,
+        url: str,
+        httpx_client: Optional[httpx.Client] = None,
+    ):
         self.base_url = url
         self.client = SyncWrapper(
             url=self.base_url, httpx_client=httpx_client or httpx.Client()
@@ -42,7 +44,11 @@ class Environment:
 
 
 class AsyncEnvironment:
-    def __init__(self, url: str, httpx_client: Optional[httpx.AsyncClient] = None):
+    def __init__(
+        self,
+        url: str,
+        httpx_client: Optional[httpx.AsyncClient] = None,
+    ):
         self.base_url = url
         self.client = AsyncWrapper(
             url=self.base_url, httpx_client=httpx_client or httpx.AsyncClient()
@@ -51,6 +57,9 @@ class AsyncEnvironment:
         self._resources_state: Dict[str, Dict[str, Resource]] = {
             resource_type.value: {} for resource_type in ResourceType
         }
+
+    async def load(self) -> None:
+        await self._load_resources()
 
     @property
     def env_key(self) -> Optional[str]:
