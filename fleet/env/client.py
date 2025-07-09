@@ -114,8 +114,12 @@ class AsyncEnvironment:
     async def _load_resources(self) -> None:
         if self._resources is None:
             response = await self.client.request("GET", "/resources")
+            if response.status_code != 200:
+                self._resources = []
+                return
+            data = response.json()
             self._resources = [
-                ResourceModel(**resource) for resource in response.json()["resources"]
+                ResourceModel(**resource) for resource in data["resources"]
             ]
             for resource in self._resources:
                 if resource.type not in self._resources_state:
