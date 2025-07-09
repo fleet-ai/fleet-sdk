@@ -1,6 +1,6 @@
 """Fleet SDK Environment Module."""
 
-from .client import Environment, AsyncEnvironment
+from .client import InstanceClient, AsyncInstanceClient
 from .models import (
     ResetRequest,
     ResetResponse,
@@ -11,8 +11,8 @@ from .models import (
 )
 
 __all__ = [
-    "Environment",
-    "AsyncEnvironment",
+    "InstanceClient",
+    "AsyncInstanceClient",
     "ResetRequest",
     "ResetResponse",
     "CDPDescribeResponse",

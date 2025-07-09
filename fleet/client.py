@@ -23,7 +23,7 @@ from typing import Optional, List
 from .base import InstanceBase, AsyncWrapper, SyncWrapper
 from .models import InstanceRequest, InstanceRecord, Environment as EnvironmentModel
 
-from .env import Environment, AsyncEnvironment, ResetRequest, ResetResponse
+from .env import InstanceClient, AsyncInstanceClient, ResetRequest, ResetResponse
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
 from .resources.browser import AsyncBrowserResource
@@ -35,40 +35,40 @@ class Instance(InstanceBase):
     def __init__(self, httpx_client: Optional[httpx.Client] = None, **kwargs):
         super().__init__(**kwargs)
         self._httpx_client = httpx_client or httpx.Client()
-        self._env: Optional[Environment] = None
+        self._instance: Optional[InstanceClient] = None
 
     @property
-    def env(self) -> Environment:
-        if self._env is None:
-            self._env = Environment(self.manager_url, self._httpx_client)
-        return self._env
+    def instance(self) -> InstanceClient:
+        if self._instance is None:
+            self._instance = InstanceClient(self.manager_url, self._httpx_client)
+        return self._instance
 
 
 class AsyncInstance(InstanceBase):
     def __init__(self, httpx_client: Optional[httpx.AsyncClient] = None, **kwargs):
         super().__init__(**kwargs)
         self._httpx_client = httpx_client or httpx.AsyncClient()
-        self._env: Optional[AsyncEnvironment] = None
+        self._instance: Optional[AsyncInstanceClient] = None
 
     @property
-    def env(self) -> AsyncEnvironment:
+    def instance(self) -> AsyncInstanceClient:
         if self._env is None:
-            self._env = AsyncEnvironment(self.manager_url, self._httpx_client)
-        return self._env
+            self._instance = AsyncInstanceClient(self.manager_url, self._httpx_client)
+        return self._instance
 
     async def reset(
         self, seed: Optional[int] = None, timestamp: Optional[int] = None
     ) -> ResetResponse:
-        return await self.env.reset(ResetRequest(seed=seed, timestamp=timestamp))
+        return await self.instance.reset(ResetRequest(seed=seed, timestamp=timestamp))
 
     def db(self, name: str = "current") -> AsyncSQLiteResource:
-        return self.env.db(name)
+        return self.instance.db(name)
 
     def browser(self, name: str = "cdp") -> AsyncBrowserResource:
-        return self.env.browser(name)
+        return self.instance.browser(name)
 
     def state(self, uri: str) -> Resource:
-        return self.env.state(uri)
+        return self.instance.state(uri)
 
 
 class Fleet:

@@ -32,7 +32,7 @@ RESOURCE_TYPES = {
 }
 
 
-class Environment:
+class InstanceClient:
     def __init__(
         self,
         url: str,
@@ -49,7 +49,7 @@ class Environment:
         return ResetResponse(**response.json())
 
 
-class AsyncEnvironment:
+class AsyncInstanceClient:
     def __init__(
         self,
         url: str,
