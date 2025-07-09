@@ -1,5 +1,5 @@
 from ..env.models import Resource as ResourceModel
-from ..env.models import BrowserDescribeResponse
+from ..env.models import CDPDescribeResponse
 from .base import Resource
 
 from typing import TYPE_CHECKING
@@ -13,6 +13,6 @@ class AsyncBrowserResource(Resource):
         super().__init__(resource)
         self.client = client
 
-    async def describe(self) -> BrowserDescribeResponse:
+    async def describe(self) -> CDPDescribeResponse:
         response = await self.client.request("GET", "/resource/cdp/describe")
-        return BrowserDescribeResponse(**response.json())
+        return CDPDescribeResponse(**response.json())

@@ -12,8 +12,9 @@ from pydantic import BaseModel, Field
 
 class CDPDescribeResponse(BaseModel):
     success: bool = Field(..., title="Success")
-    url: str = Field(..., title="Url")
-    devtools_url: str = Field(..., title="Devtools Url")
+    cdp_page_url: str = Field(..., title="Url")
+    cdp_browser_url: str = Field(..., title="Browser Url")
+    cdp_devtools_url: str = Field(..., title="Devtools Url")
 
 
 class ChromeStartRequest(BaseModel):

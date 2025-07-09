@@ -94,9 +94,9 @@ class AsyncEnvironment:
             if response.status_code != 200:
                 self._resources = []
                 return
-            data = response.json()
+            print(response.json())
             self._resources = [
-                ResourceModel(**resource) for resource in data["resources"]
+                ResourceModel(**resource) for resource in response.json()
             ]
             for resource in self._resources:
                 if resource.type not in self._resources_state:

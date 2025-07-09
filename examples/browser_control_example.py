@@ -11,12 +11,11 @@ async def main():
     environments = await fleet.list_envs()
     print("Environments:", len(environments))
 
-    instances = await fleet.instances(status="running")
-    print("Instances:", len(instances))
-
-    instance = await fleet.instance("16fdbc96")
-    print("Instance:", instance.instance_id)
-    print("Instance Environment:", instance.env_key)
+    # Create a new instance
+    instance = await fleet.make(
+        flt.InstanceRequest(env_key="hubspot", version="v1.2.7")
+    )
+    print("New Instance:", instance.instance_id)
 
     environment = await fleet.environment(instance.env_key)
     print("Environment Default Version:", environment.default_version)
@@ -37,10 +36,6 @@ async def main():
     browser = await instance.env.browser("cdp").describe()
     print("CDP URL:", browser.url)
     print("CDP Devtools URL:", browser.devtools_url)
-
-    # Create a new instance
-    instance = await fleet.make(flt.InstanceRequest(env_key=instance.env_key))
-    print("New Instance:", instance.instance_id)
 
     # Delete the instance
     instance = await fleet.delete(instance.instance_id)
