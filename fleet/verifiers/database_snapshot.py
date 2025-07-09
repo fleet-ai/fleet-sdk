@@ -1,0 +1,666 @@
+# database_dsl.py
+"""A schema‑agnostic, SQL‑native DSL for snapshot validation and diff invariants.
+
+The module extends your original `DatabaseSnapshot` implementation with
+
+* A **Supabase‑style query builder** (method‑chaining: `select`, `eq`, `join`, …).
+* Assertion helpers (`assert_exists`, `assert_none`, `assert_eq`, `count().assert_eq`, …).
+* A `SnapshotDiff` engine that enforces invariants (`expect_only`, `expect`).
+* Convenience helpers (`expect_row`, `expect_rows`, `expect_absent_row`).
+
+The public API stays tiny yet composable; everything else is built on
+orthogonal primitives so it works for *any* relational schema.
+"""
+from __future__ import annotations
+
+import sqlite3
+from datetime import datetime
+from typing import Any
+
+################################################################################
+#  Low‑level helpers
+################################################################################
+
+SQLValue = str | int | float | None
+Condition = tuple[str, str, SQLValue]  # (column, op, value)
+JoinSpec = tuple[str, dict[str, str]]  # (table, on mapping)
+
+
+class _CountResult:
+    """Wraps an integer count so we can chain assertions fluently."""
+
+    def __init__(self, value: int):
+        self.value = value
+
+    # Assertions ------------------------------------------------------------
+    def assert_eq(self, expected: int):
+        if self.value != expected:
+            raise AssertionError(f"Expected {expected}, got {self.value}")
+        return self
+
+    def assert_gt(self, threshold: int):
+        if self.value <= threshold:
+            raise AssertionError(f"Expected > {threshold}, got {self.value}")
+        return self
+
+    def assert_between(self, low: int, high: int):
+        if not low <= self.value <= high:
+            raise AssertionError(f"Expected {low}‑{high}, got {self.value}")
+        return self
+
+    # Convenience -----------------------------------------------------------
+    def __int__(self):
+        return self.value
+
+    def __repr__(self):
+        return f"<Count {self.value}>"
+
+
+################################################################################
+#  Query Builder
+################################################################################
+
+
+class QueryBuilder:
+    """Fluent SQL builder executed against a single `DatabaseSnapshot`."""
+
+    def __init__(self, snapshot: "DatabaseSnapshot", table: str):  # noqa: UP037
+        self._snapshot = snapshot
+        self._table = table
+        self._select_cols: list[str] = ["*"]
+        self._conditions: list[Condition] = []
+        self._joins: list[JoinSpec] = []
+        self._limit: int | None = None
+        self._order_by: str | None = None
+        # Cache for idempotent executions
+        self._cached_rows: list[dict[str, Any]] | None = None
+
+    # ---------------------------------------------------------------------
+    #  Column projection / limiting / ordering
+    # ---------------------------------------------------------------------
+    def select(self, *columns: str) -> "QueryBuilder":  # noqa: UP037
+        qb = self._clone()
+        qb._select_cols = list(columns) if columns else ["*"]
+        return qb
+
+    def limit(self, n: int) -> "QueryBuilder":  # noqa: UP037
+        qb = self._clone()
+        qb._limit = n
+        return qb
+
+    def sort(self, column: str, desc: bool = False) -> "QueryBuilder":  # noqa: UP037
+        qb = self._clone()
+        qb._order_by = f"{column} {'DESC' if desc else 'ASC'}"
+        return qb
+
+    # ---------------------------------------------------------------------
+    #  WHERE helpers (SQL‑like)
+    # ---------------------------------------------------------------------
+    def _add_condition(
+        self, column: str, op: str, value: SQLValue
+    ) -> "QueryBuilder":  # noqa: UP037
+        qb = self._clone()
+        qb._conditions.append((column, op, value))
+        return qb
+
+    def eq(self, column: str, value: SQLValue) -> "QueryBuilder":  # noqa: UP037
+        return self._add_condition(column, "=", value)
+
+    def neq(self, column: str, value: SQLValue) -> "QueryBuilder":  # noqa: UP037
+        return self._add_condition(column, "!=", value)
+
+    def gt(self, column: str, value: SQLValue) -> "QueryBuilder":  # noqa: UP037
+        return self._add_condition(column, ">", value)
+
+    def gte(self, column: str, value: SQLValue) -> "QueryBuilder":  # noqa: UP037
+        return self._add_condition(column, ">=", value)
+
+    def lt(self, column: str, value: SQLValue) -> "QueryBuilder":  # noqa: UP037
+        return self._add_condition(column, "<", value)
+
+    def lte(self, column: str, value: SQLValue) -> "QueryBuilder":  # noqa: UP037
+        return self._add_condition(column, "<=", value)
+
+    def in_(self, column: str, values: list[SQLValue]) -> "QueryBuilder":  # noqa: UP037
+        qb = self._clone()
+        qb._conditions.append((column, "IN", tuple(values)))
+        return qb
+
+    def not_in(
+        self, column: str, values: list[SQLValue]
+    ) -> "QueryBuilder":  # noqa: UP037
+        qb = self._clone()
+        qb._conditions.append((column, "NOT IN", tuple(values)))
+        return qb
+
+    def is_null(self, column: str) -> "QueryBuilder":  # noqa: UP037
+        return self._add_condition(column, "IS", None)
+
+    def not_null(self, column: str) -> "QueryBuilder":  # noqa: UP037
+        return self._add_condition(column, "IS NOT", None)
+
+    def ilike(self, column: str, pattern: str) -> "QueryBuilder":  # noqa: UP037
+        qb = self._clone()
+        qb._conditions.append((column, "ILIKE", pattern))
+        return qb
+
+    # ---------------------------------------------------------------------
+    #  JOIN (simple inner join)
+    # ---------------------------------------------------------------------
+    def join(
+        self, other_table: str, on: dict[str, str]
+    ) -> "QueryBuilder":  # noqa: UP037
+        """`on` expects {local_col: remote_col}."""
+        qb = self._clone()
+        qb._joins.append((other_table, on))
+        return qb
+
+    # ---------------------------------------------------------------------
+    #  Execution helpers
+    # ---------------------------------------------------------------------
+    def _compile(self) -> tuple[str, list[Any]]:
+        cols = ", ".join(self._select_cols)
+        sql = [f"SELECT {cols} FROM {self._table}"]
+        params: list[Any] = []
+
+        # Joins -------------------------------------------------------------
+        for tbl, onmap in self._joins:
+            join_clauses = [
+                f"{self._table}.{l} = {tbl}.{r}" for l, r in onmap.items()  # noqa: E741
+            ]
+            sql.append(f"JOIN {tbl} ON {' AND '.join(join_clauses)}")
+
+        # WHERE -------------------------------------------------------------
+        if self._conditions:
+            placeholders = []
+            for col, op, val in self._conditions:
+                if op in ("IN", "NOT IN") and isinstance(val, tuple):
+                    ph = ", ".join(["?" for _ in val])
+                    placeholders.append(f"{col} {op} ({ph})")
+                    params.extend(val)
+                elif op in ("IS", "IS NOT"):
+                    placeholders.append(f"{col} {op} NULL")
+                elif op == "ILIKE":
+                    placeholders.append(
+                        f"{col} LIKE ?"
+                    )  # SQLite has no ILIKE; LIKE is case‑insensitive when in NOCASE collation
+                    params.append(val)
+                else:
+                    placeholders.append(f"{col} {op} ?")
+                    params.append(val)
+            sql.append("WHERE " + " AND ".join(placeholders))
+
+        # ORDER / LIMIT -----------------------------------------------------
+        if self._order_by:
+            sql.append(f"ORDER BY {self._order_by}")
+        if self._limit is not None:
+            sql.append(f"LIMIT {self._limit}")
+
+        return " ".join(sql), params
+
+    def _execute(self) -> list[dict[str, Any]]:
+        if self._cached_rows is not None:
+            return self._cached_rows
+
+        sql, params = self._compile()
+        conn = sqlite3.connect(self._snapshot.db_path)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+        self._cached_rows = rows
+        return rows
+
+    # ---------------------------------------------------------------------
+    #  High‑level result helpers / assertions
+    # ---------------------------------------------------------------------
+    def count(self) -> _CountResult:
+        qb = self.select("COUNT(*) AS __cnt__").limit(
+            None
+        )  # remove limit since counting overrides
+        sql, params = qb._compile()
+        conn = sqlite3.connect(self._snapshot.db_path)
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        val = cur.fetchone()[0] or 0
+        cur.close()
+        conn.close()
+        return _CountResult(val)
+
+    def first(self) -> dict[str, Any] | None:
+        return self.limit(1)._execute()[0] if self.limit(1)._execute() else None
+
+    def all(self) -> list[dict[str, Any]]:
+        return self._execute()
+
+    # Assertions -----------------------------------------------------------
+    def assert_exists(self):
+        row = self.first()
+        if row is None:
+            # Build descriptive error message
+            sql, params = self._compile()
+            error_msg = (
+                f"Expected at least one matching row, but found none.\n"
+                f"Query: {sql}\n"
+                f"Parameters: {params}\n"
+                f"Table: {self._table}"
+            )
+            if hasattr(self, "_conditions") and self._conditions:
+                conditions_str = ", ".join(
+                    [f"{col} {op} {val}" for col, op, val in self._conditions]
+                )
+                error_msg += f"\nConditions: {conditions_str}"
+            raise AssertionError(error_msg)
+        return self
+
+    def assert_none(self):
+        row = self.first()
+        if row is not None:
+            row_id = _get_row_identifier(row)
+            row_data = _format_row_for_error(row)
+            sql, params = self._compile()
+            error_msg = (
+                f"Expected no matching rows, but found at least one.\n"
+                f"Found row: {row_id}\n"
+                f"Row data: {row_data}\n"
+                f"Query: {sql}\n"
+                f"Parameters: {params}\n"
+                f"Table: {self._table}"
+            )
+            raise AssertionError(error_msg)
+        return self
+
+    def assert_eq(self, column: str, value: SQLValue):
+        row = self.first()
+        if row is None:
+            sql, params = self._compile()
+            error_msg = (
+                f"Row not found for equality assertion.\n"
+                f"Expected to find a row with {column}={repr(value)}\n"
+                f"Query: {sql}\n"
+                f"Parameters: {params}\n"
+                f"Table: {self._table}"
+            )
+            raise AssertionError(error_msg)
+
+        actual_value = row.get(column)
+        if actual_value != value:
+            row_id = _get_row_identifier(row)
+            row_data = _format_row_for_error(row)
+            error_msg = (
+                f"Field value assertion failed.\n"
+                f"Row: {row_id}\n"
+                f"Field: {column}\n"
+                f"Expected: {repr(value)}\n"
+                f"Actual: {repr(actual_value)}\n"
+                f"Full row data: {row_data}\n"
+                f"Table: {self._table}"
+            )
+            raise AssertionError(error_msg)
+        return self
+
+    # Misc -----------------------------------------------------------------
+    def explain(self) -> str:
+        sql, params = self._compile()
+        return f"SQL: {sql}\nParams: {params}"
+
+    # Utilities ------------------------------------------------------------
+    def _clone(self) -> "QueryBuilder":  # noqa: UP037
+        qb = QueryBuilder(self._snapshot, self._table)
+        qb._select_cols = list(self._select_cols)
+        qb._conditions = list(self._conditions)
+        qb._joins = list(self._joins)
+        qb._limit = self._limit
+        qb._order_by = self._order_by
+        return qb
+
+    # Representation -------------------------------------------------------
+    def __repr__(self):
+        return f"<QueryBuilder {self.explain()}>"
+
+
+################################################################################
+#  Snapshot Diff invariants
+################################################################################
+
+
+class IgnoreConfig:
+    """Configuration for ignoring specific tables, fields, or combinations during diff operations."""
+
+    def __init__(
+        self,
+        tables: set[str] | None = None,
+        fields: set[str] | None = None,
+        table_fields: dict[str, set[str]] | None = None,
+    ):
+        """
+        Args:
+            tables: Set of table names to completely ignore
+            fields: Set of field names to ignore across all tables
+            table_fields: Dict mapping table names to sets of field names to ignore in that table
+        """
+        self.tables = tables or set()
+        self.fields = fields or set()
+        self.table_fields = table_fields or {}
+
+    def should_ignore_table(self, table: str) -> bool:
+        """Check if a table should be completely ignored."""
+        return table in self.tables
+
+    def should_ignore_field(self, table: str, field: str) -> bool:
+        """Check if a specific field in a table should be ignored."""
+        # Global field ignore
+        if field in self.fields:
+            return True
+        # Table-specific field ignore
+        if table in self.table_fields and field in self.table_fields[table]:
+            return True
+        return False
+
+
+def _format_row_for_error(row: dict[str, Any], max_fields: int = 10) -> str:
+    """Format a row dictionary for error messages with truncation if needed."""
+    if not row:
+        return "{empty row}"
+
+    items = list(row.items())
+    if len(items) <= max_fields:
+        formatted_items = [f"{k}={repr(v)}" for k, v in items]
+        return "{" + ", ".join(formatted_items) + "}"
+    else:
+        # Show first few fields and indicate truncation
+        shown_items = [f"{k}={repr(v)}" for k, v in items[:max_fields]]
+        remaining = len(items) - max_fields
+        return "{" + ", ".join(shown_items) + f", ... +{remaining} more fields" + "}"
+
+
+def _get_row_identifier(row: dict[str, Any]) -> str:
+    """Extract a meaningful identifier from a row for error messages."""
+    # Try common ID fields first
+    for id_field in ["id", "pk", "primary_key", "key"]:
+        if id_field in row and row[id_field] is not None:
+            return f"{id_field}={repr(row[id_field])}"
+
+    # Try name fields
+    for name_field in ["name", "title", "label"]:
+        if name_field in row and row[name_field] is not None:
+            return f"{name_field}={repr(row[name_field])}"
+
+    # Fall back to first non-None field
+    for key, value in row.items():
+        if value is not None:
+            return f"{key}={repr(value)}"
+
+    return "no identifier found"
+
+
+class SnapshotDiff:
+    """Compute & validate changes between two snapshots."""
+
+    def __init__(
+        self,
+        before: DatabaseSnapshot,
+        after: DatabaseSnapshot,
+        ignore_config: IgnoreConfig | None = None,
+    ):
+        from .sql_differ import SQLiteDiffer  # local import to avoid circularity
+
+        self.before = before
+        self.after = after
+        self.ignore_config = ignore_config or IgnoreConfig()
+        self._differ = SQLiteDiffer(before.db_path, after.db_path)
+        self._cached: dict[str, Any] | None = None
+
+    # ------------------------------------------------------------------
+    def _collect(self):
+        if self._cached is not None:
+            return self._cached
+        all_tables = set(self.before.tables()) | set(self.after.tables())
+        diff: dict[str, dict[str, Any]] = {}
+        for tbl in all_tables:
+            if self.ignore_config.should_ignore_table(tbl):
+                continue
+            diff[tbl] = self._differ.diff_table(tbl)
+        self._cached = diff
+        return diff
+
+    # ------------------------------------------------------------------
+    def expect_only(self, allowed_changes: list[dict[str, Any]]):
+        """Allowed changes is a list of {table, pk, field, after} (before optional)."""
+        diff = self._collect()
+        allowed_set = {
+            (c["table"], c.get("pk"), c.get("field"), c.get("after"))
+            for c in allowed_changes
+        }
+
+        # Collect all unexpected changes for detailed reporting
+        unexpected_changes = []
+
+        for tbl, report in diff.items():
+            for row in report.get("modified_rows", []):
+                for f, vals in row["changes"].items():
+                    if self.ignore_config.should_ignore_field(tbl, f):
+                        continue
+                    tup = (tbl, row["row_id"], f, vals["after"])
+                    if tup not in allowed_set:
+                        unexpected_changes.append(
+                            {
+                                "type": "modification",
+                                "table": tbl,
+                                "row_id": row["row_id"],
+                                "field": f,
+                                "before": vals.get("before"),
+                                "after": vals["after"],
+                                "full_row": row,
+                            }
+                        )
+
+            for row in report.get("added_rows", []):
+                tup = (tbl, row["row_id"], None, "__added__")
+                if tup not in allowed_set:
+                    unexpected_changes.append(
+                        {
+                            "type": "insertion",
+                            "table": tbl,
+                            "row_id": row["row_id"],
+                            "field": None,
+                            "after": "__added__",
+                            "full_row": row,
+                        }
+                    )
+
+            for row in report.get("removed_rows", []):
+                tup = (tbl, row["row_id"], None, "__removed__")
+                if tup not in allowed_set:
+                    unexpected_changes.append(
+                        {
+                            "type": "deletion",
+                            "table": tbl,
+                            "row_id": row["row_id"],
+                            "field": None,
+                            "after": "__removed__",
+                            "full_row": row,
+                        }
+                    )
+
+        if unexpected_changes:
+            # Build comprehensive error message
+            error_lines = ["Unexpected database changes detected:"]
+            error_lines.append("")
+
+            for i, change in enumerate(
+                unexpected_changes[:5], 1
+            ):  # Show first 5 changes
+                error_lines.append(
+                    f"{i}. {change['type'].upper()} in table '{change['table']}':"
+                )
+                error_lines.append(f"   Row ID: {change['row_id']}")
+
+                if change["type"] == "modification":
+                    error_lines.append(f"   Field: {change['field']}")
+                    error_lines.append(f"   Before: {repr(change['before'])}")
+                    error_lines.append(f"   After: {repr(change['after'])}")
+                elif change["type"] == "insertion":
+                    error_lines.append("   New row added")
+                elif change["type"] == "deletion":
+                    error_lines.append("   Row deleted")
+
+                # Show some context from the row
+                if "full_row" in change and change["full_row"]:
+                    row_data = change["full_row"]
+                    if change["type"] == "modification" and "data" in row_data:
+                        # For modifications, show the current state
+                        formatted_row = _format_row_for_error(
+                            row_data.get("data", {}), max_fields=5
+                        )
+                        error_lines.append(f"   Row data: {formatted_row}")
+                    elif (
+                        change["type"] in ["insertion", "deletion"]
+                        and "data" in row_data
+                    ):
+                        # For insertions/deletions, show the row data
+                        formatted_row = _format_row_for_error(
+                            row_data.get("data", {}), max_fields=5
+                        )
+                        error_lines.append(f"   Row data: {formatted_row}")
+
+                error_lines.append("")
+
+            if len(unexpected_changes) > 5:
+                error_lines.append(
+                    f"... and {len(unexpected_changes) - 5} more unexpected changes"
+                )
+                error_lines.append("")
+
+            # Show what changes were allowed
+            error_lines.append("Allowed changes were:")
+            if allowed_changes:
+                for i, allowed in enumerate(allowed_changes[:3], 1):
+                    error_lines.append(
+                        f"  {i}. Table: {allowed.get('table')}, "
+                        f"ID: {allowed.get('pk')}, "
+                        f"Field: {allowed.get('field')}, "
+                        f"After: {repr(allowed.get('after'))}"
+                    )
+                if len(allowed_changes) > 3:
+                    error_lines.append(
+                        f"  ... and {len(allowed_changes) - 3} more allowed changes"
+                    )
+            else:
+                error_lines.append("  (No changes were allowed)")
+
+            raise AssertionError("\n".join(error_lines))
+
+        return self
+
+    def expect(
+        self, *, allow: list[dict[str, Any]] = None, forbid: list[dict[str, Any]] = None
+    ):
+        """More granular: allow / forbid per‑table and per‑field."""
+        allow = allow or []
+        forbid = forbid or []
+        allow_tbl_field = {(c["table"], c.get("field")) for c in allow}
+        forbid_tbl_field = {(c["table"], c.get("field")) for c in forbid}
+        diff = self._collect()
+        for tbl, report in diff.items():
+            for row in report.get("modified_rows", []):
+                for f in row["changed"].keys():
+                    if self.ignore_config.should_ignore_field(tbl, f):
+                        continue
+                    key = (tbl, f)
+                    if key in forbid_tbl_field:
+                        raise AssertionError(f"Modification to forbidden field {key}")
+                    if allow_tbl_field and key not in allow_tbl_field:
+                        raise AssertionError(f"Modification to unallowed field {key}")
+            if (tbl, None) in forbid_tbl_field and (
+                report.get("added_rows") or report.get("removed_rows")
+            ):
+                raise AssertionError(f"Changes in forbidden table {tbl}")
+        return self
+
+
+################################################################################
+#  DatabaseSnapshot with DSL entrypoints
+################################################################################
+
+
+class DatabaseSnapshot:
+    """Represents a snapshot of an SQLite DB with DSL entrypoints."""
+
+    def __init__(self, db_path: str, *, name: str | None = None):
+        self.db_path = db_path
+        self.name = name or f"snapshot_{datetime.utcnow().isoformat()}"
+        self.created_at = datetime.utcnow()
+
+    # DSL entry ------------------------------------------------------------
+    def table(self, table: str) -> QueryBuilder:
+        return QueryBuilder(self, table)
+
+    # Metadata -------------------------------------------------------------
+    def tables(self) -> list[str]:
+        conn = sqlite3.connect(self.db_path)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+        tbls = [r[0] for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return tbls
+
+    # Diff interface -------------------------------------------------------
+    def diff(
+        self,
+        other: "DatabaseSnapshot",  # noqa: UP037
+        ignore_config: IgnoreConfig | None = None,
+    ) -> SnapshotDiff:
+        return SnapshotDiff(self, other, ignore_config)
+
+    ############################################################################
+    # Convenience, schema‑agnostic expectation helpers
+    ############################################################################
+
+    def expect_row(
+        self, table: str, where: dict[str, SQLValue], expect: dict[str, SQLValue]
+    ):
+        qb = self.table(table)
+        for k, v in where.items():
+            qb = qb.eq(k, v)
+        qb.assert_exists()
+        for col, val in expect.items():
+            qb.assert_eq(col, val)
+        return self
+
+    def expect_rows(
+        self,
+        table: str,
+        where: dict[str, SQLValue],
+        *,
+        count: int | None = None,
+        contains: list[dict[str, SQLValue]] | None = None,
+    ):
+        qb = self.table(table)
+        for k, v in where.items():
+            qb = qb.eq(k, v)
+        if count is not None:
+            qb.count().assert_eq(count)
+        if contains:
+            rows = qb.all()
+            for cond in contains:
+                matched = any(all(r.get(k) == v for k, v in cond.items()) for r in rows)
+                if not matched:
+                    raise AssertionError(f"Expected a row matching {cond} in {table}")
+        return self
+
+    def expect_absent_row(self, table: str, where: dict[str, SQLValue]):
+        qb = self.table(table)
+        for k, v in where.items():
+            qb = qb.eq(k, v)
+        qb.assert_none()
+        return self
+
+    # ---------------------------------------------------------------------
+    def __repr__(self):
+        return f"<DatabaseSnapshot {self.name} at {self.db_path}>"
