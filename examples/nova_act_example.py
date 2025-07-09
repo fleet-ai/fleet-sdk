@@ -58,7 +58,7 @@ def run_nova_act_with_fleet_data(fleet_app_url):
         with nova_act.NovaAct(
             headless=False,
             starting_page=fleet_app_url,
-            
+            cdp_endpoint_url="wss://05bd8217.fleetai.com/cdp/devtools/browser/288477c8-2a6d-4e66-b8de-29bc3033c7a2"
         ) as nova:
             print("✅ Nova Act started successfully!")
             run_nova_examples(nova)
@@ -145,7 +145,7 @@ async def main():
     fleet = flt.AsyncFleet()
     print("\n🚀 Initializing Fleet client...")
 
-    instance = await fleet.instance("79700e43")
+    instance = await fleet.instance("05bd8217")
 
     try:
         # Reset the environment to ensure clean state
