@@ -32,7 +32,7 @@ class AsyncManager:
             resource_type: {} for resource_type in ResourceType
         }
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "AsyncManager":
         await self._load_resources()
         return self
 
@@ -57,7 +57,8 @@ class AsyncManager:
             self._resources_state[ResourceType.cdp][name], self.client
         )
 
-    def resources(self) -> List[ResourceModel]:
+    async def resources(self) -> List[ResourceModel]:
+        await self._load_resources()
         return self._resources
 
     async def _load_resources(self) -> None:

@@ -15,20 +15,26 @@ class Instance(InstanceBase):
     def __init__(self, httpx_client: Optional[httpx.Client] = None, **kwargs):
         super().__init__(**kwargs)
         self._httpx_client = httpx_client or httpx.Client()
+        self._env: Optional[Manager] = None
 
     @property
     def env(self) -> Manager:
-        return Manager(self.manager_url, self._httpx_client)
+        if self._env is None:
+            self._env = Manager(self.manager_url, self._httpx_client)
+        return self._env
 
 
 class AsyncInstance(InstanceBase):
     def __init__(self, httpx_client: Optional[httpx.AsyncClient] = None, **kwargs):
         super().__init__(**kwargs)
         self._httpx_client = httpx_client or httpx.AsyncClient()
+        self._env: Optional[AsyncManager] = None
 
     @property
     def env(self) -> AsyncManager:
-        return AsyncManager(self.manager_url, self._httpx_client)
+        if self._env is None:
+            self._env = AsyncManager(self.manager_url, self._httpx_client)
+        return self._env
 
 
 class Fleet:

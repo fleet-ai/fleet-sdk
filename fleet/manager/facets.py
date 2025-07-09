@@ -22,7 +22,7 @@ class AsyncSQLiteResource(Resource):
     async def describe(self) -> DescribeResponse:
         """Describe the SQLite database schema."""
         response = await self.client.request(
-            "GET", f"/resources/sqlite/{self.resource.name}/describe"
+            "GET", f"/resource/sqlite/{self.resource.name}/describe"
         )
         return DescribeResponse(**response.json())
 
@@ -40,7 +40,7 @@ class AsyncSQLiteResource(Resource):
         request = QueryRequest(query=query, args=args, read_only=read_only)
         response = await self.client.request(
             "POST",
-            f"/resources/sqlite/{self.resource.name}/query",
+            f"/resource/sqlite/{self.resource.name}/query",
             json=request.model_dump(),
         )
         return QueryResponse(**response.json())
@@ -52,5 +52,5 @@ class AsyncBrowserResource(Resource):
         self.client = client
 
     async def describe(self) -> BrowserDescribeResponse:
-        response = await self.client.request("GET", "/resources/cdp/describe")
+        response = await self.client.request("GET", "/resource/cdp/describe")
         return BrowserDescribeResponse(**response.json())
