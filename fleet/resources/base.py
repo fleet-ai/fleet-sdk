@@ -1,5 +1,5 @@
 from abc import ABC
-from ..env.models import Resource as ResourceModel, ResourceType, ResourceMode
+from ..manager.models import Resource as ResourceModel, ResourceType, ResourceMode
 
 
 class Resource(ABC):
@@ -8,7 +8,7 @@ class Resource(ABC):
 
     @property
     def uri(self) -> str:
-        return f"{self.resource.type}://{self.resource.name}"
+        return f"{self.resource.type.value}://{self.resource.name}"
 
     @property
     def name(self) -> str:
@@ -21,3 +21,6 @@ class Resource(ABC):
     @property
     def mode(self) -> ResourceMode:
         return self.resource.mode
+    
+    def __repr__(self) -> str:
+        return f"Resource(uri={self.uri}, mode={self.mode.value})"

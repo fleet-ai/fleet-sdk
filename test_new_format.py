@@ -19,19 +19,19 @@ async def test_new_format():
     print("-" * 30)
     
     # List categories
-    categories = flt.env.list_categories()
+    categories = flt.manager.list_categories()
     print(f"Available categories: {categories}")
     
     # List environments in browser category
-    browser_envs = flt.env.list_names("browser")
+    browser_envs = flt.manager.list_names("browser")
     print(f"Browser environments: {browser_envs}")
     
     # List versions for chrome-desktop
-    versions = flt.env.list_versions("browser", "chrome-desktop")
+    versions = flt.manager.list_versions("browser", "chrome-desktop")
     print(f"Chrome desktop versions: {versions}")
     
     # List all available environments
-    all_envs = flt.env.list_environments()
+    all_envs = flt.manager.list_environments()
     print(f"All environments: {all_envs}")
     
     print("\n2. Environment Validation")
@@ -49,7 +49,7 @@ async def test_new_format():
     ]
     
     for spec in test_specs:
-        supported = flt.env.is_environment_supported(spec)
+        supported = flt.manager.is_environment_supported(spec)
         print(f"  {spec:<30} → {'✓' if supported else '✗'}")
     
     print("\n3. Environment Creation Examples")

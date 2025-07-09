@@ -21,7 +21,7 @@ from .exceptions import (
     FleetConfigurationError,
 )
 from .client import Fleet, AsyncFleet, InstanceRequest
-from .env import (
+from .manager import (
     ResetRequest,
     ResetResponse,
     CDPDescribeResponse,
@@ -33,7 +33,7 @@ from .verifiers import *
 
 __version__ = "0.1.1"
 __all__ = [
-    "env",
+    "manager",
     "FleetError",
     "FleetAPIError",
     "FleetTimeoutError",

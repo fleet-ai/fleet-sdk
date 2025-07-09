@@ -1,4 +1,4 @@
-from ..env.models import (
+from ..manager.models import (
     Resource as ResourceModel,
     CDPDescribeResponse,
     ChromeStartRequest,
@@ -9,7 +9,7 @@ from .base import Resource
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..env.base import AsyncWrapper
+    from ..manager.base import AsyncWrapper
 
 
 class AsyncBrowserResource(Resource):

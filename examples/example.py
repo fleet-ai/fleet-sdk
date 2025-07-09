@@ -28,7 +28,7 @@ async def main():
 
     print("Query:", await sqlite.query("SELECT * FROM users"))
 
-    sqlite = await env.state("sqlite://seed").describe()
+    sqlite = await env.state("sqlite://current").describe()
     print("SQLite:", sqlite)
 
     await env.browser().start(width=1920, height=1080)

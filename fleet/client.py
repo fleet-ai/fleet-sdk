@@ -23,7 +23,7 @@ from typing import Optional, List
 from .base import InstanceBase, AsyncWrapper, SyncWrapper
 from .models import InstanceRequest, InstanceRecord, Environment as EnvironmentModel
 
-from .env import InstanceClient, AsyncInstanceClient, ResetRequest, ResetResponse
+from .manager import InstanceClient, AsyncInstanceClient, ResetRequest, ResetResponse
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
 from .resources.browser import AsyncBrowserResource
@@ -52,7 +52,7 @@ class AsyncInstance(InstanceBase):
 
     @property
     def instance(self) -> AsyncInstanceClient:
-        if self._env is None:
+        if self._instance is None:
             self._instance = AsyncInstanceClient(self.manager_url, self._httpx_client)
         return self._instance
 
@@ -69,6 +69,9 @@ class AsyncInstance(InstanceBase):
 
     def state(self, uri: str) -> Resource:
         return self.instance.state(uri)
+    
+    async def resources(self) -> List[Resource]:
+        return await self.instance.resources()
 
 
 class Fleet:
@@ -152,7 +155,7 @@ class AsyncFleet:
             "POST", "/v1/env/instances", json=request.model_dump()
         )
         instance = AsyncInstance(**response.json())
-        await instance.env.load()
+        await instance.instance.load()
         return instance
 
     async def instances(self, status: Optional[str] = None) -> List[AsyncInstance]:
@@ -164,7 +167,7 @@ class AsyncFleet:
         instances = [
             AsyncInstance(**instance_data) for instance_data in response.json()
         ]
-        await asyncio.gather(*[instance.env.load() for instance in instances])
+        await asyncio.gather(*[instance.instance.load() for instance in instances])
         return instances
 
     async def instance(self, instance_id: str) -> AsyncInstance:
