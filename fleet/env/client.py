@@ -14,7 +14,12 @@ from ..resources.base import Resource
 from ..exceptions import FleetEnvironmentError, FleetAPIError
 
 from .base import SyncWrapper, AsyncWrapper
-from .models import ResetResponse, Resource as ResourceModel, ResourceType
+from .models import (
+    ResetResponse,
+    Resource as ResourceModel,
+    ResourceType,
+    HealthResponse,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -60,34 +65,6 @@ class AsyncEnvironment:
 
     async def load(self) -> None:
         await self._load_resources()
-
-    @property
-    def env_key(self) -> Optional[str]:
-        """Get the environment key from instance response or config."""
-        if self._instance_response:
-            return self._instance_response.env_key
-        return self.config.environment_type
-
-    @property
-    def region(self) -> Optional[str]:
-        """Get the region from instance response."""
-        if self._instance_response:
-            return self._instance_response.region
-        return self.config.metadata.get("region")
-
-    @property
-    def status(self) -> Optional[str]:
-        """Get the current instance status."""
-        if self._instance_response:
-            return self._instance_response.status
-        return None
-
-    @property
-    def subdomain(self) -> Optional[str]:
-        """Get the instance subdomain."""
-        if self._instance_response:
-            return self._instance_response.subdomain
-        return None
 
     async def reset(self) -> ResetResponse:
         response = await self.client.request("POST", "/reset")
@@ -173,43 +150,9 @@ class AsyncEnvironment:
         except Exception as e:
             logger.error(f"Error closing environment: {e}")
 
-    # async def manager_health_check(self) -> Optional[ManagerHealthResponse]:
-    #     """Check the health of the manager API.
-
-    #     Returns:
-    #         ManagerHealthResponse if manager is available, None otherwise
-    #     """
-    #     await self._ensure_manager_client()
-    #     if not self._manager_client:
-    #         return None
-
-    #     try:
-    #         return await self._manager_client.health_check()
-    #     except Exception as e:
-    #         logger.warning(f"Manager health check failed: {e}")
-    #         return None
-
-    # async def _ensure_manager_client(self) -> None:
-    #     """Ensure manager client is initialized if instance URLs are available."""
-    #     if self._manager_client is not None:
-    #         return
-
-    #     # Need instance response to get manager URLs
-    #     if not self._instance_response and self._instance_id:
-    #         try:
-    #             self._instance_response = await self._client.get_instance(
-    #                 self._instance_id
-    #             )
-    #         except Exception as e:
-    #             logger.warning(
-    #                 f"Failed to get instance details for manager client: {e}"
-    #             )
-    #             return
-
-    #     if self._instance_response and self._instance_response.urls.manager:
-    #         manager_base_url = self._instance_response.urls.manager.api
-    #         self._manager_client = FleetManagerClient(manager_base_url)
-    #         logger.debug(f"Initialized manager client for {manager_base_url}")
+    async def manager_health_check(self) -> Optional[HealthResponse]:
+        response = await self.client.request("GET", "/health")
+        return HealthResponse(**response.json())
 
     async def _wait_for_instance_ready(self, timeout: float = 300.0) -> None:
         """Wait for instance to be ready.

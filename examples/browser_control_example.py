@@ -8,7 +8,7 @@ import fleet as flt
 async def main():
     fleet = flt.AsyncFleet()
 
-    environments = await fleet.environments()
+    environments = await fleet.list_envs()
     print("Environments:", len(environments))
 
     instances = await fleet.instances(status="running")
@@ -24,15 +24,19 @@ async def main():
     response = await instance.env.reset()
     print("Reset response:", response)
 
-    await instance.env.resources()
+    print(await instance.env.resources())
 
-    sqlite = await instance.env.sqlite("current").describe()
-    print("SQLite:", sqlite)
+    sqlite = instance.env.sqlite("current")
+    print("SQLite:", await sqlite.describe())
+
+    print("Query:", await sqlite.query("SELECT * FROM users"))
 
     sqlite = await instance.env.state("sqlite://current").describe()
     print("SQLite:", sqlite)
 
-    print(await instance.env.browser("cdp").describe())
+    browser = await instance.env.browser("cdp").describe()
+    print("CDP URL:", browser.url)
+    print("CDP Devtools URL:", browser.devtools_url)
 
     # Create a new instance
     instance = await fleet.make(flt.InstanceRequest(env_key=instance.env_key))

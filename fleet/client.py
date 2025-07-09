@@ -113,7 +113,7 @@ class AsyncFleet:
             httpx_client=self._httpx_client,
         )
 
-    async def environments(self) -> List[EnvironmentModel]:
+    async def list_envs(self) -> List[EnvironmentModel]:
         response = await self.client.request("GET", "/v1/env/")
         return [EnvironmentModel(**env_data) for env_data in response.json()]
 
