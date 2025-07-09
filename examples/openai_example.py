@@ -39,6 +39,7 @@ def create_response(**kwargs):
 
     return response.json()
 
+
 def pp(obj):
     print(json.dumps(obj, indent=4))
 
@@ -53,6 +54,7 @@ def calculate_image_dimensions(base_64_image):
     image_data = base64.b64decode(base_64_image)
     image = Image.open(io.BytesIO(image_data))
     return image.size
+
 
 # Optional: key mapping if your model uses "CUA" style keys
 CUA_KEY_TO_PLAYWRIGHT_KEY = {
@@ -99,7 +101,7 @@ class BasePlaywrightComputer:
         return "browser"
 
     def get_dimensions(self):
-        return (1024, 768)
+        return (1920, 1080)
 
     def __init__(self):
         self._playwright = None
@@ -206,28 +208,16 @@ class LocalPlaywrightBrowser(BasePlaywrightComputer):
 
     def _get_browser_and_page(self) -> tuple[Browser, Page]:
         width, height = self.get_dimensions()
-        launch_args = [
-            f"--window-size={width},{height}",
-            "--disable-extensions",
-            "--disable-file-system",
-        ]
-        browser = self._playwright.chromium.launch(
-            chromium_sandbox=True,
-            headless=self.headless,
-            args=launch_args,
-            env={"DISPLAY": ":0"},
-        )
+        browser = self._playwright.chromium.connect_over_cdp("wss://fbd0dfae.fleetai.com/cdp/devtools/browser/841e3685-0e59-4d3e-a127-f06573741f62")
 
-        context = browser.new_context()
+        context = browser.contexts[0]
 
         # Add event listeners for page creation and closure
         context.on("page", self._handle_new_page)
 
-        page = context.new_page()
+        page = context.pages[0]
         page.set_viewport_size({"width": width, "height": height})
         page.on("close", self._handle_page_close)
-
-        page.goto("https://bing.com")
 
         return browser, page
 
@@ -377,32 +367,9 @@ class Agent:
                     new_items += self.handle_item(item)
 
         return new_items
-    
 
-tools = [
-    {
-        "type": "function",
-        "name": "back",
-        "description": "Go back to the previous page.",
-        "parameters": {},
-    },
-    {
-        "type": "function",
-        "name": "goto",
-        "description": "Go to a specific URL.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "Fully qualified URL to navigate to.",
-                },
-            },
-            "additionalProperties": False,
-            "required": ["url"],
-        },
-    },
-]
+
+tools = []
 
 
 def main():
@@ -411,7 +378,7 @@ def main():
         items = [
             {
                 "role": "developer",
-                "content": "Use the additional back() and goto() functions to navigate the browser. If you see nothing, try going to bing.com.",
+                "content": "You have access to a clone of Hubspot. You can use the computer to navigate the browser and perform actions.",
             }
         ]
         while True:
