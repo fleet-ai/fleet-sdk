@@ -1,7 +1,58 @@
 import time
 import base64
 from typing import List, Dict, Callable
-from playwright.sync_api import sync_playwright, Browser, Page
+from playwright.sync_api import sync_playwright, Browser, Page, Playwright
+import requests
+import json
+import io
+from io import BytesIO
+from PIL import Image
+import os
+
+
+def sanitize_message(msg: dict) -> dict:
+    """Return a copy of the message with image_url omitted for computer_call_output messages."""
+    if msg.get("type") == "computer_call_output":
+        output = msg.get("output", {})
+        if isinstance(output, dict):
+            sanitized = msg.copy()
+            sanitized["output"] = {**output, "image_url": "[omitted]"}
+            return sanitized
+    return msg
+
+
+def create_response(**kwargs):
+    url = "https://api.openai.com/v1/responses"
+    headers = {
+        "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}",
+        "Content-Type": "application/json",
+    }
+
+    openai_org = os.getenv("OPENAI_ORG")
+    if openai_org:
+        headers["Openai-Organization"] = openai_org
+
+    response = requests.post(url, headers=headers, json=kwargs)
+
+    if response.status_code != 200:
+        print(f"Error: {response.status_code} {response.text}")
+
+    return response.json()
+
+def pp(obj):
+    print(json.dumps(obj, indent=4))
+
+
+def show_image(base_64_image):
+    image_data = base64.b64decode(base_64_image)
+    image = Image.open(BytesIO(image_data))
+    image.show()
+
+
+def calculate_image_dimensions(base_64_image):
+    image_data = base64.b64decode(base_64_image)
+    image = Image.open(io.BytesIO(image_data))
+    return image.size
 
 # Optional: key mapping if your model uses "CUA" style keys
 CUA_KEY_TO_PLAYWRIGHT_KEY = {
@@ -69,8 +120,8 @@ class BasePlaywrightComputer:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._browser:
-            self._browser.close()
+        # if self._browser:
+        #     self._browser.close()
         if self._playwright:
             self._playwright.stop()
 
@@ -207,7 +258,7 @@ class Agent:
     def __init__(
         self,
         model="computer-use-preview",
-        computer: Computer = None,
+        computer: LocalPlaywrightBrowser = None,
         tools: list[dict] = [],
         acknowledge_safety_check_callback: Callable = lambda: False,
     ):
@@ -292,7 +343,6 @@ class Agent:
             # additional URL safety checks for browser environments
             if self.computer.get_environment() == "browser":
                 current_url = self.computer.get_current_url()
-                check_blocklisted_url(current_url)
                 call_output["output"]["current_url"] = current_url
 
             return [call_output]
@@ -327,3 +377,77 @@ class Agent:
                     new_items += self.handle_item(item)
 
         return new_items
+    
+
+tools = [
+    {
+        "type": "function",
+        "name": "back",
+        "description": "Go back to the previous page.",
+        "parameters": {},
+    },
+    {
+        "type": "function",
+        "name": "goto",
+        "description": "Go to a specific URL.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Fully qualified URL to navigate to.",
+                },
+            },
+            "additionalProperties": False,
+            "required": ["url"],
+        },
+    },
+]
+
+
+def main():
+    with LocalPlaywrightBrowser() as computer:
+        agent = Agent(computer=computer, tools=tools)
+        items = [
+            {
+                "role": "developer",
+                "content": "Use the additional back() and goto() functions to navigate the browser. If you see nothing, try going to bing.com.",
+            }
+        ]
+        while True:
+            user_input = input("> ")
+            items.append({"role": "user", "content": user_input})
+            output_items = agent.run_full_turn(items, show_images=False)
+            items += output_items
+
+
+if __name__ == "__main__":
+    main()
+
+
+# def run(playwright: Playwright):
+#     # Connect to the remote session
+#     chromium = playwright.chromium
+#     browser = chromium.connect_over_cdp("wss://fbd0dfae.fleetai.com/cdp/devtools/browser/841e3685-0e59-4d3e-a127-f06573741f62")
+#     context = browser.contexts[0]
+#     page = context.pages[0]
+
+#     print(page.url)
+#     screenshot = page.screenshot()
+#     print(f"Screenshot taken, size: {len(screenshot)} bytes")
+#     # Save the screenshot to a file
+#     with open("screenshot.png", "wb") as f:
+#         f.write(screenshot)
+#     print("Screenshot saved as screenshot.png")
+
+#     # try:
+#     #     page.goto("https://news.ycombinator.com/")
+#     #     print(page.title())
+#     # finally:
+#     #     page.close()
+#     #     browser.close()
+#     #     print(f"Session complete! View replay at https://browserbase.com/sessions/{session.id}")
+
+
+# with sync_playwright() as playwright:
+#     run(playwright)
