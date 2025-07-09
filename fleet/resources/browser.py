@@ -1,5 +1,3 @@
-from typing import Optional
-
 from ..env.models import (
     Resource as ResourceModel,
     CDPDescribeResponse,
@@ -19,16 +17,17 @@ class AsyncBrowserResource(Resource):
         super().__init__(resource)
         self.client = client
 
-    async def start(
-        self, start_request: Optional[ChromeStartRequest] = None
-    ) -> ChromeStartResponse:
+    async def start(self, width: int = 1920, height: int = 1080) -> ChromeStartResponse:
         response = await self.client.request(
             "POST",
             "/resources/cdp/start",
-            json=start_request.model_dump() if start_request else None,
+            json=ChromeStartRequest(resolution=f"{width},{height}").model_dump(),
         )
         return ChromeStartResponse(**response.json())
 
     async def describe(self) -> CDPDescribeResponse:
         response = await self.client.request("GET", "/resources/cdp/describe")
+        if response.status_code != 200:
+            await self.start()
+            response = await self.client.request("GET", "/resources/cdp/describe")
         return CDPDescribeResponse(**response.json())

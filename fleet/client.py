@@ -23,7 +23,10 @@ from typing import Optional, List
 from .base import InstanceBase, AsyncWrapper, SyncWrapper
 from .models import InstanceRequest, InstanceRecord, Environment as EnvironmentModel
 
-from .env import Environment, AsyncEnvironment
+from .env import Environment, AsyncEnvironment, ResetRequest, ResetResponse
+from .resources.base import Resource
+from .resources.sqlite import AsyncSQLiteResource
+from .resources.browser import AsyncBrowserResource
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,20 @@ class AsyncInstance(InstanceBase):
         if self._env is None:
             self._env = AsyncEnvironment(self.manager_url, self._httpx_client)
         return self._env
+
+    async def reset(
+        self, seed: Optional[int] = None, timestamp: Optional[int] = None
+    ) -> ResetResponse:
+        return await self.env.reset(ResetRequest(seed=seed, timestamp=timestamp))
+
+    def db(self, name: str = "current") -> AsyncSQLiteResource:
+        return self.env.db(name)
+
+    def browser(self, name: str = "cdp") -> AsyncBrowserResource:
+        return self.env.browser(name)
+
+    def state(self, uri: str) -> Resource:
+        return self.env.state(uri)
 
 
 class Fleet:
@@ -121,7 +138,16 @@ class AsyncFleet:
         response = await self.client.request("GET", f"/v1/env/{env_key}")
         return EnvironmentModel(**response.json())
 
-    async def make(self, request: InstanceRequest) -> AsyncInstance:
+    async def make(self, env_key: str) -> AsyncInstance:
+        if ":" in env_key:
+            env_key_part, version = env_key.split(":", 1)
+            if not version.startswith("v"):
+                version = f"v{version}"
+        else:
+            env_key_part = env_key
+            version = None
+
+        request = InstanceRequest(env_key=env_key_part, version=version)
         response = await self.client.request(
             "POST", "/v1/env/instances", json=request.model_dump()
         )

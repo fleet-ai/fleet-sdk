@@ -12,39 +12,35 @@ async def main():
     print("Environments:", len(environments))
 
     # Create a new instance
-    instance = await fleet.make(
-        flt.InstanceRequest(env_key="hubspot", version="v1.2.7")
-    )
-    print("New Instance:", instance.instance_id)
+    env = await fleet.make("hubspot:v1.2.7")
+    print("New Instance:", env.instance_id)
 
-    environment = await fleet.environment(instance.env_key)
+    environment = await fleet.environment(env.env_key)
     print("Environment Default Version:", environment.default_version)
 
-    response = await instance.env.reset(flt.ResetRequest(seed=42))
+    response = await env.reset(seed=42)
     print("Reset response:", response)
 
-    print(await instance.env.resources())
+    print(await env.resources())
 
-    sqlite = instance.env.db("current")
+    sqlite = env.db()
     print("SQLite:", await sqlite.describe())
 
     print("Query:", await sqlite.query("SELECT * FROM users"))
 
-    sqlite = await instance.env.state("sqlite://current").describe()
+    sqlite = await env.state("sqlite://seed").describe()
     print("SQLite:", sqlite)
 
-    await instance.env.browser("cdp").start(
-        flt.ChromeStartRequest(resolution="1920,1080")
-    )
+    await env.browser().start(width=1920, height=1080)
 
-    browser = await instance.env.browser("cdp").describe()
-    print("CDP Page URL:", browser.cdp_page_url)
-    print("CDP Browser URL:", browser.cdp_browser_url)
-    print("CDP Devtools URL:", browser.cdp_devtools_url)
+    browser_connection = await env.browser().describe()
+    print("CDP Page URL:", browser_connection.cdp_page_url)
+    print("CDP Browser URL:", browser_connection.cdp_browser_url)
+    print("CDP Devtools URL:", browser_connection.cdp_devtools_url)
 
     # Delete the instance
-    instance = await fleet.delete(instance.instance_id)
-    print("Instance deleted:", instance.terminated_at)
+    env = await fleet.delete(env.instance_id)
+    print("Instance deleted:", env.terminated_at)
 
 
 if __name__ == "__main__":
