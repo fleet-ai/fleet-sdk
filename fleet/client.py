@@ -4,9 +4,9 @@ import logging
 from typing import Optional, List
 
 from .base import InstanceBase, AsyncWrapper, SyncWrapper
-from .models import InstanceRequest, InstanceRecord, Environment
+from .models import InstanceRequest, InstanceRecord, Environment as EnvironmentModel
 
-from .manager import Manager, AsyncManager
+from .env import Environment, AsyncEnvironment
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +15,12 @@ class Instance(InstanceBase):
     def __init__(self, httpx_client: Optional[httpx.Client] = None, **kwargs):
         super().__init__(**kwargs)
         self._httpx_client = httpx_client or httpx.Client()
-        self._env: Optional[Manager] = None
+        self._env: Optional[Environment] = None
 
     @property
-    def env(self) -> Manager:
+    def env(self) -> Environment:
         if self._env is None:
-            self._env = Manager(self.manager_url, self._httpx_client)
+            self._env = Environment(self.manager_url, self._httpx_client)
         return self._env
 
 
@@ -28,12 +28,12 @@ class AsyncInstance(InstanceBase):
     def __init__(self, httpx_client: Optional[httpx.AsyncClient] = None, **kwargs):
         super().__init__(**kwargs)
         self._httpx_client = httpx_client or httpx.AsyncClient()
-        self._env: Optional[AsyncManager] = None
+        self._env: Optional[AsyncEnvironment] = None
 
     @property
-    def env(self) -> AsyncManager:
+    def env(self) -> AsyncEnvironment:
         if self._env is None:
-            self._env = AsyncManager(self.manager_url, self._httpx_client)
+            self._env = AsyncEnvironment(self.manager_url, self._httpx_client)
         return self._env
 
 
@@ -51,11 +51,11 @@ class Fleet:
             httpx_client=self._httpx_client,
         )
 
-    def list_environments(self) -> List[Environment]:
+    def list_environments(self) -> List[EnvironmentModel]:
         response = self.client.request("GET", "/v1/env/")
         return [Environment(**env_data) for env_data in response.json()]
 
-    def get_environment(self, env_key: str) -> Environment:
+    def get_environment(self, env_key: str) -> EnvironmentModel:
         response = self.client.request("GET", f"/v1/env/{env_key}")
         return Environment(**response.json())
 
@@ -94,13 +94,13 @@ class AsyncFleet:
             httpx_client=self._httpx_client,
         )
 
-    async def environments(self) -> List[Environment]:
+    async def environments(self) -> List[EnvironmentModel]:
         response = await self.client.request("GET", "/v1/env/")
-        return [Environment(**env_data) for env_data in response.json()]
+        return [EnvironmentModel(**env_data) for env_data in response.json()]
 
-    async def environment(self, env_key: str) -> Environment:
+    async def environment(self, env_key: str) -> EnvironmentModel:
         response = await self.client.request("GET", f"/v1/env/{env_key}")
-        return Environment(**response.json())
+        return EnvironmentModel(**response.json())
 
     async def make(self, request: InstanceRequest) -> AsyncInstance:
         response = await self.client.request(

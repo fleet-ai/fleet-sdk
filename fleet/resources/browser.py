@@ -1,11 +1,11 @@
-from ..manager.models import Resource as ResourceModel
-from ..manager.facets import BrowserDescribeResponse
+from ..env.models import Resource as ResourceModel
+from ..env.models import BrowserDescribeResponse
 from .base import Resource
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..manager.base import AsyncWrapper
+    from ..env.base import AsyncWrapper
 
 
 class AsyncBrowserResource(Resource):
