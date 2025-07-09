@@ -58,7 +58,7 @@ class AsyncManager:
             self._resources_state[ResourceType.sqlite.value][name], self.client
         )
 
-    def cdp(self, name: str) -> AsyncBrowserResource:
+    def browser(self, name: str) -> AsyncBrowserResource:
         return AsyncBrowserResource(
             self._resources_state[ResourceType.cdp.value][name], self.client
         )
