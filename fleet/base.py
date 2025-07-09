@@ -1,16 +1,30 @@
 import httpx
 from typing import Dict, Any, Optional
 
+from .models import InstanceResponse
+
+
+class InstanceBase(InstanceResponse):
+    @property
+    def manager_url(self) -> str:
+        return f"{self.urls.manager.api}"
+
 
 class BaseWrapper:
-    def __init__(self, *, url: str):
-        self.url = url
+    def __init__(self, *, api_key: Optional[str], base_url: Optional[str]):
+        if api_key is None:
+            raise ValueError("api_key is required")
+        self.api_key = api_key
+        if base_url is None:
+            base_url = "https://fleet.new"
+        self.base_url = base_url
 
     def get_headers(self) -> Dict[str, str]:
         headers: Dict[str, str] = {
             "X-Fleet-SDK-Language": "Python",
             "X-Fleet-SDK-Version": "1.0.0",
         }
+        headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
 
@@ -22,14 +36,14 @@ class SyncWrapper(BaseWrapper):
     def request(
         self,
         method: str,
-        path: str,
+        url: str,
         params: Optional[Dict[str, Any]] = None,
         json: Optional[Any] = None,
         **kwargs,
     ) -> httpx.Response:
         return self.httpx_client.request(
             method,
-            f"{self.url}{path}",
+            f"{self.base_url}{url}",
             headers=self.get_headers(),
             params=params,
             json=json,
@@ -45,14 +59,14 @@ class AsyncWrapper(BaseWrapper):
     async def request(
         self,
         method: str,
-        path: str,
+        url: str,
         params: Optional[Dict[str, Any]] = None,
         json: Optional[Any] = None,
         **kwargs,
     ) -> httpx.Response:
         return await self.httpx_client.request(
             method,
-            f"{self.url}{path}",
+            f"{self.base_url}{url}",
             headers=self.get_headers(),
             params=params,
             json=json,
