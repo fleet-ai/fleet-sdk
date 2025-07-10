@@ -28,10 +28,9 @@ async def main():
 
     await env.browser().start(width=1920, height=1080)
 
-    browser_connection = await env.browser().describe()
-    print("CDP Page URL:", browser_connection.cdp_page_url)
-    print("CDP Browser URL:", browser_connection.cdp_browser_url)
-    print("CDP Devtools URL:", browser_connection.cdp_devtools_url)
+    print("CDP Page URL:", await env.browser().cdp_url)
+    print("CDP Browser URL:", await env.browser().cdp_url)
+    print("CDP Devtools URL:", await env.browser().devtools_url)
 
     # Delete the instance
     await env.close()

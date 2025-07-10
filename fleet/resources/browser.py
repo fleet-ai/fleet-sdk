@@ -31,3 +31,11 @@ class AsyncBrowserResource(Resource):
             await self.start()
             response = await self.client.request("GET", "/resources/cdp/describe")
         return CDPDescribeResponse(**response.json())
+
+    @property
+    async def cdp_url(self) -> str:
+        return (await self.describe()).cdp_browser_url
+
+    @property
+    async def devtools_url(self) -> str:
+        return (await self.describe()).cdp_devtools_url
