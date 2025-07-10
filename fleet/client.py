@@ -86,6 +86,11 @@ class AsyncEnvironment(EnvironmentBase):
     async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
         return await self.instance.verify(validator)
 
+    async def verify_raw(
+        self, function_code: str, function_name: str
+    ) -> ExecuteFunctionResponse:
+        return await self.instance.verify_raw(function_code, function_name)
+
 
 class Fleet:
     def __init__(

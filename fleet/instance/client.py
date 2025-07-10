@@ -67,7 +67,8 @@ class AsyncInstanceClient:
     ):
         self.base_url = url
         self.client = AsyncWrapper(
-            url=self.base_url, httpx_client=httpx_client or httpx.AsyncClient(timeout=60.0)
+            url=self.base_url,
+            httpx_client=httpx_client or httpx.AsyncClient(timeout=60.0),
         )
         self._resources: Optional[List[ResourceModel]] = None
         self._resources_state: Dict[str, Dict[str, Resource]] = {
@@ -119,7 +120,11 @@ class AsyncInstanceClient:
     async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
         function_code = inspect.getsource(validator)
         function_name = validator.__name__
+        return await self.verify_raw(function_code, function_name)
 
+    async def verify_raw(
+        self, function_code: str, function_name: str
+    ) -> ExecuteFunctionResponse:
         response = await self.client.request(
             "POST",
             "/execute_verifier_function",
@@ -128,7 +133,6 @@ class AsyncInstanceClient:
                 function_name=function_name,
             ).model_dump(),
         )
-
         return ExecuteFunctionResponse(**response.json())
 
     async def _load_resources(self) -> None:
