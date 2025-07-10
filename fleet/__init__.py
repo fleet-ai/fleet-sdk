@@ -30,10 +30,11 @@ from .manager import (
     ChromeStatusResponse,
 )
 from .verifiers import *
+from . import env
 
 __version__ = "0.1.1"
 __all__ = [
-    "manager",
+    "env",
     "FleetError",
     "FleetAPIError",
     "FleetTimeoutError",

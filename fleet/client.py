@@ -69,9 +69,12 @@ class AsyncInstance(InstanceBase):
 
     def state(self, uri: str) -> Resource:
         return self.instance.state(uri)
-    
+
     async def resources(self) -> List[Resource]:
         return await self.instance.resources()
+
+    async def close(self) -> InstanceRecord:
+        return await AsyncFleet().delete(self.instance_id)
 
 
 class Fleet:

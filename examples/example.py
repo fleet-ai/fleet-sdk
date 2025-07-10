@@ -6,17 +6,12 @@ import fleet as flt
 
 
 async def main():
-    fleet = flt.AsyncFleet()
-
-    environments = await fleet.list_envs()
+    environments = await flt.env.list_envs()
     print("Environments:", len(environments))
 
     # Create a new instance
-    env = await fleet.make("hubspot:v1.2.7")
+    env = await flt.env.make("hubspot:v1.2.7")
     print("New Instance:", env.instance_id)
-
-    environment = await fleet.environment(env.env_key)
-    print("Environment Default Version:", environment.default_version)
 
     response = await env.reset(seed=42)
     print("Reset response:", response)
@@ -39,8 +34,7 @@ async def main():
     print("CDP Devtools URL:", browser_connection.cdp_devtools_url)
 
     # Delete the instance
-    env = await fleet.delete(env.instance_id)
-    print("Instance deleted:", env.terminated_at)
+    await env.close()
 
 
 if __name__ == "__main__":
