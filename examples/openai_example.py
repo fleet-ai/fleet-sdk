@@ -198,14 +198,15 @@ async def ainput(prompt: str = "") -> str:
 
 
 async def main():
-    # Create a Fleet environment instance
-    instance = await flt.env.make("hubspot")
-
-    # Create the Playwright wrapper
-    browser = flt.FleetPlaywrightWrapper(instance)
-    await browser.start()
-
+    browser = None
     try:
+        # Create a Fleet environment instance
+        instance = await flt.env.make("hubspot")
+
+        # Create the Playwright wrapper
+        browser = flt.FleetPlaywrightWrapper(instance)
+        await browser.start()
+
         agent = Agent(browser, model="computer-use-preview", tools=[])
         items = [
             {
@@ -213,16 +214,39 @@ async def main():
                 "content": "You have access to a clone of Hubspot. You can use the computer to navigate the browser and perform actions.",
             }
         ]
+        
         while True:
-            user_input = await ainput("> ")
-            items.append({"role": "user", "content": user_input})
-            output_items = await agent.run_full_turn(
-                items, show_images=False, debug=False
-            )
-            items += output_items
+            try:
+                user_input = await ainput("> ")
+                items.append({"role": "user", "content": user_input})
+                output_items = await agent.run_full_turn(
+                    items, show_images=False, debug=False
+                )
+                items += output_items
+            except (EOFError, KeyboardInterrupt):
+                print("\nShutting down...")
+                break
+            except Exception as e:
+                print(f"Error during interaction: {e}")
+                # Continue the loop for other errors
+                
+    except KeyboardInterrupt:
+        print("\nInterrupted during setup")
+    except Exception as e:
+        print(f"Fatal error: {e}")
     finally:
-        await browser.close()
+        if browser:
+            print("Closing browser...")
+            try:
+                await browser.close()
+                print("Browser closed successfully")
+            except Exception as e:
+                print(f"Error closing browser: {e}")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # This catches KeyboardInterrupt that might escape from asyncio.run
+        print("\nProgram terminated by user")

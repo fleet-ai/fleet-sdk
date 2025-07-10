@@ -109,7 +109,7 @@ class FleetPlaywrightWrapper:
         )
 
         self._started = True
-        print(f"Browser started on: {cdp.cdp_devtools_url}")
+        print(f"Track agent: {cdp.cdp_devtools_url}")
 
     async def close(self):
         """Close the browser connection."""
