@@ -8,6 +8,9 @@ import fleet as flt
 from nova_act import NovaAct, ActResult
 
 
+MAX_STEPS = 5
+
+
 class Problem(TypedDict):
     id: str
     problem: str
@@ -38,6 +41,7 @@ async def main():
 
     env = await flt.env.make("fira:v1.2.7")
     print(f"New Instance: {env.urls.app}")
+
     successes = 0
 
     try:
@@ -53,7 +57,7 @@ async def main():
 
             def run_nova() -> ActResult:
                 with NovaAct(starting_page=env.urls.app, headless=True) as nova:
-                    return nova.act(problem["problem"])
+                    return nova.act(problem["problem"], max_steps=MAX_STEPS)
 
             await asyncio.to_thread(run_nova)
 
