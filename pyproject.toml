@@ -39,6 +39,9 @@ dev = [
     "mypy>=1.0.0",
     "ruff>=0.1.0",
 ]
+playwright = [
+    "playwright>=1.40.0",
+]
 
 [project.urls]
 Homepage = "https://fleetai.com"

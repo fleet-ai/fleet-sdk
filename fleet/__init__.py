@@ -32,6 +32,14 @@ from .manager import (
 from .verifiers import *
 from . import env
 
+# Optional playwright integration
+try:
+    from .playwright import FleetPlaywrightWrapper
+    _PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    FleetPlaywrightWrapper = None
+    _PLAYWRIGHT_AVAILABLE = False
+
 __version__ = "0.1.1"
 __all__ = [
     "env",
@@ -49,3 +57,7 @@ __all__ = [
     "ChromeStartResponse",
     "ChromeStatusResponse",
 ]
+
+# Add playwright wrapper to exports if available
+if _PLAYWRIGHT_AVAILABLE:
+    __all__.append("FleetPlaywrightWrapper")
