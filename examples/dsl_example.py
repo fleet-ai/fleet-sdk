@@ -99,6 +99,7 @@ async def main():
         )
         """
 
+        print("RESOURCES", await env.resources())
         db = env.db()
         insert_result = await db.exec(insert_query)
         print(f"Insert result: {insert_result}")
