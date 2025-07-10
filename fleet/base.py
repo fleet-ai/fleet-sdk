@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 from .models import InstanceResponse
 
 
-class InstanceBase(InstanceResponse):
+class EnvironmentBase(InstanceResponse):
     @property
     def manager_url(self) -> str:
         return f"{self.urls.manager.api}"

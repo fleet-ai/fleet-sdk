@@ -20,7 +20,7 @@ import httpx
 import logging
 from typing import Optional, List
 
-from .base import InstanceBase, AsyncWrapper, SyncWrapper
+from .base import EnvironmentBase, AsyncWrapper, SyncWrapper
 from .models import InstanceRequest, InstanceRecord, Environment as EnvironmentModel
 
 from .manager import InstanceClient, AsyncInstanceClient, ResetRequest, ResetResponse
@@ -31,7 +31,7 @@ from .resources.browser import AsyncBrowserResource
 logger = logging.getLogger(__name__)
 
 
-class Instance(InstanceBase):
+class Environment(EnvironmentBase):
     def __init__(self, httpx_client: Optional[httpx.Client] = None, **kwargs):
         super().__init__(**kwargs)
         self._httpx_client = httpx_client or httpx.Client()
@@ -44,7 +44,7 @@ class Instance(InstanceBase):
         return self._instance
 
 
-class AsyncInstance(InstanceBase):
+class AsyncEnvironment(EnvironmentBase):
     def __init__(self, httpx_client: Optional[httpx.AsyncClient] = None, **kwargs):
         super().__init__(**kwargs)
         self._httpx_client = httpx_client or httpx.AsyncClient()
@@ -99,23 +99,23 @@ class Fleet:
         response = self.client.request("GET", f"/v1/env/{env_key}")
         return EnvironmentModel(**response.json())
 
-    def make(self, request: InstanceRequest) -> Instance:
+    def make(self, request: InstanceRequest) -> Environment:
         response = self.client.request(
             "POST", "/v1/env/instances", json=request.model_dump()
         )
-        return Instance(**response.json())
+        return Environment(**response.json())
 
-    def instances(self, status: Optional[str] = None) -> List[Instance]:
+    def instances(self, status: Optional[str] = None) -> List[Environment]:
         params = {}
         if status:
             params["status"] = status
 
         response = self.client.request("GET", "/v1/env/instances", params=params)
-        return [Instance(**instance_data) for instance_data in response.json()]
+        return [Environment(**instance_data) for instance_data in response.json()]
 
-    def instance(self, instance_id: str) -> Instance:
+    def instance(self, instance_id: str) -> Environment:
         response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
-        return Instance(**response.json())
+        return Environment(**response.json())
 
     def delete(self, instance_id: str) -> InstanceRecord:
         response = self.client.request("DELETE", f"/v1/env/instances/{instance_id}")
@@ -144,7 +144,7 @@ class AsyncFleet:
         response = await self.client.request("GET", f"/v1/env/{env_key}")
         return EnvironmentModel(**response.json())
 
-    async def make(self, env_key: str) -> AsyncInstance:
+    async def make(self, env_key: str) -> AsyncEnvironment:
         if ":" in env_key:
             env_key_part, version = env_key.split(":", 1)
             if not version.startswith("v"):
@@ -157,25 +157,25 @@ class AsyncFleet:
         response = await self.client.request(
             "POST", "/v1/env/instances", json=request.model_dump()
         )
-        instance = AsyncInstance(**response.json())
+        instance = AsyncEnvironment(**response.json())
         await instance.instance.load()
         return instance
 
-    async def instances(self, status: Optional[str] = None) -> List[AsyncInstance]:
+    async def instances(self, status: Optional[str] = None) -> List[AsyncEnvironment]:
         params = {}
         if status:
             params["status"] = status
 
         response = await self.client.request("GET", "/v1/env/instances", params=params)
         instances = [
-            AsyncInstance(**instance_data) for instance_data in response.json()
+            AsyncEnvironment(**instance_data) for instance_data in response.json()
         ]
         await asyncio.gather(*[instance.instance.load() for instance in instances])
         return instances
 
-    async def instance(self, instance_id: str) -> AsyncInstance:
+    async def instance(self, instance_id: str) -> AsyncEnvironment:
         response = await self.client.request("GET", f"/v1/env/instances/{instance_id}")
-        instance = AsyncInstance(**response.json())
+        instance = AsyncEnvironment(**response.json())
         await instance.env.load()
         return instance
 
