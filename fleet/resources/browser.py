@@ -17,7 +17,6 @@ class AsyncBrowserResource(Resource):
     def __init__(self, resource: ResourceModel, client: "AsyncWrapper"):
         super().__init__(resource)
         self.client = client
-        self._describe: Optional[CDPDescribeResponse] = None
 
     async def start(self, width: int = 1920, height: int = 1080) -> CDPDescribeResponse:
         response = await self.client.request(
@@ -29,13 +28,11 @@ class AsyncBrowserResource(Resource):
         return await self.describe()
 
     async def describe(self) -> CDPDescribeResponse:
-        if self._describe is None:
+        response = await self.client.request("GET", "/resources/cdp/describe")
+        if response.status_code != 200:
+            await self.start()
             response = await self.client.request("GET", "/resources/cdp/describe")
-            if response.status_code != 200:
-                await self.start()
-                response = await self.client.request("GET", "/resources/cdp/describe")
-            self._describe = CDPDescribeResponse(**response.json())
-        return self._describe
+        return CDPDescribeResponse(**response.json())
 
     async def cdp_url(self) -> str:
         return (await self.describe()).cdp_browser_url
