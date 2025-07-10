@@ -2,7 +2,7 @@ import re
 import asyncio
 import argparse
 import json
-from typing import TypedDict, List
+from typing import TypedDict
 from pathlib import Path
 import fleet as flt
 
@@ -22,12 +22,6 @@ def extract_function_name(function_str: str) -> str | None:
     raise ValueError(f"No function name found in {function_str}")
 
 
-def load_problems(file_path: str) -> List[Problem]:
-    with open(file_path, "r") as f:
-        data = json.load(f)
-    return data["problems"]
-
-
 async def main():
     parser = argparse.ArgumentParser(
         description="Load and display Jira problems from JSON file"
@@ -45,7 +39,9 @@ async def main():
     print(f"New Instance: {env.urls.app}")
 
     try:
-        problems = load_problems(args.json_file)
+        with open(args.json_file, "r") as f:
+            data = json.load(f)
+        problems = data["problems"]
 
         print(f"Loaded {len(problems)} problems from '{args.json_file}'")
 
