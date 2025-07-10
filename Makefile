@@ -1,4 +1,4 @@
-.PHONY: help install-dev build test clean publish-to-pypi validate-tag
+.PHONY: help install-dev build test clean publish-to-pypi validate-tag unasync
 
 help:
 	@echo "Fleet Python SDK Development Commands"
@@ -9,13 +9,14 @@ help:
 	@echo "clean          Clean build artifacts"
 	@echo "validate-tag   Validate release tag format"
 	@echo "publish-to-pypi Publish package to PyPI"
+	@echo "unasync        Generate sync code from async sources"
 
 install-dev:
 	python -m pip install --upgrade pip
 	pip install build twine
 	pip install -e .
 
-build: clean
+build: clean unasync
 	python -m build
 
 test:
@@ -27,6 +28,35 @@ clean:
 	rm -rf *.egg-info/
 	find . -type d -name __pycache__ -delete
 	find . -type f -name "*.pyc" -delete
+
+unasync:
+	@echo "Running unasync to generate sync code from async sources..."
+	@python -c "import os, unasync; \
+	rule = unasync.Rule('fleet/_async/', 'fleet/', { \
+		'AsyncClient': 'Client', \
+		'AsyncInstanceClient': 'InstanceClient', \
+		'AsyncEnvironment': 'Environment', \
+		'AsyncFleet': 'Fleet', \
+		'AsyncWrapper': 'SyncWrapper', \
+		'AsyncResource': 'Resource', \
+		'AsyncSQLiteResource': 'SQLiteResource', \
+		'AsyncBrowserResource': 'BrowserResource', \
+		'make_async': 'make', \
+		'list_envs_async': 'list_envs', \
+		'get_async': 'get', \
+		'async def': 'def', \
+		'await ': '', \
+		'async with': 'with', \
+		'async for': 'for', \
+		'__aenter__': '__enter__', \
+		'__aexit__': '__exit__', \
+		'import asyncio': 'import time', \
+		'asyncio.sleep': 'time.sleep', \
+		'httpx.AsyncClient': 'httpx.Client', \
+	}); \
+	files = [os.path.join(root, f) for root, dirs, files in os.walk('fleet/_async/') for f in files if f.endswith('.py')]; \
+	unasync.unasync_files(files, [rule])"
+	@echo "✅ Sync code generated successfully!"
 
 validate-tag:
 	@if [ -z "$(TAG)" ]; then \

@@ -6,34 +6,34 @@ from .base import Resource
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..instance.base import SyncWrapper
+    from ..instance.base import AsyncWrapper
 
 
-class SQLiteResource(Resource):
-    def __init__(self, resource: ResourceModel, client: "SyncWrapper"):
+class AsyncSQLiteResource(Resource):
+    def __init__(self, resource: ResourceModel, client: "AsyncWrapper"):
         super().__init__(resource)
         self.client = client
 
-    def describe(self) -> DescribeResponse:
+    async def describe(self) -> DescribeResponse:
         """Describe the SQLite database schema."""
-        response = self.client.request(
+        response = await self.client.request(
             "GET", f"/resources/sqlite/{self.resource.name}/describe"
         )
         return DescribeResponse(**response.json())
 
-    def query(
+    async def query(
         self, query: str, args: Optional[List[Any]] = None
     ) -> QueryResponse:
-        return self._query(query, args, read_only=True)
+        return await self._query(query, args, read_only=True)
 
-    def exec(self, query: str, args: Optional[List[Any]] = None) -> QueryResponse:
-        return self._query(query, args, read_only=False)
+    async def exec(self, query: str, args: Optional[List[Any]] = None) -> QueryResponse:
+        return await self._query(query, args, read_only=False)
 
-    def _query(
+    async def _query(
         self, query: str, args: Optional[List[Any]] = None, read_only: bool = True
     ) -> QueryResponse:
         request = QueryRequest(query=query, args=args, read_only=read_only)
-        response = self.client.request(
+        response = await self.client.request(
             "POST",
             f"/resources/sqlite/{self.resource.name}/query",
             json=request.model_dump(),

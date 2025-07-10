@@ -65,7 +65,7 @@ def validate_new_deal_creation(
 async def main():
     # Create a new instance
     print("Creating new Hubspot instance...")
-    env = await flt.env.make("hubspot:v1.2.7")
+    env = await flt.env.make_async("hubspot:v1.2.7")
     print(f"New Instance: {env.instance_id}")
 
     try:
@@ -99,6 +99,7 @@ async def main():
         )
         """
 
+        print("RESOURCES", await env.resources())
         db = env.db()
         insert_result = await db.exec(insert_query)
         print(f"Insert result: {insert_result}")

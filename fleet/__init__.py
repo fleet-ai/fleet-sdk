@@ -20,8 +20,11 @@ from .exceptions import (
     FleetTimeoutError,
     FleetConfigurationError,
 )
-from .client import Fleet, AsyncFleet, InstanceRequest
+from .client import Fleet, Environment
+from ._async.client import AsyncFleet, AsyncEnvironment
+from .models import InstanceRequest
 from .instance import (
+    InstanceClient,
     AsyncInstanceClient,
     ResetRequest,
     ResetResponse,
@@ -30,7 +33,12 @@ from .instance import (
     ChromeStartResponse,
     ChromeStatusResponse,
 )
-from .verifiers import *
+from .verifiers import (
+    DatabaseSnapshot,
+    IgnoreConfig,
+    SnapshotDiff,
+    TASK_SUCCESSFUL_SCORE,
+)
 from . import env
 
 # Optional playwright integration
@@ -49,7 +57,10 @@ __all__ = [
     "FleetTimeoutError",
     "FleetConfigurationError",
     "Fleet",
+    "Environment",
     "AsyncFleet",
+    "AsyncEnvironment",
+    "InstanceClient",
     "AsyncInstanceClient",
     "InstanceRequest",
     "ResetRequest",
@@ -58,6 +69,10 @@ __all__ = [
     "ChromeStartRequest",
     "ChromeStartResponse",
     "ChromeStatusResponse",
+    "DatabaseSnapshot",
+    "IgnoreConfig",
+    "SnapshotDiff",
+    "TASK_SUCCESSFUL_SCORE",
 ]
 
 # Add playwright wrapper to exports if available

@@ -6,11 +6,11 @@ import fleet as flt
 
 
 async def main():
-    environments = await flt.env.list_envs()
+    environments = await flt.env.list_envs_async()
     print("Environments:", len(environments))
 
     # Create a new instance
-    env = await flt.env.make("hubspot:v1.2.7")
+    env = await flt.env.make_async("hubspot:v1.2.7")
     print("New Instance:", env.instance_id)
 
     response = await env.reset(seed=42)

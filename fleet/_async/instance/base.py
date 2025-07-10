@@ -14,12 +14,12 @@ class BaseWrapper:
         return headers
 
 
-class SyncWrapper(BaseWrapper):
-    def __init__(self, *, httpx_client: httpx.Client, **kwargs):
+class AsyncWrapper(BaseWrapper):
+    def __init__(self, *, httpx_client: httpx.AsyncClient, **kwargs):
         super().__init__(**kwargs)
         self.httpx_client = httpx_client
 
-    def request(
+    async def request(
         self,
         method: str,
         path: str,
@@ -27,7 +27,7 @@ class SyncWrapper(BaseWrapper):
         json: Optional[Any] = None,
         **kwargs,
     ) -> httpx.Response:
-        return self.httpx_client.request(
+        return await self.httpx_client.request(
             method,
             f"{self.url}{path}",
             headers=self.get_headers(),
