@@ -1,112 +1,75 @@
-from fleet.verifiers import DatabaseSnapshot, IgnoreConfig
+import asyncio
+import fleet as flt
+from fleet.verifiers import DatabaseSnapshot, IgnoreConfig, TASK_SUCCESSFUL_SCORE
 
-async def validate_give_me_more_tasks(
+
+def validate_new_deal_creation(
     before: DatabaseSnapshot,
     after: DatabaseSnapshot,
     transcript: str | None = None,
 ) -> int:
-    """Validate that bugs are moved to sprint 3 and assigned correctly."""
+    """Validate that a new deal was created"""
 
-    # Get user IDs
-    raj_user = after.table("users").eq("name", "Raj Patel").first()
-    sarah_kim_user = after.table("users").eq("name", "Sarah Kim").first()
+    # Find the new deal entry
+    new_deal = after.table("entries").eq("id", 32302).first()
+    if not new_deal:
+        raise AssertionError("Expected new deal with id 32302 not found")
 
-    if not raj_user:
-        raise AssertionError("User 'Raj Patel' not found")
-    if not sarah_kim_user:
-        raise AssertionError("User 'Sarah Kim' not found")
-
-    raj_id = raj_user["id"]
-    sarah_kim_id = sarah_kim_user["id"]
-
-    # Verify SCRUM-555 (data pipeline bug) is assigned to Sarah Kim
-    after.table("issues").eq("id", "SCRUM-555").assert_eq("owner", sarah_kim_id)
-
-    # Verify other bugs are assigned to Raj Patel
-    other_bugs = [
-        "SCRUM-780",
-        "SCRUM-781",
-        "SCRUM-790",
-        "SCRUM-822",
-        "SCRUM-882",
-        "SCRUM-897",
-        "SCRUM-956",
-        "SCRUM-1331",
-        "SCRUM-1312",
-        "SCRUM-1210",
-        "SCRUM-1230",
-        "SCRUM-1282",
-    ]
-    for bug_id in other_bugs:
-        after.table("issues").eq("id", bug_id).assert_eq("owner", raj_id)
-
-    # Verify all bugs are in sprint_3
-    all_bugs = ["SCRUM-555"] + other_bugs
-    for bug_id in all_bugs:
-        after.table("sprint_issues").eq("issue_id", bug_id).assert_eq(
-            "sprint_id", "sprint_3"
+    # Verify it's a deal type
+    if new_deal["type"] != "deal":
+        raise AssertionError(
+            f"Expected entry type to be 'deal', got '{new_deal['type']}'"
         )
+
+    # Verify the deal has a name (should be "testing" based on the diff)
+    if not new_deal["name"]:
+        raise AssertionError("Expected deal to have a name")
+
+    # Parse the properties JSON to check basic deal properties
+    import json
+
+    properties = json.loads(new_deal["properties"])
+
+    # Verify it has basic deal properties
+    if "dealstage" not in properties:
+        raise AssertionError("Expected deal to have a dealstage property")
+
+    if "deal_type" not in properties:
+        raise AssertionError("Expected deal to have a deal_type property")
+
+    if "priority" not in properties:
+        raise AssertionError("Expected deal to have a priority property")
 
     # Configure ignore settings
     ignore_config = IgnoreConfig(
-        tables={"activities", "pageviews", "sprint_issues"},
+        tables={"pageviews"},
         table_fields={
-            "issues": {"updated_at", "created_at", "rowid"},
-            "users": {"updated_at", "created_at", "rowid"},
-            "sprint_issues": {"updated_at", "created_at", "rowid"},
+            "entries": {"createdDate", "lastModifiedDate", "createdAt", "updatedAt"},
         },
     )
 
     # Build expected changes
-    expected_changes: list[dict] = []
-
-    # Assignment changes
-    expected_changes.append(
+    expected_changes = [
         {
-            "table": "issues",
-            "pk": "SCRUM-555",
-            "field": "owner",
-            "after": sarah_kim_id,
+            "table": "entries",
+            "pk": 32302,
+            "field": None,
+            "after": "__added__",
         }
-    )
-    for bug_id in other_bugs:
-        expected_changes.append(
-            {
-                "table": "issues",
-                "pk": bug_id,
-                "field": "owner",
-                "after": raj_id,
-            }
-        )
+    ]
 
-    # Sprint changes
-    for bug_id in all_bugs:
-        # Remove from previous sprint if present
-        before_assignment = (
-            before.table("sprint_issues").eq("issue_id", bug_id).first()
-        )
-        if before_assignment:
-            old_sprint = before_assignment.get("sprint_id")
-            expected_changes.append(
-                {
-                    "table": "sprint_issues",
-                    "pk": (old_sprint, bug_id),
-                    "field": None,
-                    "after": "__removed__",
-                }
-            )
-
-        # Add to sprint_3
-        expected_changes.append(
-            {
-                "table": "sprint_issues",
-                "pk": ("sprint_3", bug_id),
-                "field": None,
-                "after": "__added__",
-            }
-        )
-
-    # Enforce invariant
     before.diff(after, ignore_config).expect_only(expected_changes)
-
     return TASK_SUCCESSFUL_SCORE
+
+
+async def main():
+    env = await flt.env.get("4379cf6c")
+    response = await env.verify(validate_new_deal_creation)
+    print(f"Success: {response.success}")
+    print(f"Result: {response.result}")
+    print(f"Error: {response.error}")
+    print(f"Message: {response.message}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

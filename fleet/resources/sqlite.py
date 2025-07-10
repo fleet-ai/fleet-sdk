@@ -1,12 +1,12 @@
 from typing import Any, List, Optional
-from ..manager.models import Resource as ResourceModel
-from ..manager.models import DescribeResponse, QueryRequest, QueryResponse
+from ..instance.models import Resource as ResourceModel
+from ..instance.models import DescribeResponse, QueryRequest, QueryResponse
 from .base import Resource
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..manager.base import AsyncWrapper
+    from ..instance.base import AsyncWrapper
 
 
 class AsyncSQLiteResource(Resource):

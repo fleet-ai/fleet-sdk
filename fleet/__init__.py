@@ -21,7 +21,8 @@ from .exceptions import (
     FleetConfigurationError,
 )
 from .client import Fleet, AsyncFleet, InstanceRequest
-from .manager import (
+from .instance import (
+    AsyncInstanceClient,
     ResetRequest,
     ResetResponse,
     CDPDescribeResponse,
@@ -49,6 +50,7 @@ __all__ = [
     "FleetConfigurationError",
     "Fleet",
     "AsyncFleet",
+    "AsyncInstanceClient",
     "InstanceRequest",
     "ResetRequest",
     "ResetResponse",

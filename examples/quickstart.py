@@ -35,7 +35,7 @@ async def main():
     # 1. List available environments
     print("\n📋 Available environments:")
     try:
-        environments = await fleet.manager.list_envs()
+        environments = await fleet.instance.list_envs()
         for env in environments:
             print(f"  - {env.env_key}: {env.name}")
             print(f"    Description: {env.description}")
@@ -48,7 +48,7 @@ async def main():
     # 2. Create a new environment instance
     print("\n🚀 Creating new environment...")
     try:
-        env = await fleet.manager.make("fira:v1.2.5", region="us-west-1")
+        env = await fleet.instance.make("fira:v1.2.5", region="us-west-1")
         print(f"✅ Environment created with instance ID: {env.instance_id}")
         
         # Execute a simple action
@@ -85,7 +85,7 @@ async def main():
     # 3. List running instances
     print("\n🏃 Listing running instances...")
     try:
-        instances = await fleet.manager.list_instances(status="running")
+        instances = await fleet.instance.list_instances(status="running")
         if instances:
             print(f"Found {len(instances)} running instances:")
             for instance in instances:
@@ -99,13 +99,13 @@ async def main():
     print("\n🔗 Connecting to existing instance...")
     try:
         # Only get running instances
-        running_instances = await fleet.manager.list_instances(status="running")
+        running_instances = await fleet.instance.list_instances(status="running")
         if running_instances:
             # Find a running instance that's not the one we just created/deleted
             target_instance = running_instances[0]
             print(f"Connecting to running instance: {target_instance.instance_id}")
             
-            env = await fleet.manager.get(target_instance.instance_id)
+            env = await fleet.instance.get(target_instance.instance_id)
             print(f"✅ Connected to instance: {env.instance_id}")
             
             # Execute an action on the existing instance

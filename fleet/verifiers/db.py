@@ -1,4 +1,3 @@
-# database_dsl.py
 """A schema‑agnostic, SQL‑native DSL for snapshot validation and diff invariants.
 
 The module extends your original `DatabaseSnapshot` implementation with
@@ -11,11 +10,13 @@ The module extends your original `DatabaseSnapshot` implementation with
 The public API stays tiny yet composable; everything else is built on
 orthogonal primitives so it works for *any* relational schema.
 """
+
 from __future__ import annotations
 
 import sqlite3
 from datetime import datetime
 from typing import Any
+import json
 
 ################################################################################
 #  Low‑level helpers
@@ -24,6 +25,36 @@ from typing import Any
 SQLValue = str | int | float | None
 Condition = tuple[str, str, SQLValue]  # (column, op, value)
 JoinSpec = tuple[str, dict[str, str]]  # (table, on mapping)
+
+
+def _is_json_string(value: Any) -> bool:
+    """Check if a value looks like a JSON string."""
+    if not isinstance(value, str):
+        return False
+    value = value.strip()
+    return (value.startswith("{") and value.endswith("}")) or (
+        value.startswith("[") and value.endswith("]")
+    )
+
+
+def _values_equivalent(val1: Any, val2: Any) -> bool:
+    """Compare two values, using JSON semantic comparison for JSON strings."""
+    # If both are exactly equal, return True
+    if val1 == val2:
+        return True
+
+    # If both look like JSON strings, try semantic comparison
+    if _is_json_string(val1) and _is_json_string(val2):
+        try:
+            parsed1 = json.loads(val1)
+            parsed2 = json.loads(val2)
+            return parsed1 == parsed2
+        except (json.JSONDecodeError, TypeError):
+            # If parsing fails, fall back to string comparison
+            pass
+
+    # Default to exact comparison
+    return val1 == val2
 
 
 class _CountResult:
@@ -96,9 +127,7 @@ class QueryBuilder:
     # ---------------------------------------------------------------------
     #  WHERE helpers (SQL‑like)
     # ---------------------------------------------------------------------
-    def _add_condition(
-        self, column: str, op: str, value: SQLValue
-    ) -> "QueryBuilder":  # noqa: UP037
+    def _add_condition(self, column: str, op: str, value: SQLValue) -> "QueryBuilder":  # noqa: UP037
         qb = self._clone()
         qb._conditions.append((column, op, value))
         return qb
@@ -126,9 +155,7 @@ class QueryBuilder:
         qb._conditions.append((column, "IN", tuple(values)))
         return qb
 
-    def not_in(
-        self, column: str, values: list[SQLValue]
-    ) -> "QueryBuilder":  # noqa: UP037
+    def not_in(self, column: str, values: list[SQLValue]) -> "QueryBuilder":  # noqa: UP037
         qb = self._clone()
         qb._conditions.append((column, "NOT IN", tuple(values)))
         return qb
@@ -147,9 +174,7 @@ class QueryBuilder:
     # ---------------------------------------------------------------------
     #  JOIN (simple inner join)
     # ---------------------------------------------------------------------
-    def join(
-        self, other_table: str, on: dict[str, str]
-    ) -> "QueryBuilder":  # noqa: UP037
+    def join(self, other_table: str, on: dict[str, str]) -> "QueryBuilder":  # noqa: UP037
         """`on` expects {local_col: remote_col}."""
         qb = self._clone()
         qb._joins.append((other_table, on))
@@ -166,7 +191,8 @@ class QueryBuilder:
         # Joins -------------------------------------------------------------
         for tbl, onmap in self._joins:
             join_clauses = [
-                f"{self._table}.{l} = {tbl}.{r}" for l, r in onmap.items()  # noqa: E741
+                f"{self._table}.{l} = {tbl}.{r}"
+                for l, r in onmap.items()  # noqa: E741
             ]
             sql.append(f"JOIN {tbl} ON {' AND '.join(join_clauses)}")
 
@@ -430,10 +456,27 @@ class SnapshotDiff:
     def expect_only(self, allowed_changes: list[dict[str, Any]]):
         """Allowed changes is a list of {table, pk, field, after} (before optional)."""
         diff = self._collect()
-        allowed_set = {
-            (c["table"], c.get("pk"), c.get("field"), c.get("after"))
-            for c in allowed_changes
-        }
+
+        def _is_change_allowed(
+            table: str, row_id: str, field: str | None, after_value: Any
+        ) -> bool:
+            """Check if a change is in the allowed list using semantic comparison."""
+            for allowed in allowed_changes:
+                allowed_pk = allowed.get("pk")
+                # Handle type conversion for primary key comparison
+                # Convert both to strings for comparison to handle int/string mismatches
+                pk_match = (
+                    str(allowed_pk) == str(row_id) if allowed_pk is not None else False
+                )
+
+                if (
+                    allowed["table"] == table
+                    and pk_match
+                    and allowed.get("field") == field
+                    and _values_equivalent(allowed.get("after"), after_value)
+                ):
+                    return True
+            return False
 
         # Collect all unexpected changes for detailed reporting
         unexpected_changes = []
@@ -443,8 +486,7 @@ class SnapshotDiff:
                 for f, vals in row["changes"].items():
                     if self.ignore_config.should_ignore_field(tbl, f):
                         continue
-                    tup = (tbl, row["row_id"], f, vals["after"])
-                    if tup not in allowed_set:
+                    if not _is_change_allowed(tbl, row["row_id"], f, vals["after"]):
                         unexpected_changes.append(
                             {
                                 "type": "modification",
@@ -458,8 +500,7 @@ class SnapshotDiff:
                         )
 
             for row in report.get("added_rows", []):
-                tup = (tbl, row["row_id"], None, "__added__")
-                if tup not in allowed_set:
+                if not _is_change_allowed(tbl, row["row_id"], None, "__added__"):
                     unexpected_changes.append(
                         {
                             "type": "insertion",
@@ -472,8 +513,7 @@ class SnapshotDiff:
                     )
 
             for row in report.get("removed_rows", []):
-                tup = (tbl, row["row_id"], None, "__removed__")
-                if tup not in allowed_set:
+                if not _is_change_allowed(tbl, row["row_id"], None, "__removed__"):
                     unexpected_changes.append(
                         {
                             "type": "deletion",

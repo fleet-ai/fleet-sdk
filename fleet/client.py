@@ -23,7 +23,14 @@ from typing import Optional, List
 from .base import EnvironmentBase, AsyncWrapper, SyncWrapper
 from .models import InstanceRequest, InstanceRecord, Environment as EnvironmentModel
 
-from .manager import InstanceClient, AsyncInstanceClient, ResetRequest, ResetResponse
+from .instance import (
+    InstanceClient,
+    AsyncInstanceClient,
+    ResetRequest,
+    ResetResponse,
+    ValidatorType,
+    ExecuteFunctionResponse,
+)
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
 from .resources.browser import AsyncBrowserResource
@@ -47,7 +54,7 @@ class Environment(EnvironmentBase):
 class AsyncEnvironment(EnvironmentBase):
     def __init__(self, httpx_client: Optional[httpx.AsyncClient] = None, **kwargs):
         super().__init__(**kwargs)
-        self._httpx_client = httpx_client or httpx.AsyncClient()
+        self._httpx_client = httpx_client or httpx.AsyncClient(timeout=60.0)
         self._instance: Optional[AsyncInstanceClient] = None
 
     @property
@@ -75,6 +82,9 @@ class AsyncEnvironment(EnvironmentBase):
 
     async def close(self) -> InstanceRecord:
         return await AsyncFleet().delete(self.instance_id)
+
+    async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
+        return await self.instance.verify(validator)
 
 
 class Fleet:
@@ -176,7 +186,7 @@ class AsyncFleet:
     async def instance(self, instance_id: str) -> AsyncEnvironment:
         response = await self.client.request("GET", f"/v1/env/instances/{instance_id}")
         instance = AsyncEnvironment(**response.json())
-        await instance.env.load()
+        await instance.instance.load()
         return instance
 
     async def delete(self, instance_id: str) -> InstanceRecord:

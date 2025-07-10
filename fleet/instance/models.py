@@ -126,3 +126,16 @@ class Resource(BaseModel):
     type: ResourceType
     mode: ResourceMode
     label: Optional[str] = Field(None, title="Label")
+
+
+class ExecuteFunctionRequest(BaseModel):
+    function_code: str
+    function_name: str
+    text_solution: Optional[str] = None
+
+
+class ExecuteFunctionResponse(BaseModel):
+    success: bool
+    result: Optional[Any] = None
+    error: Optional[str] = None
+    message: str
