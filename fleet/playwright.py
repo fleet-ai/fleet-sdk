@@ -1,7 +1,7 @@
 import base64
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Any
 from playwright.async_api import async_playwright, Browser, Page
-import fleet as flt
+from .client import AsyncEnvironment
 
 
 # Key mapping for computer use actions
@@ -37,44 +37,50 @@ CUA_KEY_TO_PLAYWRIGHT_KEY = {
 class FleetPlaywrightWrapper:
     """
     A wrapper that adds Playwright browser automation to Fleet environment instances.
-    
+
     This class handles:
     - Browser connection via CDP
     - Computer actions (click, scroll, type, etc.)
     - Screenshot capture
     - Integration with OpenAI computer use API
-    
+
     Usage:
         instance = await fleet.env.make(env_key="hubspot", version="v1.2.7")
         browser = FleetPlaywrightWrapper(instance)
         await browser.start()
-        
+
         # Use browser methods
         screenshot = await browser.screenshot()
         tools = [browser.openai_cua_tool]
-        
+
         # Clean up when done
         await browser.close()
     """
 
+    def get_environment(self):
+        return "browser"
+
+    def get_dimensions(self):
+        return (1920, 1080)
+
     def __init__(
         self,
-        fleet_instance,
+        env: AsyncEnvironment,
         display_width: int = 1920,
         display_height: int = 1080,
     ):
         """
         Initialize the Fleet Playwright wrapper.
-        
+
         Args:
-            fleet_instance: Fleet environment instance
+            env: Fleet environment instance
             display_width: Browser viewport width
             display_height: Browser viewport height
         """
-        self.fleet_instance = fleet_instance
+        self.env = env
         self.display_width = display_width
         self.display_height = display_height
-        
+
         self._playwright = None
         self._browser: Browser | None = None
         self._page: Page | None = None
@@ -84,25 +90,26 @@ class FleetPlaywrightWrapper:
         """Start the browser and establish connection."""
         if self._started:
             return
-            
+
         # Start Playwright
         self._playwright = await async_playwright().start()
-        
+
         # Start browser on the Fleet instance
         print("Starting browser...")
-        await self.fleet_instance.env.browser("cdp").start()
-        cdp = await self.fleet_instance.env.browser("cdp").describe()
-        
+        await self.env.browser().start()
+        cdp = await self.env.browser().describe()
+
         # Connect to browser
-        self._browser = await self._playwright.chromium.connect_over_cdp(cdp.cdp_browser_url)
+        self._browser = await self._playwright.chromium.connect_over_cdp(
+            cdp.cdp_browser_url
+        )
         self._page = self._browser.contexts[0].pages[0]
-        await self._page.set_viewport_size({
-            "width": self.display_width, 
-            "height": self.display_height
-        })
-        
+        await self._page.set_viewport_size(
+            {"width": self.display_width, "height": self.display_height}
+        )
+
         self._started = True
-        print("Browser ready!")
+        print(f"Browser started on: {cdp.cdp_devtools_url}")
 
     async def close(self):
         """Close the browser connection."""
@@ -122,7 +129,7 @@ class FleetPlaywrightWrapper:
     def openai_cua_tool(self) -> Dict[str, Any]:
         """
         Tool definition for OpenAI computer use API.
-        
+
         Returns:
             Tool definition dict for use with OpenAI responses API
         """
@@ -130,18 +137,18 @@ class FleetPlaywrightWrapper:
             "type": "computer_use_preview",
             "display_width": self.display_width,
             "display_height": self.display_height,
-            "environment": "browser"
+            "environment": "browser",
         }
 
     async def screenshot(self) -> str:
         """
         Take a screenshot and return base64 encoded string.
-        
+
         Returns:
             Base64 encoded PNG screenshot
         """
         self._ensure_started()
-        
+
         png_bytes = await self._page.screenshot(full_page=False)
         return base64.b64encode(png_bytes).decode("utf-8")
 
@@ -153,34 +160,34 @@ class FleetPlaywrightWrapper:
     async def execute_computer_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute a computer action and return the result for OpenAI API.
-        
+
         Args:
             action: Computer action dict from OpenAI response
-            
+
         Returns:
             Result dict for computer_call_output
         """
         self._ensure_started()
-        
+
         action_type = action["type"]
         action_args = {k: v for k, v in action.items() if k != "type"}
-        
+
         print(f"Executing: {action_type}({action_args})")
-        
+
         # Execute the action
         if hasattr(self, f"_{action_type}"):
             method = getattr(self, f"_{action_type}")
             await method(**action_args)
         else:
             raise ValueError(f"Unsupported action type: {action_type}")
-        
+
         # Take screenshot after action
         screenshot_base64 = await self.screenshot()
-        
+
         return {
             "type": "input_image",
             "image_url": f"data:image/png;base64,{screenshot_base64}",
-            "current_url": self.get_current_url()
+            "current_url": self.get_current_url(),
         }
 
     # Computer action implementations
@@ -233,6 +240,7 @@ class FleetPlaywrightWrapper:
     async def _wait(self, ms: int = 1000) -> None:
         """Wait for specified milliseconds."""
         import asyncio
+
         await asyncio.sleep(ms / 1000)
 
     # Browser-specific actions
@@ -257,4 +265,27 @@ class FleetPlaywrightWrapper:
     async def _refresh(self) -> None:
         """Refresh the page."""
         self._ensure_started()
-        await self._page.reload() 
+        await self._page.reload()
+
+    # ------------------------------------------------------------------
+    # Public aliases (no leading underscore) expected by the Agent &
+    # OpenAI computer-use API. They forward directly to the underscored
+    # implementations above so the external interface matches the older
+    # BasePlaywrightComputer class.
+    # ------------------------------------------------------------------
+
+    # Mouse / keyboard actions
+    click = _click
+    double_click = _double_click
+    scroll = _scroll
+    type = _type  # noqa: A003 – shadowing built-in for API compatibility
+    keypress = _keypress
+    move = _move
+    drag = _drag
+    wait = _wait
+
+    # Browser navigation actions
+    goto = _goto
+    back = _back
+    forward = _forward
+    refresh = _refresh
