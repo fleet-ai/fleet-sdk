@@ -63,12 +63,64 @@ def validate_new_deal_creation(
 
 
 async def main():
-    env = await flt.env.get("4379cf6c")
-    response = await env.verify(validate_new_deal_creation)
-    print(f"Success: {response.success}")
-    print(f"Result: {response.result}")
-    print(f"Error: {response.error}")
-    print(f"Message: {response.message}")
+    # Create a new instance
+    print("Creating new Hubspot instance...")
+    env = await flt.env.make("hubspot:v1.2.7")
+    print(f"New Instance: {env.instance_id}")
+
+    try:
+        # Reset the instance
+        response = await env.reset(seed=42)
+        print(f"Reset response: {response}")
+
+        # Run verifier before insertion (should fail)
+        print("\nRunning verifier before insertion...")
+        response = await env.verify(validate_new_deal_creation)
+        print(f"Success: {response.success}")
+        print(f"Result: {response.result}")
+        print(f"Error: {response.error}")
+        print(f"Message: {response.message}")
+
+        # Insert the deal entry
+        print("\nInserting deal entry...")
+        insert_query = """
+        INSERT INTO entries (id, name, type, owner_id, createdDate, lastModifiedDate, createdAt, updatedAt, archivedAt, properties)
+        VALUES (
+            32302,
+            'testing',
+            'deal',
+            1,
+            '2025-07-10T01:32:01.089Z',
+            '2025-07-10T01:32:01.089Z',
+            '2025-07-10 01:32:01',
+            '2025-07-10 01:32:01',
+            NULL,
+            '{"amount":null,"closedate":"2025-08-09","close_date":"2025-08-09","dealstage":"appointmentscheduled","pipeline":"default","description":null,"priority":"medium","deal_stage_probability":null,"deal_type":"newbusiness","hs_createdate":"2025-07-10T01:32:01.089Z","hs_object_source":"INTEGRATION","hs_object_source_id":"14696758","hs_object_source_label":"INTEGRATION","hs_is_closed":"false","hs_is_closed_count":"0","hs_is_closed_lost":"false","hs_is_closed_won":"false","hs_is_deal_split":"false","hs_is_open_count":"1","hs_num_associated_active_deal_registrations":"0","hs_num_associated_deal_registrations":"0","hs_num_associated_deal_splits":"0","hs_num_of_associated_line_items":"0","hs_num_target_accounts":"0","hs_number_of_call_engagements":"0","hs_number_of_inbound_calls":"0","hs_number_of_outbound_calls":"0","hs_number_of_overdue_tasks":"0","num_associated_contacts":"0","num_notes":"0","hs_closed_amount":"0","hs_closed_amount_in_home_currency":"0","hs_closed_deal_close_date":"0","hs_closed_deal_create_date":"0","hs_closed_won_count":"0","hs_v2_date_entered_current_stage":"2025-07-10T01:32:01.089Z","hs_v2_time_in_current_stage":"2025-07-10T01:32:01.089Z","hs_duration":"1752111121089","hs_open_deal_create_date":"1752111121089","days_to_close":"29","hs_days_to_close_raw":"29.936098506944443"}'
+        )
+        """
+
+        db = env.db()
+        insert_result = await db.exec(insert_query)
+        print(f"Insert result: {insert_result}")
+
+        # Verify the insertion
+        print("\nVerifying insertion...")
+        query_result = await db.query("SELECT * FROM entries WHERE id = 32302")
+        print(f"Query result: {query_result}")
+
+        # Run verifier after insertion (should succeed)
+        print("\nRunning verifier after insertion...")
+        response = await env.verify(validate_new_deal_creation)
+        print(f"Success: {response.success}")
+        print(f"Result: {response.result}")
+        print(f"Error: {response.error}")
+        print(f"Message: {response.message}")
+
+    finally:
+        # Delete the instance
+        print("\nDeleting instance...")
+        await env.close()
+        print("Instance deleted.")
 
 
 if __name__ == "__main__":
