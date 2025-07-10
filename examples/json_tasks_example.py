@@ -47,6 +47,7 @@ async def main():
 
         for problem in problems:
             function_name = extract_function_name(problem["verifier_func"])
+            print(f"Verifying {function_name}...")
             response = await env.verify_raw(problem["verifier_func"], function_name)
             print(response)
     finally:
