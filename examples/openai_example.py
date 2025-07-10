@@ -214,7 +214,7 @@ async def main():
                 "content": "You have access to a clone of Hubspot. You can use the computer to navigate the browser and perform actions.",
             }
         ]
-        
+
         while True:
             try:
                 user_input = await ainput("> ")
@@ -229,7 +229,7 @@ async def main():
             except Exception as e:
                 print(f"Error during interaction: {e}")
                 # Continue the loop for other errors
-                
+
     except KeyboardInterrupt:
         print("\nInterrupted during setup")
     except Exception as e:
