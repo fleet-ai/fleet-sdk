@@ -1,4 +1,3 @@
-import asyncio
 import fleet as flt
 from fleet.verifiers import DatabaseSnapshot, IgnoreConfig, TASK_SUCCESSFUL_SCORE
 
@@ -62,20 +61,20 @@ def validate_new_deal_creation(
     return TASK_SUCCESSFUL_SCORE
 
 
-async def main():
+def main():
     # Create a new instance
     print("Creating new Hubspot instance...")
-    env = await flt.env.make("hubspot:v1.2.7")
+    env = flt.env.make("hubspot:v1.2.7")
     print(f"New Instance: {env.instance_id}")
 
     try:
         # Reset the instance
-        response = await env.reset(seed=42)
+        response = env.reset(seed=42)
         print(f"Reset response: {response}")
 
         # Run verifier before insertion (should fail)
         print("\nRunning verifier before insertion...")
-        response = await env.verify(validate_new_deal_creation)
+        response = env.verify(validate_new_deal_creation)
         print(f"Success: {response.success}")
         print(f"Result: {response.result}")
         print(f"Error: {response.error}")
@@ -100,17 +99,17 @@ async def main():
         """
 
         db = env.db()
-        insert_result = await db.exec(insert_query)
+        insert_result = db.exec(insert_query)
         print(f"Insert result: {insert_result}")
 
         # Verify the insertion
         print("\nVerifying insertion...")
-        query_result = await db.query("SELECT * FROM entries WHERE id = 32302")
+        query_result = db.query("SELECT * FROM entries WHERE id = 32302")
         print(f"Query result: {query_result}")
 
         # Run verifier after insertion (should succeed)
         print("\nRunning verifier after insertion...")
-        response = await env.verify(validate_new_deal_creation)
+        response = env.verify(validate_new_deal_creation)
         print(f"Success: {response.success}")
         print(f"Result: {response.result}")
         print(f"Error: {response.error}")
@@ -119,9 +118,9 @@ async def main():
     finally:
         # Delete the instance
         print("\nDeleting instance...")
-        await env.close()
+        env.close()
         print("Instance deleted.")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

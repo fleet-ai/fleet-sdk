@@ -1,7 +1,7 @@
 import base64
 from typing import List, Dict, Any
-from playwright.async_api import async_playwright, Browser, Page
-from .client import AsyncEnvironment
+from playwright.sync_api import sync_playwright, Browser, Page
+from .client import Environment
 
 
 # Key mapping for computer use actions
@@ -47,14 +47,14 @@ class FleetPlaywrightWrapper:
     Usage:
         instance = await fleet.env.make(env_key="hubspot", version="v1.2.7")
         browser = FleetPlaywrightWrapper(instance)
-        await browser.start()
+        browser.start()
 
         # Use browser methods
-        screenshot = await browser.screenshot()
+        screenshot = browser.screenshot()
         tools = [browser.openai_cua_tool]
 
         # Clean up when done
-        await browser.close()
+        browser.close()
     """
 
     def get_environment(self):
@@ -65,7 +65,7 @@ class FleetPlaywrightWrapper:
 
     def __init__(
         self,
-        env: AsyncEnvironment,
+        env: Environment,
         display_width: int = 1920,
         display_height: int = 1080,
     ):
@@ -86,35 +86,35 @@ class FleetPlaywrightWrapper:
         self._page: Page | None = None
         self._started = False
 
-    async def start(self):
+    def start(self):
         """Start the browser and establish connection."""
         if self._started:
             return
 
         # Start Playwright
-        self._playwright = await async_playwright().start()
+        self._playwright = sync_playwright().start()
 
         # Start browser on the Fleet instance
         print("Starting browser...")
-        await self.env.browser().start()
-        cdp = await self.env.browser().describe()
+        self.env.browser().start()
+        cdp = self.env.browser().describe()
 
         # Connect to browser
-        self._browser = await self._playwright.chromium.connect_over_cdp(
+        self._browser = self._playwright.chromium.connect_over_cdp(
             cdp.cdp_browser_url
         )
         self._page = self._browser.contexts[0].pages[0]
-        await self._page.set_viewport_size(
+        self._page.set_viewport_size(
             {"width": self.display_width, "height": self.display_height}
         )
 
         self._started = True
         print(f"Track agent: {cdp.cdp_devtools_url}")
 
-    async def close(self):
+    def close(self):
         """Close the browser connection."""
         if self._playwright:
-            await self._playwright.stop()
+            self._playwright.stop()
             self._playwright = None
             self._browser = None
             self._page = None
@@ -123,7 +123,7 @@ class FleetPlaywrightWrapper:
     def _ensure_started(self):
         """Ensure browser is started before operations."""
         if not self._started:
-            raise RuntimeError("Browser not started. Call await browser.start() first.")
+            raise RuntimeError("Browser not started. Call browser.start() first.")
 
     @property
     def openai_cua_tool(self) -> Dict[str, Any]:
@@ -140,7 +140,7 @@ class FleetPlaywrightWrapper:
             "environment": "browser",
         }
 
-    async def screenshot(self) -> str:
+    def screenshot(self) -> str:
         """
         Take a screenshot and return base64 encoded string.
 
@@ -149,7 +149,7 @@ class FleetPlaywrightWrapper:
         """
         self._ensure_started()
 
-        png_bytes = await self._page.screenshot(full_page=False)
+        png_bytes = self._page.screenshot(full_page=False)
         return base64.b64encode(png_bytes).decode("utf-8")
 
     def get_current_url(self) -> str:
@@ -157,7 +157,7 @@ class FleetPlaywrightWrapper:
         self._ensure_started()
         return self._page.url
 
-    async def execute_computer_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
+    def execute_computer_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute a computer action and return the result for OpenAI API.
 
@@ -177,12 +177,12 @@ class FleetPlaywrightWrapper:
         # Execute the action
         if hasattr(self, f"_{action_type}"):
             method = getattr(self, f"_{action_type}")
-            await method(**action_args)
+            method(**action_args)
         else:
             raise ValueError(f"Unsupported action type: {action_type}")
 
         # Take screenshot after action
-        screenshot_base64 = await self.screenshot()
+        screenshot_base64 = self.screenshot()
 
         return {
             "type": "input_image",
@@ -191,81 +191,80 @@ class FleetPlaywrightWrapper:
         }
 
     # Computer action implementations
-    async def _click(self, x: int, y: int, button: str = "left") -> None:
+    def _click(self, x: int, y: int, button: str = "left") -> None:
         """Click at coordinates."""
         self._ensure_started()
-        await self._page.mouse.click(x, y, button=button)
+        self._page.mouse.click(x, y, button=button)
 
-    async def _double_click(self, x: int, y: int) -> None:
+    def _double_click(self, x: int, y: int) -> None:
         """Double-click at coordinates."""
         self._ensure_started()
-        await self._page.mouse.dblclick(x, y)
+        self._page.mouse.dblclick(x, y)
 
-    async def _scroll(self, x: int, y: int, scroll_x: int, scroll_y: int) -> None:
+    def _scroll(self, x: int, y: int, scroll_x: int, scroll_y: int) -> None:
         """Scroll from coordinates."""
         self._ensure_started()
-        await self._page.mouse.move(x, y)
-        await self._page.evaluate(f"window.scrollBy({scroll_x}, {scroll_y})")
+        self._page.mouse.move(x, y)
+        self._page.evaluate(f"window.scrollBy({scroll_x}, {scroll_y})")
 
-    async def _type(self, text: str) -> None:
+    def _type(self, text: str) -> None:
         """Type text."""
         self._ensure_started()
-        await self._page.keyboard.type(text)
+        self._page.keyboard.type(text)
 
-    async def _keypress(self, keys: List[str]) -> None:
+    def _keypress(self, keys: List[str]) -> None:
         """Press key combination."""
         self._ensure_started()
         mapped_keys = [CUA_KEY_TO_PLAYWRIGHT_KEY.get(key.lower(), key) for key in keys]
         for key in mapped_keys:
-            await self._page.keyboard.down(key)
+            self._page.keyboard.down(key)
         for key in reversed(mapped_keys):
-            await self._page.keyboard.up(key)
+            self._page.keyboard.up(key)
 
-    async def _move(self, x: int, y: int) -> None:
+    def _move(self, x: int, y: int) -> None:
         """Move mouse to coordinates."""
         self._ensure_started()
-        await self._page.mouse.move(x, y)
+        self._page.mouse.move(x, y)
 
-    async def _drag(self, path: List[Dict[str, int]]) -> None:
+    def _drag(self, path: List[Dict[str, int]]) -> None:
         """Drag mouse along path."""
         self._ensure_started()
         if not path:
             return
-        await self._page.mouse.move(path[0]["x"], path[0]["y"])
-        await self._page.mouse.down()
+        self._page.mouse.move(path[0]["x"], path[0]["y"])
+        self._page.mouse.down()
         for point in path[1:]:
-            await self._page.mouse.move(point["x"], point["y"])
-        await self._page.mouse.up()
+            self._page.mouse.move(point["x"], point["y"])
+        self._page.mouse.up()
 
-    async def _wait(self, ms: int = 1000) -> None:
+    def _wait(self, ms: int = 1000) -> None:
         """Wait for specified milliseconds."""
-        import asyncio
-
-        await asyncio.sleep(ms / 1000)
+        import time
+        time.sleep(ms / 1000)
 
     # Browser-specific actions
-    async def _goto(self, url: str) -> None:
+    def _goto(self, url: str) -> None:
         """Navigate to URL."""
         self._ensure_started()
         try:
-            await self._page.goto(url)
+            self._page.goto(url)
         except Exception as e:
             print(f"Error navigating to {url}: {e}")
 
-    async def _back(self) -> None:
+    def _back(self) -> None:
         """Go back in browser history."""
         self._ensure_started()
-        await self._page.go_back()
+        self._page.go_back()
 
-    async def _forward(self) -> None:
+    def _forward(self) -> None:
         """Go forward in browser history."""
         self._ensure_started()
-        await self._page.go_forward()
+        self._page.go_forward()
 
-    async def _refresh(self) -> None:
+    def _refresh(self) -> None:
         """Refresh the page."""
         self._ensure_started()
-        await self._page.reload()
+        self._page.reload()
 
     # ------------------------------------------------------------------
     # Public aliases (no leading underscore) expected by the Agent &

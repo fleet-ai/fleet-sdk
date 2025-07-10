@@ -5,7 +5,6 @@ Fleet SDK Quickstart Example.
 This example demonstrates basic usage of the Fleet SDK for environment management.
 """
 
-import asyncio
 import logging
 from typing import Dict, Any
 
@@ -17,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-async def main():
+def main():
     """Main example function."""
     
     # Check API health
@@ -25,9 +24,9 @@ async def main():
     try:
         config = fleet.get_config()
         client = fleet.FleetAPIClient(config)
-        health = await client.health_check()
+        health = client.health_check()
         print(f"✅ API Status: {health.status}")
-        await client.close()
+        client.close()
     except Exception as e:
         print(f"❌ API Health Check failed: {e}")
         return
@@ -35,7 +34,7 @@ async def main():
     # 1. List available environments
     print("\n📋 Available environments:")
     try:
-        environments = await fleet.instance.list_envs()
+        environments = fleet.instance.list_envs()
         for env in environments:
             print(f"  - {env.env_key}: {env.name}")
             print(f"    Description: {env.description}")
@@ -48,13 +47,13 @@ async def main():
     # 2. Create a new environment instance
     print("\n🚀 Creating new environment...")
     try:
-        env = await fleet.instance.make("fira:v1.2.5", region="us-west-1")
+        env = fleet.instance.make("fira:v1.2.5", region="us-west-1")
         print(f"✅ Environment created with instance ID: {env.instance_id}")
         
         # Execute a simple action
         print("\n⚡ Executing a simple action...")
         action = {"type": "test", "data": {"message": "Hello Fleet!"}}
-        state, reward, done = await env.step(action)
+        state, reward, done = env.step(action)
         print(f"✅ Action executed successfully!")
         print(f"   Reward: {reward}")
         print(f"   Done: {done}")
@@ -63,7 +62,7 @@ async def main():
         # Check manager API health
         print("\n🏥 Checking manager API health...")
         try:
-            manager_health = await env.manager_health_check()
+            manager_health = env.manager_health_check()
             if manager_health:
                 print(f"✅ Manager API Status: {manager_health.status}")
                 print(f"   Service: {manager_health.service}")
@@ -75,7 +74,7 @@ async def main():
         
         # Clean up
         print("\n🧹 Cleaning up...")
-        await env.close()
+        env.close()
         print("✅ Environment closed")
         
     except Exception as e:
@@ -85,7 +84,7 @@ async def main():
     # 3. List running instances
     print("\n🏃 Listing running instances...")
     try:
-        instances = await fleet.instance.list_instances(status="running")
+        instances = fleet.instance.list_instances(status="running")
         if instances:
             print(f"Found {len(instances)} running instances:")
             for instance in instances:
@@ -99,24 +98,24 @@ async def main():
     print("\n🔗 Connecting to existing instance...")
     try:
         # Only get running instances
-        running_instances = await fleet.instance.list_instances(status="running")
+        running_instances = fleet.instance.list_instances(status="running")
         if running_instances:
             # Find a running instance that's not the one we just created/deleted
             target_instance = running_instances[0]
             print(f"Connecting to running instance: {target_instance.instance_id}")
             
-            env = await fleet.instance.get(target_instance.instance_id)
+            env = fleet.instance.get(target_instance.instance_id)
             print(f"✅ Connected to instance: {env.instance_id}")
             
             # Execute an action on the existing instance
             action = {"type": "ping", "data": {"timestamp": "2024-01-01T00:00:00Z"}}
-            state, reward, done = await env.step(action)
+            state, reward, done = env.step(action)
             print(f"✅ Action executed on existing instance!")
             print(f"   Reward: {reward}")
             print(f"   Done: {done}")
             
             # Clean up (this will delete the instance)
-            await env.close()
+            env.close()
             print("✅ Connection closed (instance deleted)")
         else:
             print("No running instances to connect to")
@@ -127,4 +126,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    main() 

@@ -24,7 +24,6 @@ Important: Nova Act typically creates its own browser instance. Integration with
 Fleet's CDP endpoint may not be fully supported in the current version.
 """
 
-import asyncio
 import fleet as flt
 import nova_act
 import os
@@ -117,8 +116,8 @@ def run_nova_examples(nova):
     nova.act("Take a screenshot of the current page")
 
 
-async def main():
-    """Main async function for Fleet operations."""
+def main():
+    """Main function for Fleet operations."""
     
     # Check for Nova Act API key
     nova_api_key = os.getenv("NOVA_ACT_API_KEY")
@@ -142,18 +141,18 @@ async def main():
     #     return
 
     # Initialize Fleet client
-    fleet = flt.AsyncFleet()
+    fleet = flt.Fleet()
     print("\n🚀 Initializing Fleet client...")
 
-    instance = await fleet.instance("05bd8217")
+    instance = fleet.instance("05bd8217")
 
     try:
         # Reset the environment to ensure clean state
         # print("🔄 Resetting environment...")
-        # await instance.env.reset()
+        # instance.env.reset()
 
         # Get browser resource from Fleet
-        browser = await instance.env.browser("cdp").describe()
+        browser = instance.env.browser("cdp").describe()
         print(f"🌐 CDP URL: {browser.url}")
         print(f"🔧 DevTools URL: {browser.devtools_url}")
 
@@ -170,7 +169,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
         print("\n\n⚠️  Script interrupted by user")
         print("Nova Act browser may still be running in the background.")
