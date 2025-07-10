@@ -141,9 +141,17 @@ class AsyncInstanceClient:
             if response.status_code != 200:
                 self._resources = []
                 return
-            self._resources = [
-                ResourceModel(**resource) for resource in response.json()
-            ]
+
+            # Handle both old and new response formats
+            response_data = response.json()
+            if isinstance(response_data, dict) and "resources" in response_data:
+                # Old format: {"resources": [...]}
+                resources_list = response_data["resources"]
+            else:
+                # New format: [...]
+                resources_list = response_data
+
+            self._resources = [ResourceModel(**resource) for resource in resources_list]
             for resource in self._resources:
                 if resource.type not in self._resources_state:
                     self._resources_state[resource.type.value] = {}
