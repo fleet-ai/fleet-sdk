@@ -8,7 +8,7 @@ import fleet as flt
 from nova_act import NovaAct, ActResult
 
 
-MAX_STEPS = 5
+MAX_STEPS = 30
 
 
 class Problem(TypedDict):
