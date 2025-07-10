@@ -1,7 +1,6 @@
 import asyncio
 from openai import AsyncOpenAI
 import fleet as flt
-import json
 
 client = AsyncOpenAI()
 
@@ -52,10 +51,14 @@ async def main():
                     result = await browser.execute_computer_action(action)
 
                 print("Computer action result:")
-                print(json.dumps(result, indent=2))
+                print(result)
     finally:
         await browser.close()
+        await instance.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nProgram terminated by user")

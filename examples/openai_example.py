@@ -194,15 +194,14 @@ async def ainput(prompt: str = "") -> str:
 
 
 async def main():
-    browser = None
+    # Create a Fleet environment instance
+    instance = await flt.env.make("hubspot")
+
+    # Create the Playwright wrapper
+    browser = flt.FleetPlaywrightWrapper(instance)
+    await browser.start()
+
     try:
-        # Create a Fleet environment instance
-        instance = await flt.env.make("hubspot")
-
-        # Create the Playwright wrapper
-        browser = flt.FleetPlaywrightWrapper(instance)
-        await browser.start()
-
         agent = Agent(browser, model="computer-use-preview", tools=[])
         items = [
             {
@@ -225,24 +224,13 @@ async def main():
             except Exception as e:
                 print(f"Error during interaction: {e}")
                 # Continue the loop for other errors
-
-    except KeyboardInterrupt:
-        print("\nInterrupted during setup")
-    except Exception as e:
-        print(f"Fatal error: {e}")
     finally:
-        if browser:
-            print("Closing browser...")
-            try:
-                await browser.close()
-                print("Browser closed successfully")
-            except Exception as e:
-                print(f"Error closing browser: {e}")
+        await browser.close()
+        await instance.close()
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        # This catches KeyboardInterrupt that might escape from asyncio.run
         print("\nProgram terminated by user")
