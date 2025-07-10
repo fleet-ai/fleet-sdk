@@ -59,7 +59,10 @@ async def main():
                 with NovaAct(starting_page=env.urls.app, headless=True) as nova:
                     return nova.act(problem["problem"], max_steps=MAX_STEPS)
 
-            await asyncio.to_thread(run_nova)
+            try:
+                await asyncio.to_thread(run_nova)
+            except Exception as e:
+                print(f"Error: {e}")
 
             function_name = extract_function_name(problem["verifier_func"])
             print(f"Verifying {function_name} ({problem['id']})...")
