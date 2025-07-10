@@ -23,7 +23,7 @@ from typing import Optional, List
 from .base import EnvironmentBase, AsyncWrapper, SyncWrapper
 from .models import InstanceRequest, InstanceRecord, Environment as EnvironmentModel
 
-from .manager import InstanceClient, AsyncInstanceClient, ResetRequest, ResetResponse
+from .instance import InstanceClient, AsyncInstanceClient, ResetRequest, ResetResponse
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
 from .resources.browser import AsyncBrowserResource

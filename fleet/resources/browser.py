@@ -1,5 +1,5 @@
 from typing import Optional
-from ..manager.models import (
+from ..instance.models import (
     Resource as ResourceModel,
     CDPDescribeResponse,
     ChromeStartRequest,
@@ -10,7 +10,7 @@ from .base import Resource
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..manager.base import AsyncWrapper
+    from ..instance.base import AsyncWrapper
 
 
 class AsyncBrowserResource(Resource):

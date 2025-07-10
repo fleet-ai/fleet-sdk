@@ -1,5 +1,5 @@
 from abc import ABC
-from ..manager.models import Resource as ResourceModel, ResourceType, ResourceMode
+from ..instance.models import Resource as ResourceModel, ResourceType, ResourceMode
 
 
 class Resource(ABC):

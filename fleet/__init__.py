@@ -21,7 +21,7 @@ from .exceptions import (
     FleetConfigurationError,
 )
 from .client import Fleet, AsyncFleet, InstanceRequest
-from .manager import (
+from .instance import (
     ResetRequest,
     ResetResponse,
     CDPDescribeResponse,
