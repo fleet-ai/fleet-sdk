@@ -39,7 +39,7 @@ async def main():
     if not file_path.exists():
         raise FileNotFoundError(f"Error: File '{args.json_file}' not found")
 
-    env = await flt.env.make("fira:v1.2.7")
+    env = await flt.env.make_async("fira:v1.2.7")
     print(f"New Instance: {env.urls.app}")
 
     successes = 0

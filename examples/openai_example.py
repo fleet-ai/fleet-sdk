@@ -1,11 +1,10 @@
-import asyncio
-from openai import AsyncOpenAI
+from openai import OpenAI
 import fleet as flt
 import json
 from typing import Callable
 
 
-client = AsyncOpenAI()
+client = OpenAI()
 
 
 def sanitize_message(msg: dict) -> dict:
@@ -50,7 +49,7 @@ class Agent:
         if self.debug:
             print(*args)
 
-    async def handle_item(self, item):
+    def handle_item(self, item):
         """Handle each item; may cause a computer action + screenshot."""
         if self.debug:
             print(f"Handling item of type: {item.get('type')}")
@@ -66,7 +65,7 @@ class Agent:
 
             if hasattr(self.computer, name):  # if function exists on computer, call it
                 method = getattr(self.computer, name)
-                await method(**args)
+                method(**args)
             return [
                 {
                     "type": "function_call_output",
@@ -83,9 +82,9 @@ class Agent:
                 print(f"{action_type}({action_args})")
 
             method = getattr(self.computer, action_type)
-            await method(**action_args)
+            method(**action_args)
 
-            screenshot_base64 = await self.computer.screenshot()
+            screenshot_base64 = self.computer.screenshot()
 
             # if user doesn't ack all safety checks exit with error
             pending_checks = item.get("pending_safety_checks", [])
@@ -114,7 +113,7 @@ class Agent:
             return [call_output]
         return []
 
-    async def run_full_turn(
+    def run_full_turn(
         self, input_items, print_steps=True, debug=False, show_images=False
     ):
         self.print_steps = print_steps
@@ -134,7 +133,7 @@ class Agent:
 
             clean_input = [_clean_item(m) for m in (input_items + new_items)]
 
-            response = await client.responses.create(
+            response = client.responses.create(
                 model=self.model,
                 input=clean_input,
                 tools=self.tools,
@@ -173,7 +172,7 @@ class Agent:
                 new_items.append(item)
 
                 # Next, perform any local side-effects (browser actions, etc.).
-                handled_items = await self.handle_item(item)
+                handled_items = self.handle_item(item)
 
                 # If the handler generated additional items (e.g. computer_call_output)
                 # we append those *immediately* so the order remains:
@@ -187,19 +186,13 @@ class Agent:
 tools = []
 
 
-async def ainput(prompt: str = "") -> str:
-    """Async version of input()"""
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, input, prompt)
-
-
-async def main():
+def main():
     # Create a Fleet environment instance
-    instance = await flt.env.make("hubspot")
+    instance = flt.env.make("hubspot")
 
     # Create the Playwright wrapper
     browser = flt.FleetPlaywrightWrapper(instance)
-    await browser.start()
+    browser.start()
 
     try:
         agent = Agent(browser, model="computer-use-preview", tools=[])
@@ -212,9 +205,9 @@ async def main():
 
         while True:
             try:
-                user_input = await ainput("> ")
+                user_input = input("> ")
                 items.append({"role": "user", "content": user_input})
-                output_items = await agent.run_full_turn(
+                output_items = agent.run_full_turn(
                     items, show_images=False, debug=False
                 )
                 items += output_items
@@ -225,9 +218,9 @@ async def main():
                 print(f"Error during interaction: {e}")
                 # Continue the loop for other errors
     finally:
-        await browser.close()
-        await instance.close()
+        browser.close()
+        instance.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

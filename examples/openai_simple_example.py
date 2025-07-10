@@ -1,15 +1,14 @@
-import asyncio
-from openai import AsyncOpenAI
+from openai import OpenAI
 import fleet as flt
 
-client = AsyncOpenAI()
+client = OpenAI()
 
 
-async def main():
-    instance = await flt.env.make("hubspot")
+def main():
+    instance = flt.env.make("hubspot")
 
     browser = flt.FleetPlaywrightWrapper(instance)
-    await browser.start()
+    browser.start()
 
     try:
         width, height = browser.get_dimensions()
@@ -22,7 +21,7 @@ async def main():
             }
         ]
 
-        response = await client.responses.create(
+        response = client.responses.create(
             model="computer-use-preview",
             input=[
                 {
@@ -41,21 +40,21 @@ async def main():
             if response.output[0].type == "computer_call":
                 action = response.output[0].action
                 if action.type == "screenshot":
-                    screenshot_base64 = await browser.screenshot()
+                    screenshot_base64 = browser.screenshot()
                     result = {
                         "type": "input_image",
                         "image_url": f"data:image/png;base64,{screenshot_base64}",
                         "current_url": browser.get_current_url(),
                     }
                 else:
-                    result = await browser.execute_computer_action(action)
+                    result = browser.execute_computer_action(action)
 
                 print("Computer action result:")
                 print(result)
     finally:
-        await browser.close()
-        await instance.close()
+        browser.close()
+        instance.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

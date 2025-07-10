@@ -4,7 +4,7 @@ from nova_act import NovaAct, ActResult
 
 
 async def main():
-    instance = await flt.env.make("hubspot")
+    instance = await flt.env.make_async("hubspot:v1.2.7")
     cdp_url = await instance.browser().cdp_url()
 
     loop = asyncio.get_event_loop()

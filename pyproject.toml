@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fleet-python"
-version = "0.2.3"
+version = "0.2.4"
 description = "Python SDK for Fleet environments"
 authors = [
     {name = "Fleet AI", email = "nic@fleet.so"},
@@ -38,6 +38,7 @@ dev = [
     "isort>=5.0.0",
     "mypy>=1.0.0",
     "ruff>=0.1.0",
+    "unasync>=0.6.0",
 ]
 playwright = [
     "playwright>=1.40.0",
@@ -72,4 +73,24 @@ target-version = "py38"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"] 
+testpaths = ["tests"]
+
+[tool.unasync]
+[tool.unasync.files]
+"fleet/_async/" = "fleet/"
+
+[tool.unasync.replacements]
+"AsyncClient" = "Client"
+"AsyncInstanceClient" = "InstanceClient"
+"AsyncWrapper" = "SyncWrapper"
+"AsyncResource" = "Resource"
+"AsyncSQLiteResource" = "SQLiteResource"
+"AsyncBrowserResource" = "BrowserResource"
+"async def" = "def"
+"await " = ""
+"async with" = "with"
+"async for" = "for"
+"__aenter__" = "__enter__"
+"__aexit__" = "__exit__"
+"asyncio" = "time"
+"aiohttp" = "httpx" 
