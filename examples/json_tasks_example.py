@@ -52,7 +52,7 @@ async def main():
             await env.reset()
 
             def run_nova() -> ActResult:
-                with NovaAct(starting_page=env.urls.app) as nova:
+                with NovaAct(starting_page=env.urls.app, headless=True) as nova:
                     return nova.act(problem["problem"])
 
             await asyncio.to_thread(run_nova)
