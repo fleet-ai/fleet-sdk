@@ -112,7 +112,9 @@ class AsyncFleet:
         response = await self.client.request(
             "POST", "/v1/env/instances", json=request.model_dump()
         )
-        return AsyncEnvironment(**response.json())
+        instance = AsyncEnvironment(**response.json())
+        await instance.instance.load()
+        return instance
 
     async def instances(self, status: Optional[str] = None) -> List[AsyncEnvironment]:
         params = {}

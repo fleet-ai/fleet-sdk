@@ -112,7 +112,9 @@ class Fleet:
         response = self.client.request(
             "POST", "/v1/env/instances", json=request.model_dump()
         )
-        return Environment(**response.json())
+        instance = Environment(**response.json())
+        instance.instance.load()
+        return instance
 
     def instances(self, status: Optional[str] = None) -> List[Environment]:
         params = {}
