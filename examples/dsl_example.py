@@ -1,5 +1,7 @@
+import asyncio
 from typing import Optional
 import json
+import fleet as flt
 from fleet.verifiers import DatabaseSnapshot, IgnoreConfig, TASK_SUCCESSFUL_SCORE
 
 
@@ -61,3 +63,13 @@ def validate_new_deal_creation(
     before.diff(after, ignore_config).expect_only(expected_changes)
 
     return TASK_SUCCESSFUL_SCORE
+
+
+async def main():
+    env = await flt.env.get("fdfab7ca")
+    score = await env.verify(validate_new_deal_creation)
+    print(f"Score: {score}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

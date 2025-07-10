@@ -3,6 +3,7 @@
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import asyncio
 import httpx
+import inspect
 import time
 import logging
 from urllib.parse import urlparse
@@ -107,9 +108,14 @@ class AsyncInstanceClient:
             for resources_by_name in self._resources_state.values()
             for resource in resources_by_name.values()
         ]
-    
-    async def verify(self, validator: Callable[[DatabaseSnapshot, DatabaseSnapshot], int]) -> int:
-        pass
+
+    async def verify(
+        self, validator: Callable[[DatabaseSnapshot, DatabaseSnapshot], int]
+    ) -> int:
+        validator_source = inspect.getsource(validator)
+        print(validator_source)
+
+        return 0
 
     async def _load_resources(self) -> None:
         if self._resources is None:

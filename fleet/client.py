@@ -176,7 +176,7 @@ class AsyncFleet:
     async def instance(self, instance_id: str) -> AsyncEnvironment:
         response = await self.client.request("GET", f"/v1/env/instances/{instance_id}")
         instance = AsyncEnvironment(**response.json())
-        await instance.env.load()
+        await instance.instance.load()
         return instance
 
     async def delete(self, instance_id: str) -> InstanceRecord:
