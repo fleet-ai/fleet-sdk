@@ -1,7 +1,6 @@
 """Fleet SDK Environment Module."""
 
-from .client import InstanceClient, ValidatorType
-from .._async.instance.client import AsyncInstanceClient
+from .client import AsyncInstanceClient, ValidatorType
 from .models import (
     ResetRequest,
     ResetResponse,
@@ -14,7 +13,6 @@ from .models import (
 
 __all__ = [
     "ValidatorType",
-    "InstanceClient",
     "AsyncInstanceClient",
     "ResetRequest",
     "ResetResponse",

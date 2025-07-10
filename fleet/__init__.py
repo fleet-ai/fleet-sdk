@@ -20,8 +20,11 @@ from .exceptions import (
     FleetTimeoutError,
     FleetConfigurationError,
 )
-from .client import Fleet, AsyncFleet, InstanceRequest
+from .client import Fleet, Environment
+from ._async.client import AsyncFleet, AsyncEnvironment
+from .models import InstanceRequest
 from .instance import (
+    InstanceClient,
     AsyncInstanceClient,
     ResetRequest,
     ResetResponse,
@@ -49,7 +52,10 @@ __all__ = [
     "FleetTimeoutError",
     "FleetConfigurationError",
     "Fleet",
+    "Environment",
     "AsyncFleet",
+    "AsyncEnvironment",
+    "InstanceClient",
     "AsyncInstanceClient",
     "InstanceRequest",
     "ResetRequest",

@@ -8,15 +8,15 @@ import time
 import logging
 from urllib.parse import urlparse
 
-from ..resources.sqlite import SQLiteResource
-from ..resources.browser import BrowserResource
+from ..resources.sqlite import AsyncSQLiteResource
+from ..resources.browser import AsyncBrowserResource
 from ..resources.base import Resource
 
-from ..verifiers import DatabaseSnapshot
+from ...verifiers import DatabaseSnapshot
 
 from ..exceptions import FleetEnvironmentError, FleetAPIError
 
-from .base import SyncWrapper
+from .base import AsyncWrapper
 from .models import (
     ResetRequest,
     ResetResponse,
@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
 
 
 RESOURCE_TYPES = {
-    ResourceType.db: SQLiteResource,
-    ResourceType.cdp: BrowserResource,
+    ResourceType.db: AsyncSQLiteResource,
+    ResourceType.cdp: AsyncBrowserResource,
 }
 
 ValidatorType = Callable[
@@ -42,29 +42,29 @@ ValidatorType = Callable[
 ]
 
 
-class InstanceClient:
+class AsyncInstanceClient:
     def __init__(
         self,
         url: str,
-        httpx_client: Optional[httpx.Client] = None,
+        httpx_client: Optional[httpx.AsyncClient] = None,
     ):
         self.base_url = url
-        self.client = SyncWrapper(
+        self.client = AsyncWrapper(
             url=self.base_url,
-            httpx_client=httpx_client or httpx.Client(timeout=60.0),
+            httpx_client=httpx_client or httpx.AsyncClient(timeout=60.0),
         )
         self._resources: Optional[List[ResourceModel]] = None
         self._resources_state: Dict[str, Dict[str, Resource]] = {
             resource_type.value: {} for resource_type in ResourceType
         }
 
-    def load(self) -> None:
-        self._load_resources()
+    async def load(self) -> None:
+        await self._load_resources()
 
-    def reset(
+    async def reset(
         self, reset_request: Optional[ResetRequest] = None
     ) -> ResetResponse:
-        response = self.client.request(
+        response = await self.client.request(
             "POST", "/reset", json=reset_request.model_dump() if reset_request else None
         )
         return ResetResponse(**response.json())
@@ -73,7 +73,7 @@ class InstanceClient:
         url = urlparse(uri)
         return self._resources_state[url.scheme][url.netloc]
 
-    def db(self, name: str) -> SQLiteResource:
+    def db(self, name: str) -> AsyncSQLiteResource:
         """
         Returns an AsyncSQLiteResource object for the given SQLite database name.
 
@@ -83,32 +83,32 @@ class InstanceClient:
         Returns:
             An AsyncSQLiteResource object for the given SQLite database name
         """
-        return SQLiteResource(
+        return AsyncSQLiteResource(
             self._resources_state[ResourceType.db.value][name], self.client
         )
 
-    def browser(self, name: str) -> BrowserResource:
-        return BrowserResource(
+    def browser(self, name: str) -> AsyncBrowserResource:
+        return AsyncBrowserResource(
             self._resources_state[ResourceType.cdp.value][name], self.client
         )
 
-    def resources(self) -> List[Resource]:
-        self._load_resources()
+    async def resources(self) -> List[Resource]:
+        await self._load_resources()
         return [
             resource
             for resources_by_name in self._resources_state.values()
             for resource in resources_by_name.values()
         ]
 
-    def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
+    async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
         function_code = inspect.getsource(validator)
         function_name = validator.__name__
-        return self.verify_raw(function_code, function_name)
+        return await self.verify_raw(function_code, function_name)
 
-    def verify_raw(
+    async def verify_raw(
         self, function_code: str, function_name: str
     ) -> ExecuteFunctionResponse:
-        response = self.client.request(
+        response = await self.client.request(
             "POST",
             "/execute_verifier_function",
             json=ExecuteFunctionRequest(
@@ -118,9 +118,9 @@ class InstanceClient:
         )
         return ExecuteFunctionResponse(**response.json())
 
-    def _load_resources(self) -> None:
+    async def _load_resources(self) -> None:
         if self._resources is None:
-            response = self.client.request("GET", "/resources")
+            response = await self.client.request("GET", "/resources")
             if response.status_code != 200:
                 self._resources = []
                 return
@@ -142,7 +142,7 @@ class InstanceClient:
                     RESOURCE_TYPES[resource.type](resource, self.client)
                 )
 
-    def step(self, action: Dict[str, Any]) -> Tuple[Dict[str, Any], float, bool]:
+    async def step(self, action: Dict[str, Any]) -> Tuple[Dict[str, Any], float, bool]:
         """Execute one step in the environment."""
         if not self._instance_id:
             raise FleetEnvironmentError(
@@ -155,20 +155,20 @@ class InstanceClient:
 
             # Execute action through instance manager API
             # This is a placeholder - actual implementation depends on the manager API spec
-            state, reward, done = self._execute_action(action)
+            state, reward, done = await self._execute_action(action)
 
             return state, reward, done
 
         except Exception as e:
             raise FleetEnvironmentError(f"Failed to execute step: {e}")
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Close the environment and clean up resources."""
         try:
             # Delete instance if it exists
             if self._instance_id:
                 try:
-                    self._client.delete_instance(self._instance_id)
+                    await self._client.delete_instance(self._instance_id)
                     logger.info(f"Deleted instance: {self._instance_id}")
                 except FleetAPIError as e:
                     logger.warning(f"Failed to delete instance: {e}")
@@ -178,20 +178,20 @@ class InstanceClient:
 
             # Close manager client
             if self._manager_client:
-                self._manager_client.close()
+                await self._manager_client.close()
                 self._manager_client = None
 
             # Close API client
-            self._client.close()
+            await self._client.close()
 
         except Exception as e:
             logger.error(f"Error closing environment: {e}")
 
-    def manager_health_check(self) -> Optional[HealthResponse]:
-        response = self.client.request("GET", "/health")
+    async def manager_health_check(self) -> Optional[HealthResponse]:
+        response = await self.client.request("GET", "/health")
         return HealthResponse(**response.json())
 
-    def _wait_for_instance_ready(self, timeout: float = 300.0) -> None:
+    async def _wait_for_instance_ready(self, timeout: float = 300.0) -> None:
         """Wait for instance to be ready.
 
         Args:
@@ -201,7 +201,7 @@ class InstanceClient:
 
         while time.time() - start_time < timeout:
             try:
-                instance = self._client.get_instance(self._instance_id)
+                instance = await self._client.get_instance(self._instance_id)
                 self._instance_response = instance
 
                 if instance.status == "running":
@@ -214,20 +214,20 @@ class InstanceClient:
                     )
 
                 # Wait before checking again
-                asyncio.sleep(5)
+                await asyncio.sleep(5)
 
             except FleetAPIError as e:
                 if time.time() - start_time >= timeout:
                     raise FleetEnvironmentError(
                         f"Timeout waiting for instance to be ready: {e}"
                     )
-                asyncio.sleep(5)
+                await asyncio.sleep(5)
 
         raise FleetEnvironmentError(
             f"Timeout waiting for instance {self._instance_id} to be ready"
         )
 
-    def _execute_action(
+    async def _execute_action(
         self, action: Dict[str, Any]
     ) -> Tuple[Dict[str, Any], float, bool]:
         """Execute an action through the instance manager API.
@@ -242,7 +242,7 @@ class InstanceClient:
             Tuple of (state, reward, done)
         """
         # Ensure manager client is available
-        self._ensure_manager_client()
+        await self._ensure_manager_client()
 
         # TODO: In the future, this would use the manager API to execute actions
         # For example: await self._manager_client.log_action(action)
@@ -269,10 +269,10 @@ class InstanceClient:
             "status": "running",
         }
 
-    def __enter__(self):
+    async def __aenter__(self):
         """Async context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
-        self.close()
+        await self.close()
