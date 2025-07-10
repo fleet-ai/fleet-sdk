@@ -26,10 +26,9 @@ async def main():
     sqlite = await env.state("sqlite://current").describe()
     print("SQLite:", sqlite)
 
-    await env.browser().start(width=1920, height=1080)
-
-    print("CDP URL:", await env.browser().cdp_url)
-    print("Devtools URL:", await env.browser().devtools_url)
+    browser = env.browser()
+    print("CDP URL:", await browser.cdp_url())
+    print("Devtools URL:", await browser.devtools_url())
 
     # Delete the instance
     await env.close()
