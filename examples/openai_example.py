@@ -113,7 +113,7 @@ class Agent:
             return [call_output]
         return []
 
-    async def run_full_turn(
+    def run_full_turn(
         self, input_items, print_steps=True, debug=False, show_images=False
     ):
         self.print_steps = print_steps
@@ -133,7 +133,7 @@ class Agent:
 
             clean_input = [_clean_item(m) for m in (input_items + new_items)]
 
-            response = await client.responses.create(
+            response = client.responses.create(
                 model=self.model,
                 input=clean_input,
                 tools=self.tools,
@@ -172,7 +172,7 @@ class Agent:
                 new_items.append(item)
 
                 # Next, perform any local side-effects (browser actions, etc.).
-                handled_items = await self.handle_item(item)
+                handled_items = self.handle_item(item)
 
                 # If the handler generated additional items (e.g. computer_call_output)
                 # we append those *immediately* so the order remains:
