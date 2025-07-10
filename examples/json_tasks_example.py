@@ -2,9 +2,10 @@ import re
 import asyncio
 import argparse
 import json
-from typing import TypedDict
+from typing import TypedDict, List
 from pathlib import Path
 import fleet as flt
+from nova_act import NovaAct, ActResult
 
 
 class Problem(TypedDict):
@@ -37,19 +38,35 @@ async def main():
 
     env = await flt.env.make("fira:v1.2.7")
     print(f"New Instance: {env.urls.app}")
+    successes = 0
 
     try:
         with open(args.json_file, "r") as f:
             data = json.load(f)
-        problems = data["problems"]
+        problems: List[Problem] = data["problems"]
 
         print(f"Loaded {len(problems)} problems from '{args.json_file}'")
 
-        for problem in problems:
+        for i, problem in enumerate(problems):
+            print(f"Solving problem {i + 1} of {len(problems)}: {problem['id']}")
+            await env.reset()
+
+            def run_nova() -> ActResult:
+                with NovaAct(starting_page=env.urls.app) as nova:
+                    return nova.act(problem["problem"])
+
+            await asyncio.to_thread(run_nova)
+
             function_name = extract_function_name(problem["verifier_func"])
-            print(f"Verifying {function_name}...")
+            print(f"Verifying {function_name} ({problem['id']})...")
             response = await env.verify_raw(problem["verifier_func"], function_name)
             print(response)
+            if response.success:
+                successes += 1
+
+        print(f"Successes: {successes}")
+        print(f"Total: {len(problems)}")
+        print(f"Success rate: {successes / len(problems)}")
     finally:
         await env.close()
 
