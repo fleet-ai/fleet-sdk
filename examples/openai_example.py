@@ -19,10 +19,6 @@ def sanitize_message(msg: dict) -> dict:
     return msg
 
 
-def pp(obj):
-    print(json.dumps(obj, indent=4))
-
-
 class Agent:
     def __init__(
         self,
@@ -52,7 +48,7 @@ class Agent:
 
     def debug_print(self, *args):
         if self.debug:
-            pp(*args)
+            print(*args)
 
     async def handle_item(self, item):
         """Handle each item; may cause a computer action + screenshot."""
