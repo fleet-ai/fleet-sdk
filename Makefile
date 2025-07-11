@@ -53,6 +53,8 @@ unasync:
 		'async for': 'for', \
 		'__aenter__': '__enter__', \
 		'__aexit__': '__exit__', \
+		'playwright.async_api': 'playwright.sync_api', \
+		'async_playwright': 'sync_playwright', \
 		'asyncio.sleep': 'time.sleep', \
 		'httpx.AsyncClient': 'httpx.Client', \
 	}); \

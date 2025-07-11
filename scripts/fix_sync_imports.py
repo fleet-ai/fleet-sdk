@@ -25,6 +25,23 @@ def fix_file(filepath: Path) -> bool:
     # Fix any remaining AsyncFleetPlaywrightWrapper references in docstrings
     content = content.replace('AsyncFleetPlaywrightWrapper', 'FleetPlaywrightWrapper')
     
+    # Fix playwright imports for sync version
+    if 'playwright' in str(filepath):
+        # Fix the import statement
+        content = content.replace('from playwright.async_api import sync_playwright, Browser, Page', 
+                                  'from playwright.sync_api import sync_playwright, Browser, Page')
+        content = content.replace('from playwright.async_api import async_playwright, Browser, Page', 
+                                  'from playwright.sync_api import sync_playwright, Browser, Page')
+        # Replace any remaining async_playwright references
+        content = content.replace('async_playwright', 'sync_playwright')
+        # Fix await statements in docstrings
+        content = content.replace('await browser.start()', 'browser.start()')
+        content = content.replace('await browser.screenshot()', 'browser.screenshot()')
+        content = content.replace('await browser.close()', 'browser.close()')
+        content = content.replace('await fleet.env.make(', 'fleet.env.make(')
+        # Fix error message
+        content = content.replace('Call await browser.start() first', 'Call browser.start() first')
+    
     if content != original:
         filepath.write_text(content)
         return True

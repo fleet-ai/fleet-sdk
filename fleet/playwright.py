@@ -1,6 +1,6 @@
 import base64
 from typing import List, Dict, Any
-from playwright.async_api import async_playwright, Browser, Page
+from playwright.sync_api import sync_playwright, Browser, Page
 from .client import Environment
 
 
@@ -45,16 +45,16 @@ class FleetPlaywrightWrapper:
     - Integration with OpenAI computer use API
 
     Usage:
-        instance = await fleet.env.make(env_key="hubspot", version="v1.2.7")
+        instance = fleet.env.make(env_key="hubspot", version="v1.2.7")
         browser = FleetPlaywrightWrapper(instance)
-        await browser.start()
+        browser.start()
 
         # Use browser methods
-        screenshot = await browser.screenshot()
+        screenshot = browser.screenshot()
         tools = [browser.openai_cua_tool]
 
         # Clean up when done
-        await browser.close()
+        browser.close()
     """
 
     def get_environment(self):
@@ -92,7 +92,7 @@ class FleetPlaywrightWrapper:
             return
 
         # Start Playwright
-        self._playwright = async_playwright().start()
+        self._playwright = sync_playwright().start()
 
         # Start browser on the Fleet instance
         print("Starting browser...")
@@ -123,7 +123,7 @@ class FleetPlaywrightWrapper:
     def _ensure_started(self):
         """Ensure browser is started before operations."""
         if not self._started:
-            raise RuntimeError("Browser not started. Call await browser.start() first.")
+            raise RuntimeError("Browser not started. Call browser.start() first.")
 
     @property
     def openai_cua_tool(self) -> Dict[str, Any]:
