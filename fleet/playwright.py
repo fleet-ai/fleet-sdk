@@ -45,16 +45,16 @@ class FleetPlaywrightWrapper:
     - Integration with OpenAI computer use API
 
     Usage:
-        instance = await fleet.env.make(env_key="hubspot", version="v1.2.7")
+        instance = fleet.env.make(env_key="hubspot", version="v1.2.7")
         browser = FleetPlaywrightWrapper(instance)
-        await browser.start()
+        browser.start()
 
         # Use browser methods
-        screenshot = await browser.screenshot()
+        screenshot = browser.screenshot()
         tools = [browser.openai_cua_tool]
 
         # Clean up when done
-        await browser.close()
+        browser.close()
     """
 
     def get_environment(self):
@@ -100,7 +100,9 @@ class FleetPlaywrightWrapper:
         cdp = self.env.browser().describe()
 
         # Connect to browser
-        self._browser = self._playwright.chromium.connect_over_cdp(cdp.cdp_browser_url)
+        self._browser = self._playwright.chromium.connect_over_cdp(
+            cdp.cdp_browser_url
+        )
         self._page = self._browser.contexts[0].pages[0]
         self._page.set_viewport_size(
             {"width": self.display_width, "height": self.display_height}
@@ -121,7 +123,7 @@ class FleetPlaywrightWrapper:
     def _ensure_started(self):
         """Ensure browser is started before operations."""
         if not self._started:
-            raise RuntimeError("Browser not started. Call await browser.start() first.")
+            raise RuntimeError("Browser not started. Call browser.start() first.")
 
     @property
     def openai_cua_tool(self) -> Dict[str, Any]:
@@ -237,9 +239,8 @@ class FleetPlaywrightWrapper:
 
     def _wait(self, ms: int = 1000) -> None:
         """Wait for specified milliseconds."""
-        import asyncio
 
-        asyncio.sleep(ms / 1000)
+        time.sleep(ms / 1000)
 
     # Browser-specific actions
     def _goto(self, url: str) -> None:
