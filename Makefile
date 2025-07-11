@@ -56,7 +56,7 @@ unasync:
 		'asyncio.sleep': 'time.sleep', \
 		'httpx.AsyncClient': 'httpx.Client', \
 	}); \
-	files = [os.path.join(root, f) for root, dirs, files in os.walk('fleet/_async/') for f in files if f.endswith('.py')]; \
+	files = [os.path.join(root, f) for root, dirs, files in os.walk('fleet/_async/') for f in files if f.endswith('.py') and f != '__init__.py']; \
 	unasync.unasync_files(files, [rule])"
 	@python scripts/fix_sync_imports.py
 	@echo "✅ Sync code generated successfully!"
