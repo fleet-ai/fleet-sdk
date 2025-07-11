@@ -41,21 +41,24 @@ unasync:
 		'AsyncResource': 'Resource', \
 		'AsyncSQLiteResource': 'SQLiteResource', \
 		'AsyncBrowserResource': 'BrowserResource', \
+		'AsyncFleetPlaywrightWrapper': 'FleetPlaywrightWrapper', \
 		'make_async': 'make', \
 		'list_envs_async': 'list_envs', \
 		'get_async': 'get', \
 		'async def': 'def', \
+		'from fleet.verifiers': 'from ..verifiers', \
+		'await asyncio.sleep': 'time.sleep', \
 		'await ': '', \
 		'async with': 'with', \
 		'async for': 'for', \
 		'__aenter__': '__enter__', \
 		'__aexit__': '__exit__', \
-		'import asyncio': 'import time', \
 		'asyncio.sleep': 'time.sleep', \
 		'httpx.AsyncClient': 'httpx.Client', \
 	}); \
 	files = [os.path.join(root, f) for root, dirs, files in os.walk('fleet/_async/') for f in files if f.endswith('.py')]; \
 	unasync.unasync_files(files, [rule])"
+	@python scripts/fix_sync_imports.py
 	@echo "✅ Sync code generated successfully!"
 
 validate-tag:

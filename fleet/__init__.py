@@ -25,7 +25,6 @@ from ._async.client import AsyncFleet, AsyncEnvironment
 from .models import InstanceRequest
 from .instance import (
     InstanceClient,
-    AsyncInstanceClient,
     ResetRequest,
     ResetResponse,
     CDPDescribeResponse,
@@ -33,6 +32,7 @@ from .instance import (
     ChromeStartResponse,
     ChromeStatusResponse,
 )
+from ._async.instance import AsyncInstanceClient
 from .verifiers import (
     DatabaseSnapshot,
     IgnoreConfig,

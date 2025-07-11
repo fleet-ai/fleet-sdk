@@ -1,7 +1,6 @@
-"""Fleet SDK Async Instance Client."""
+"""Fleet SDK Instance Client."""
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
-import asyncio
 import httpx
 import inspect
 import time
@@ -75,13 +74,13 @@ class InstanceClient:
 
     def db(self, name: str) -> SQLiteResource:
         """
-        Returns an AsyncSQLiteResource object for the given SQLite database name.
+        Returns an SQLite database resource for the given database name.
 
         Args:
             name: The name of the SQLite database to return
 
         Returns:
-            An AsyncSQLiteResource object for the given SQLite database name
+            An SQLite database resource for the given database name
         """
         return SQLiteResource(
             self._resources_state[ResourceType.db.value][name], self.client
@@ -214,14 +213,14 @@ class InstanceClient:
                     )
 
                 # Wait before checking again
-                asyncio.sleep(5)
+                time.sleep(5)
 
             except FleetAPIError as e:
                 if time.time() - start_time >= timeout:
                     raise FleetEnvironmentError(
                         f"Timeout waiting for instance to be ready: {e}"
                     )
-                asyncio.sleep(5)
+                time.sleep(5)
 
         raise FleetEnvironmentError(
             f"Timeout waiting for instance {self._instance_id} to be ready"

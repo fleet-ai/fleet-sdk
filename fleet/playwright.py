@@ -1,6 +1,6 @@
 import base64
 from typing import List, Dict, Any
-from playwright.sync_api import sync_playwright, Browser, Page
+from playwright.async_api import async_playwright, Browser, Page
 from .client import Environment
 
 
@@ -92,7 +92,7 @@ class FleetPlaywrightWrapper:
             return
 
         # Start Playwright
-        self._playwright = sync_playwright().start()
+        self._playwright = async_playwright().start()
 
         # Start browser on the Fleet instance
         print("Starting browser...")
@@ -100,7 +100,9 @@ class FleetPlaywrightWrapper:
         cdp = self.env.browser().describe()
 
         # Connect to browser
-        self._browser = self._playwright.chromium.connect_over_cdp(cdp.cdp_browser_url)
+        self._browser = self._playwright.chromium.connect_over_cdp(
+            cdp.cdp_browser_url
+        )
         self._page = self._browser.contexts[0].pages[0]
         self._page.set_viewport_size(
             {"width": self.display_width, "height": self.display_height}
@@ -237,9 +239,8 @@ class FleetPlaywrightWrapper:
 
     def _wait(self, ms: int = 1000) -> None:
         """Wait for specified milliseconds."""
-        import asyncio
 
-        asyncio.sleep(ms / 1000)
+        time.sleep(ms / 1000)
 
     # Browser-specific actions
     def _goto(self, url: str) -> None:

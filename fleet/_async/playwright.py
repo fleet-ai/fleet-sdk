@@ -34,7 +34,7 @@ CUA_KEY_TO_PLAYWRIGHT_KEY = {
 }
 
 
-class FleetPlaywrightWrapper:
+class AsyncFleetPlaywrightWrapper:
     """
     A wrapper that adds Playwright browser automation to Fleet environment instances.
 
@@ -46,7 +46,7 @@ class FleetPlaywrightWrapper:
 
     Usage:
         instance = await fleet.env.make(env_key="hubspot", version="v1.2.7")
-        browser = FleetPlaywrightWrapper(instance)
+        browser = AsyncFleetPlaywrightWrapper(instance)
         await browser.start()
 
         # Use browser methods

@@ -1,4 +1,4 @@
-"""Fleet SDK Async Instance Client."""
+"""Fleet SDK Instance Client."""
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import asyncio
@@ -12,7 +12,7 @@ from ..resources.sqlite import AsyncSQLiteResource
 from ..resources.browser import AsyncBrowserResource
 from ..resources.base import Resource
 
-from ...verifiers import DatabaseSnapshot
+from fleet.verifiers import DatabaseSnapshot
 
 from ..exceptions import FleetEnvironmentError, FleetAPIError
 
@@ -75,13 +75,13 @@ class AsyncInstanceClient:
 
     def db(self, name: str) -> AsyncSQLiteResource:
         """
-        Returns an AsyncSQLiteResource object for the given SQLite database name.
+        Returns an SQLite database resource for the given database name.
 
         Args:
             name: The name of the SQLite database to return
 
         Returns:
-            An AsyncSQLiteResource object for the given SQLite database name
+            An SQLite database resource for the given database name
         """
         return AsyncSQLiteResource(
             self._resources_state[ResourceType.db.value][name], self.client
