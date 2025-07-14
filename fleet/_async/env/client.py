@@ -3,8 +3,8 @@ from ..models import Environment as EnvironmentModel
 from typing import List, Optional
 
 
-async def make_async(env_key: str) -> AsyncEnvironment:
-    return await AsyncFleet().make(env_key)
+async def make_async(env_key: str, region: Optional[str] = None) -> AsyncEnvironment:
+    return await AsyncFleet().make(env_key, region=region)
 
 
 async def list_envs_async() -> List[EnvironmentModel]:

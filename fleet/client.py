@@ -99,7 +99,9 @@ class Fleet:
         response = self.client.request("GET", f"/v1/env/{env_key}")
         return EnvironmentModel(**response.json())
 
-    def make(self, env_key: str) -> Environment:
+    def make(
+        self, env_key: str, region: Optional[str] = None
+    ) -> Environment:
         if ":" in env_key:
             env_key_part, version = env_key.split(":", 1)
             if not version.startswith("v"):
@@ -108,7 +110,7 @@ class Fleet:
             env_key_part = env_key
             version = None
 
-        request = InstanceRequest(env_key=env_key_part, version=version)
+        request = InstanceRequest(env_key=env_key_part, version=version, region=region)
         response = self.client.request(
             "POST", "/v1/env/instances", json=request.model_dump()
         )

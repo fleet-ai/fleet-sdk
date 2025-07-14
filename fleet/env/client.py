@@ -3,8 +3,8 @@ from ..models import Environment as EnvironmentModel
 from typing import List, Optional
 
 
-def make(env_key: str) -> Environment:
-    return Fleet().make(env_key)
+def make(env_key: str, region: Optional[str] = None) -> Environment:
+    return Fleet().make(env_key, region=region)
 
 
 def list_envs() -> List[EnvironmentModel]:
