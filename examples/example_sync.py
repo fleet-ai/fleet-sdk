@@ -11,6 +11,9 @@ def main():
     environments = flt.env.list_envs()
     print("Environments:", len(environments))
 
+    instances = flt.env.list_instances()
+    print("Instances:", len(instances))
+
     # Create a new instance
     env = flt.env.make("hubspot:v1.2.7")
     print("New Instance:", env.instance_id)
