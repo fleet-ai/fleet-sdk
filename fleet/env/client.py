@@ -11,7 +11,7 @@ def list_envs() -> List[EnvironmentModel]:
     return Fleet().list_envs()
 
 
-def list_instances_async(status: Optional[str] = None) -> List[Environment]:
+def list_instances(status: Optional[str] = None) -> List[Environment]:
     return Fleet().instances(status=status)
 
 

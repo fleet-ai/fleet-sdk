@@ -44,6 +44,7 @@ unasync:
 		'AsyncFleetPlaywrightWrapper': 'FleetPlaywrightWrapper', \
 		'make_async': 'make', \
 		'list_envs_async': 'list_envs', \
+		'list_instances_async': 'list_instances', \
 		'get_async': 'get', \
 		'async def': 'def', \
 		'from fleet.verifiers': 'from ..verifiers', \
