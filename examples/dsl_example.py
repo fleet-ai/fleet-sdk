@@ -1,6 +1,9 @@
 import asyncio
 import fleet as flt
 from fleet.verifiers import DatabaseSnapshot, IgnoreConfig, TASK_SUCCESSFUL_SCORE
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def validate_new_deal_creation(

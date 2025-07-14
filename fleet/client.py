@@ -126,8 +126,12 @@ class Fleet:
 
     def instance(self, instance_id: str) -> Environment:
         response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
-        return Environment(**response.json())
+        instance = Environment(**response.json())
+        instance.instance.load()
+        return instance
 
     def delete(self, instance_id: str) -> InstanceRecord:
-        response = self.client.request("DELETE", f"/v1/env/instances/{instance_id}")
+        response = self.client.request(
+            "DELETE", f"/v1/env/instances/{instance_id}"
+        )
         return InstanceRecord(**response.json())
