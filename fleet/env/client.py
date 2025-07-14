@@ -1,6 +1,6 @@
 from ..client import Fleet, Environment
 from ..models import Environment as EnvironmentModel
-from typing import List
+from typing import List, Optional
 
 
 def make(env_key: str) -> Environment:
@@ -9,6 +9,10 @@ def make(env_key: str) -> Environment:
 
 def list_envs() -> List[EnvironmentModel]:
     return Fleet().list_envs()
+
+
+def list_instances_async(status: Optional[str] = None) -> List[Environment]:
+    return Fleet().instances(status=status)
 
 
 def get(instance_id: str) -> Environment:
