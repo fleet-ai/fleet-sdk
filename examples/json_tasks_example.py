@@ -6,6 +6,9 @@ from typing import TypedDict, List
 from pathlib import Path
 import fleet as flt
 from nova_act import NovaAct, ActResult
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 MAX_STEPS = 30

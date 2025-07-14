@@ -2,6 +2,9 @@
 """Example demonstrating browser control with Fleet Manager Client."""
 
 import fleet as flt
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def main():

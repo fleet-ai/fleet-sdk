@@ -2,6 +2,9 @@ from openai import OpenAI
 import fleet as flt
 import json
 from typing import Callable
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 client = OpenAI()

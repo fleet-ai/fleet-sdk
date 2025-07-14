@@ -3,6 +3,9 @@
 
 import asyncio
 import fleet as flt
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 async def main():

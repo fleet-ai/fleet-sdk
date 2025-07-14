@@ -39,6 +39,7 @@ dev = [
     "mypy>=1.0.0",
     "ruff>=0.1.0",
     "unasync>=0.6.0",
+    "python-dotenv>=1.1.1",
 ]
 playwright = [
     "playwright>=1.40.0",
