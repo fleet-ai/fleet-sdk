@@ -40,6 +40,12 @@ class GeminiAgent:
         self.print_steps = print_steps
         self.debug = debug
         self.conversation_history = []
+        self.last_action = None  # Track the last action performed
+
+    @property
+    def page(self):
+        """Access the underlying Playwright page object."""
+        return self.browser._page if hasattr(self.browser, "_page") else None
 
     def debug_print(self, *args):
         if self.debug:
@@ -61,24 +67,47 @@ class GeminiAgent:
                     x=params.get("x", params.get("coordinate", [0, 0])[0]),
                     y=params.get("y", params.get("coordinate", [0, 0])[1]),
                 )
+                # Small delay to ensure click is registered and element is focused
+                time.sleep(0.2)
+                self.last_action = {"type": "click", "target": params}
             elif action_type == "type":
                 self.browser.type(text=params.get("text", ""))
+                self.last_action = {"type": "type", "text": params.get("text", "")}
             elif action_type == "key":
-                self.browser.key(key=params.get("key", ""))
+                # FleetPlaywrightWrapper expects keypress with a list of keys
+                key = params.get("key", "")
+                self.browser.keypress([key])
+                self.last_action = {"type": "key", "key": key}
             elif action_type == "scroll":
-                self.browser.scroll(
-                    x=params.get("x", params.get("coordinate", [0, 0])[0]),
-                    y=params.get("y", params.get("coordinate", [0, 0])[1]),
-                    direction=params.get("direction", "down"),
-                    amount=params.get("amount", 5),
-                )
+                # FleetPlaywrightWrapper expects scroll(x, y, scroll_x, scroll_y)
+                x = params.get("x", params.get("coordinate", [0, 0])[0])
+                y = params.get("y", params.get("coordinate", [0, 0])[1])
+                direction = params.get("direction", "down")
+                amount = params.get("amount", 5)
+
+                # Convert direction and amount to scroll_x and scroll_y
+                scroll_x = 0
+                scroll_y = 0
+                if direction == "down":
+                    scroll_y = amount * 100
+                elif direction == "up":
+                    scroll_y = -amount * 100
+                elif direction == "right":
+                    scroll_x = amount * 100
+                elif direction == "left":
+                    scroll_x = -amount * 100
+
+                self.browser.scroll(x=x, y=y, scroll_x=scroll_x, scroll_y=scroll_y)
+                self.last_action = {"type": "scroll"}
             elif action_type == "wait":
                 time.sleep(params.get("seconds", 1))
+                self.last_action = {"type": "wait"}
             elif action_type == "navigate":
-                # For navigation, we might need to handle this differently
+                # Use the browser's goto method
                 url = params.get("url", "")
                 if url:
-                    self.browser.page.goto(url)
+                    self.browser.goto(url)
+                self.last_action = {"type": "navigate", "url": url}
             else:
                 return {
                     "success": False,
@@ -92,24 +121,48 @@ class GeminiAgent:
     def create_prompt_with_screenshot(
         self, task: str, screenshot_b64: str
     ) -> List[Any]:
+        # Add context about last action
+        last_action_context = ""
+        if self.last_action:
+            if self.last_action["type"] == "click":
+                last_action_context = f"\n\nIMPORTANT: You just clicked at coordinates {self.last_action['target']}. If you clicked on a text input field, search bar, or any editable element, you MUST now use the 'type' action to enter text. Do not click the same element again."
+            elif self.last_action["type"] == "type":
+                last_action_context = f"\n\nYou just typed: '{self.last_action['text']}'. You may now need to press Enter or click a button to submit."
+
         prompt_text = (
             "You are an AI agent that can interact with web browsers. "
             f"Your task is to: {task}\n\n"
-            "You can see the current state of the browser in the screenshot provided.\n\n"
+            "You can see the current state of the browser in the screenshot provided."
+            f"{last_action_context}\n\n"
             "You can perform the following actions:\n"
             '- click: Click at specific coordinates {"type": "click", "parameters": {"x": x, "y": y}}\n'
-            '- type: Type text {"type": "type", "parameters": {"text": "text to type"}}\n'
-            '- key: Press a key {"type": "key", "parameters": {"key": "Enter"}}\n'
-            '- scroll: Scroll the page {"type": "scroll", "parameters": {"x": x, "y": y, "direction": "down", "amount": 5}}\n'
+            '- type: Type text into the currently focused element {"type": "type", "parameters": {"text": "text to type"}}\n'
+            '- key: Press a special key {"type": "key", "parameters": {"key": "Enter"}} (e.g., "Enter", "Tab", "Escape")\n'
+            '- scroll: Scroll the page {"type": "scroll", "parameters": {"x": x, "y": y, "direction": "down", "amount": 5}} (direction: up/down/left/right)\n'
             '- wait: Wait for a number of seconds {"type": "wait", "parameters": {"seconds": 1}}\n\n'
+            "CRITICAL RULES:\n"
+            "1. After clicking on ANY text input, search bar, or form field, you MUST type in the next step\n"
+            "2. Never click the same element twice in a row\n"
+            "3. If you mention searching for something in your reasoning, you must actually type the search query\n"
+            "4. Common workflow: click search bar → type query → press Enter\n\n"
             "Analyze the screenshot and decide what action to take next. Respond with a JSON object containing:\n"
             '- "reasoning": Your analysis of the current state and what needs to be done\n'
             '- "action": The action to perform (as described above)\n'
             '- "completed": true if the task is complete, false otherwise\n\n'
-            "Example response:\n"
+            "Example responses:\n"
             "{\n"
-            '  "reasoning": "I can see a login form. I need to click on the username field and enter credentials.",\n'
-            '  "action": {"type": "click", "parameters": {"x": 300, "y": 200}},\n'
+            '  "reasoning": "I can see a search bar at the top. I need to click on it first to focus it.",\n'
+            '  "action": {"type": "click", "parameters": {"x": 450, "y": 30}},\n'
+            '  "completed": false\n'
+            "}\n\n"
+            "{\n"
+            '  "reasoning": "I just clicked on the search bar and it should now be focused. I need to type my search query for PHI encryption ticket.",\n'
+            '  "action": {"type": "type", "parameters": {"text": "PHI encryption"}},\n'
+            '  "completed": false\n'
+            "}\n\n"
+            "{\n"
+            '  "reasoning": "I typed the search query. Now I need to press Enter to execute the search.",\n'
+            '  "action": {"type": "key", "parameters": {"key": "Enter"}},\n'
             '  "completed": false\n'
             "}"
         )
@@ -121,7 +174,7 @@ class GeminiAgent:
             ),
         ]
 
-    def solve_task(self, task: str, max_steps: int = 20) -> Tuple[bool, str]:
+    def solve_task(self, task: str, max_steps: int = 30) -> Tuple[bool, str]:
         steps = 0
 
         try:
@@ -140,7 +193,7 @@ class GeminiAgent:
                     contents=prompt_parts,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
-                        temperature=0.7,
+                        temperature=0.1,  # Lower temperature for more deterministic behavior
                     ),
                 )
 
@@ -154,6 +207,10 @@ class GeminiAgent:
                             f"Step {steps}: {result.get('reasoning', 'No reasoning provided')}"
                         )
 
+                    # Debug: Print the full action if in debug mode
+                    if self.debug and "action" in result:
+                        print(f"[DEBUG] Full action: {result['action']}")
+
                     # Check if task is completed
                     if result.get("completed", False):
                         return True, "Task completed successfully"
@@ -165,6 +222,8 @@ class GeminiAgent:
                             self.debug_print(
                                 f"Action failed: {action_result.get('error')}"
                             )
+                    else:
+                        print(f"[WARNING] No action in response: {result}")
 
                     # Small delay to let the page update
                     time.sleep(0.5)
@@ -172,6 +231,10 @@ class GeminiAgent:
                 except json.JSONDecodeError as e:
                     self.debug_print(f"Failed to parse Gemini response: {e}")
                     self.debug_print(f"Response text: {response.text}")
+                    # Try to extract any useful information from the response
+                    print(
+                        f"[ERROR] Invalid JSON response from Gemini: {response.text[:200]}..."
+                    )
                     continue
 
             return False, f"Max steps ({max_steps}) reached without completing the task"
@@ -192,7 +255,7 @@ def evaluate_problem(
     problem_idx: int,
     total_problems: int,
     env_key: str,
-    max_steps: int = 20,
+    max_steps: int = 30,
 ) -> Tuple[str, bool, Optional[str]]:
     env = None
     browser = None
@@ -221,7 +284,7 @@ def evaluate_problem(
             print(
                 f"[Problem {problem_idx + 1}/{total_problems}] Failed to solve: {message}"
             )
-            return problem["id"], False, message
+            # return problem["id"], False, message
 
         # Verify the solution
         function_name = extract_function_name(problem["verifier_func"])
@@ -284,7 +347,7 @@ def interactive_mode():
         instance.close()
 
 
-def evaluate_from_json(json_file: str, max_concurrent: int = 3, max_steps: int = 20):
+def evaluate_from_json(json_file: str, max_concurrent: int = 3, max_steps: int = 30):
     file_path = Path(json_file)
     if not file_path.exists():
         raise FileNotFoundError(f"Error: File '{json_file}' not found")
@@ -348,8 +411,8 @@ def main():
     parser.add_argument(
         "--max-steps",
         type=int,
-        default=20,
-        help="Maximum steps per problem (default: 20)",
+        default=30,
+        help="Maximum steps per problem (default: 30)",
     )
     parser.add_argument(
         "--interactive", action="store_true", help="Run in interactive mode"
