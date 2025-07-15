@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class AsyncEnvironment(EnvironmentBase):
     def __init__(self, httpx_client: Optional[httpx.AsyncClient] = None, **kwargs):
         super().__init__(**kwargs)
-        self._httpx_client = httpx_client or httpx.AsyncClient(timeout=60.0)
+        self._httpx_client = httpx_client or httpx.AsyncClient(timeout=180.0)
         self._instance: Optional[AsyncInstanceClient] = None
 
     @property
@@ -84,7 +84,7 @@ class AsyncFleet:
         base_url: Optional[str] = None,
         httpx_client: Optional[httpx.AsyncClient] = None,
     ):
-        self._httpx_client = httpx_client or httpx.AsyncClient(timeout=60.0)
+        self._httpx_client = httpx_client or httpx.AsyncClient(timeout=180.0)
         self.client = AsyncWrapper(
             api_key=api_key,
             base_url=base_url,

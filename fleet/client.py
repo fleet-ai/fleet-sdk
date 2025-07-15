@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class Environment(EnvironmentBase):
     def __init__(self, httpx_client: Optional[httpx.Client] = None, **kwargs):
         super().__init__(**kwargs)
-        self._httpx_client = httpx_client or httpx.Client(timeout=60.0)
+        self._httpx_client = httpx_client or httpx.Client(timeout=180.0)
         self._instance: Optional[InstanceClient] = None
 
     @property
@@ -84,7 +84,7 @@ class Fleet:
         base_url: Optional[str] = None,
         httpx_client: Optional[httpx.Client] = None,
     ):
-        self._httpx_client = httpx_client or httpx.Client(timeout=60.0)
+        self._httpx_client = httpx_client or httpx.Client(timeout=180.0)
         self.client = SyncWrapper(
             api_key=api_key,
             base_url=base_url,
