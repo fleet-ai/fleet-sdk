@@ -11,8 +11,10 @@ def list_envs() -> List[EnvironmentModel]:
     return Fleet().list_envs()
 
 
-def list_instances(status: Optional[str] = None) -> List[Environment]:
-    return Fleet().instances(status=status)
+def list_instances(
+    status: Optional[str] = None, region: Optional[str] = None
+) -> List[Environment]:
+    return Fleet().instances(status=status, region=region)
 
 
 def get(instance_id: str) -> Environment:

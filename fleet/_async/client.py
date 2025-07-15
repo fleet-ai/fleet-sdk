@@ -118,10 +118,14 @@ class AsyncFleet:
         await instance.instance.load()
         return instance
 
-    async def instances(self, status: Optional[str] = None) -> List[AsyncEnvironment]:
+    async def instances(
+        self, status: Optional[str] = None, region: Optional[str] = None
+    ) -> List[AsyncEnvironment]:
         params = {}
         if status:
             params["status"] = status
+        if region:
+            params["region"] = region
 
         response = await self.client.request("GET", "/v1/env/instances", params=params)
         return [AsyncEnvironment(**instance_data) for instance_data in response.json()]

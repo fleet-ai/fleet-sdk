@@ -118,10 +118,14 @@ class Fleet:
         instance.instance.load()
         return instance
 
-    def instances(self, status: Optional[str] = None) -> List[Environment]:
+    def instances(
+        self, status: Optional[str] = None, region: Optional[str] = None
+    ) -> List[Environment]:
         params = {}
         if status:
             params["status"] = status
+        if region:
+            params["region"] = region
 
         response = self.client.request("GET", "/v1/env/instances", params=params)
         return [Environment(**instance_data) for instance_data in response.json()]
