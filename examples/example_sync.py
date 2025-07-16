@@ -11,7 +11,7 @@ def main():
     environments = flt.env.list_envs()
     print("Environments:", len(environments))
 
-    instances = flt.env.list_instances()
+    instances = flt.env.list_instances(status="running")
     print("Instances:", len(instances))
 
     # Create a new instance
