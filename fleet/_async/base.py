@@ -16,7 +16,7 @@ class BaseWrapper:
             raise ValueError("api_key is required")
         self.api_key = api_key
         if base_url is None:
-            base_url = "https://fleet.new"
+            base_url = "https://orchestrator.fleetai.com"
         self.base_url = base_url
 
     def get_headers(self) -> Dict[str, str]:
