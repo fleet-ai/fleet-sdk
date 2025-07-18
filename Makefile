@@ -44,6 +44,7 @@ unasync:
 		'AsyncFleetPlaywrightWrapper': 'FleetPlaywrightWrapper', \
 		'make_async': 'make', \
 		'list_envs_async': 'list_envs', \
+		'list_regions_async': 'list_regions', \
 		'list_instances_async': 'list_instances', \
 		'get_async': 'get', \
 		'async def': 'def', \

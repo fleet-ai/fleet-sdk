@@ -9,6 +9,9 @@ load_dotenv()
 
 
 async def main():
+    regions = await flt.env.list_regions_async()
+    print("Regions:", regions)
+
     environments = await flt.env.list_envs_async()
     print("Environments:", len(environments))
 

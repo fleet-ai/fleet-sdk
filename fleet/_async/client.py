@@ -95,6 +95,10 @@ class AsyncFleet:
         response = await self.client.request("GET", "/v1/env/")
         return [EnvironmentModel(**env_data) for env_data in response.json()]
 
+    async def list_regions(self) -> List[str]:
+        response = await self.client.request("GET", "/v1/regions")
+        return response.json()
+
     async def environment(self, env_key: str) -> EnvironmentModel:
         response = await self.client.request("GET", f"/v1/env/{env_key}")
         return EnvironmentModel(**response.json())
