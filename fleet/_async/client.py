@@ -28,6 +28,7 @@ from .instance import (
     ResetResponse,
     ExecuteFunctionResponse,
 )
+from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
 from .resources.browser import AsyncBrowserResource
@@ -66,6 +67,14 @@ class AsyncEnvironment(EnvironmentBase):
 
     async def close(self) -> InstanceRecord:
         return await AsyncFleet().delete(self.instance_id)
+
+    async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
+        return await self.instance.verify(validator)
+
+    async def verify_raw(
+        self, function_code: str, function_name: str
+    ) -> ExecuteFunctionResponse:
+        return await self.instance.verify_raw(function_code, function_name)
 
 
 

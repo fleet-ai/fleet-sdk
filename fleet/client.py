@@ -28,6 +28,7 @@ from .instance import (
     ResetResponse,
     ExecuteFunctionResponse,
 )
+from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import SQLiteResource
 from .resources.browser import BrowserResource
@@ -66,6 +67,14 @@ class Environment(EnvironmentBase):
 
     def close(self) -> InstanceRecord:
         return Fleet().delete(self.instance_id)
+
+    def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
+        return self.instance.verify(validator)
+
+    def verify_raw(
+        self, function_code: str, function_name: str
+    ) -> ExecuteFunctionResponse:
+        return self.instance.verify_raw(function_code, function_name)
 
 
 

@@ -12,6 +12,8 @@ from ..resources.sqlite import AsyncSQLiteResource
 from ..resources.browser import AsyncBrowserResource
 from ..resources.base import Resource
 
+from fleet.verifiers import DatabaseSnapshot
+
 from ..exceptions import FleetEnvironmentError, FleetAPIError
 
 from .base import AsyncWrapper
@@ -35,6 +37,11 @@ RESOURCE_TYPES = {
     ResourceType.db: AsyncSQLiteResource,
     ResourceType.cdp: AsyncBrowserResource,
 }
+
+ValidatorType = Callable[
+    [DatabaseSnapshot, DatabaseSnapshot, Optional[str]],
+    int,
+]
 
 
 
@@ -96,6 +103,24 @@ class AsyncInstanceClient:
             for resources_by_name in self._resources_state.values()
             for resource in resources_by_name.values()
         ]
+
+    async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
+        function_code = inspect.getsource(validator)
+        function_name = validator.__name__
+        return await self.verify_raw(function_code, function_name)
+
+    async def verify_raw(
+        self, function_code: str, function_name: str
+    ) -> ExecuteFunctionResponse:
+        response = await self.client.request(
+            "POST",
+            "/execute_verifier_function",
+            json=ExecuteFunctionRequest(
+                function_code=function_code,
+                function_name=function_name,
+            ).model_dump(),
+        )
+        return ExecuteFunctionResponse(**response.json())
 
 
 
