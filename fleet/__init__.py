@@ -21,60 +21,44 @@ from .exceptions import (
     FleetConfigurationError,
 )
 from .client import Fleet, Environment
-from ._async.client import AsyncFleet, AsyncEnvironment
-from .models import InstanceRequest
-from .instance import (
-    InstanceClient,
-    ResetRequest,
-    ResetResponse,
-    CDPDescribeResponse,
-    ChromeStartRequest,
-    ChromeStartResponse,
-    ChromeStatusResponse,
-)
-from ._async.instance import AsyncInstanceClient
+from .models import InstanceRecord
+from .instance.models import Resource, ResetResponse
 from .verifiers import (
+    verifier,
+    SyncVerifiedFunction,
     DatabaseSnapshot,
     IgnoreConfig,
     SnapshotDiff,
     TASK_SUCCESSFUL_SCORE,
 )
+
+# Create a module-level env attribute for convenient access
 from . import env
 
-# Optional playwright integration
-try:
-    from .playwright import FleetPlaywrightWrapper
-    _PLAYWRIGHT_AVAILABLE = True
-except ImportError:
-    FleetPlaywrightWrapper = None
-    _PLAYWRIGHT_AVAILABLE = False
+__version__ = "0.1.0"
 
-__version__ = "0.1.1"
 __all__ = [
-    "env",
-    "FleetError",
-    "FleetAPIError",
-    "FleetTimeoutError",
-    "FleetConfigurationError",
+    # Core classes
     "Fleet",
     "Environment",
-    "AsyncFleet",
-    "AsyncEnvironment",
-    "InstanceClient",
-    "AsyncInstanceClient",
-    "InstanceRequest",
-    "ResetRequest",
+    # Models
+    "InstanceRecord", 
+    "Resource",
     "ResetResponse",
-    "CDPDescribeResponse",
-    "ChromeStartRequest",
-    "ChromeStartResponse",
-    "ChromeStatusResponse",
+    # Exceptions
+    "FleetError",
+    "FleetAPIError", 
+    "FleetTimeoutError",
+    "FleetConfigurationError",
+    # Verifiers
+    "verifier",
+    "SyncVerifiedFunction",
     "DatabaseSnapshot",
-    "IgnoreConfig",
+    "IgnoreConfig", 
     "SnapshotDiff",
     "TASK_SUCCESSFUL_SCORE",
+    # Environment module
+    "env",
+    # Version
+    "__version__",
 ]
-
-# Add playwright wrapper to exports if available
-if _PLAYWRIGHT_AVAILABLE:
-    __all__.append("FleetPlaywrightWrapper")

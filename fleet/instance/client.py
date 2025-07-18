@@ -11,8 +11,6 @@ from ..resources.sqlite import SQLiteResource
 from ..resources.browser import BrowserResource
 from ..resources.base import Resource
 
-from ..verifiers import DatabaseSnapshot
-
 from ..exceptions import FleetEnvironmentError, FleetAPIError
 
 from .base import SyncWrapper
@@ -35,10 +33,7 @@ RESOURCE_TYPES = {
     ResourceType.cdp: BrowserResource,
 }
 
-ValidatorType = Callable[
-    [DatabaseSnapshot, DatabaseSnapshot, Optional[str]],
-    int,
-]
+
 
 
 class InstanceClient:
@@ -99,23 +94,7 @@ class InstanceClient:
             for resource in resources_by_name.values()
         ]
 
-    def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
-        function_code = inspect.getsource(validator)
-        function_name = validator.__name__
-        return self.verify_raw(function_code, function_name)
 
-    def verify_raw(
-        self, function_code: str, function_name: str
-    ) -> ExecuteFunctionResponse:
-        response = self.client.request(
-            "POST",
-            "/execute_verifier_function",
-            json=ExecuteFunctionRequest(
-                function_code=function_code,
-                function_name=function_name,
-            ).model_dump(),
-        )
-        return ExecuteFunctionResponse(**response.json())
 
     def _load_resources(self) -> None:
         if self._resources is None:
