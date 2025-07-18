@@ -49,6 +49,15 @@ class FleetRateLimitError(FleetAPIError):
         super().__init__(message, status_code=429)
 
 
+class FleetInstanceLimitError(FleetAPIError):
+    """Exception raised when team instance limit is exceeded."""
+    
+    def __init__(self, message: str = "Instance limit exceeded", running_instances: Optional[int] = None, instance_limit: Optional[int] = None):
+        super().__init__(message, status_code=429)
+        self.running_instances = running_instances
+        self.instance_limit = instance_limit
+
+
 class FleetEnvironmentError(FleetError):
     """Exception raised when environment operations fail."""
     
