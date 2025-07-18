@@ -139,3 +139,20 @@ class ExecuteFunctionResponse(BaseModel):
     result: Optional[Any] = None
     error: Optional[str] = None
     message: str
+
+
+class ExecuteVerifierRemoteRequest(BaseModel):
+    bundle_data: str  # base64 encoded zip bundle
+    args: List[Any]
+    kwargs: Dict[str, Any]
+    timeout: Optional[int] = 30
+    env_context: Optional[Dict[str, Any]] = None
+
+
+class ExecuteVerifierRemoteResponse(BaseModel):
+    success: bool
+    result: Optional[Any] = None
+    error: Optional[Dict[str, Any]] = None
+    bundle_hash: Optional[str] = None
+    execution_time_ms: Optional[int] = None
+    cache_hit: Optional[bool] = None

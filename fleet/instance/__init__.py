@@ -1,6 +1,6 @@
 """Fleet SDK Environment Module."""
 
-from .client import InstanceClient, ValidatorType
+from .client import InstanceClient
 from .models import (
     ResetRequest,
     ResetResponse,
@@ -12,7 +12,6 @@ from .models import (
 )
 
 __all__ = [
-    "ValidatorType",
     "InstanceClient",
     "ResetRequest",
     "ResetResponse",

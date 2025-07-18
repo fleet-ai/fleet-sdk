@@ -12,8 +12,6 @@ from ..resources.sqlite import AsyncSQLiteResource
 from ..resources.browser import AsyncBrowserResource
 from ..resources.base import Resource
 
-from fleet.verifiers import DatabaseSnapshot
-
 from ..exceptions import FleetEnvironmentError, FleetAPIError
 
 from .base import AsyncWrapper
@@ -25,6 +23,8 @@ from .models import (
     HealthResponse,
     ExecuteFunctionRequest,
     ExecuteFunctionResponse,
+    ExecuteVerifierRemoteRequest,
+    ExecuteVerifierRemoteResponse,
 )
 
 
@@ -36,10 +36,7 @@ RESOURCE_TYPES = {
     ResourceType.cdp: AsyncBrowserResource,
 }
 
-ValidatorType = Callable[
-    [DatabaseSnapshot, DatabaseSnapshot, Optional[str]],
-    int,
-]
+
 
 
 class AsyncInstanceClient:
@@ -100,23 +97,7 @@ class AsyncInstanceClient:
             for resource in resources_by_name.values()
         ]
 
-    async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
-        function_code = inspect.getsource(validator)
-        function_name = validator.__name__
-        return await self.verify_raw(function_code, function_name)
 
-    async def verify_raw(
-        self, function_code: str, function_name: str
-    ) -> ExecuteFunctionResponse:
-        response = await self.client.request(
-            "POST",
-            "/execute_verifier_function",
-            json=ExecuteFunctionRequest(
-                function_code=function_code,
-                function_name=function_name,
-            ).model_dump(),
-        )
-        return ExecuteFunctionResponse(**response.json())
 
     async def _load_resources(self) -> None:
         if self._resources is None:
@@ -166,6 +147,40 @@ class AsyncInstanceClient:
     async def manager_health_check(self) -> Optional[HealthResponse]:
         response = await self.client.request("GET", "/health")
         return HealthResponse(**response.json())
+
+    async def execute_verifier_remote(
+        self, 
+        bundle_data: bytes,
+        args: tuple,
+        kwargs: dict,
+        timeout: Optional[int] = 30
+    ) -> ExecuteVerifierRemoteResponse:
+        """Execute a verifier function remotely using a bundle."""
+        import base64
+        
+        # Convert bundle bytes to base64
+        bundle_b64 = base64.b64encode(bundle_data).decode('utf-8')
+        
+        # Create request
+        request = ExecuteVerifierRemoteRequest(
+            bundle_data=bundle_b64,
+            args=list(args),
+            kwargs=kwargs,
+            timeout=timeout,
+            env_context={
+                "instance_id": self.base_url,  # This will need to be improved
+                "manager_url": self.base_url
+            }
+        )
+        
+        # Make API call
+        response = await self.client.request(
+            "POST",
+            "/v1/verifiers/execute",
+            json=request.model_dump()
+        )
+        
+        return ExecuteVerifierRemoteResponse(**response.json())
 
     async def __aenter__(self):
         """Async context manager entry."""
