@@ -95,6 +95,10 @@ class Fleet:
         response = self.client.request("GET", "/v1/env/")
         return [EnvironmentModel(**env_data) for env_data in response.json()]
 
+    def list_regions(self) -> List[str]:
+        response = self.client.request("GET", "/v1/env/regions")
+        return response.json()
+
     def environment(self, env_key: str) -> EnvironmentModel:
         response = self.client.request("GET", f"/v1/env/{env_key}")
         return EnvironmentModel(**response.json())
