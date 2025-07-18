@@ -18,6 +18,8 @@ from .exceptions import (
     FleetError,
     FleetAPIError,
     FleetTimeoutError,
+    FleetRateLimitError,
+    FleetInstanceLimitError,
     FleetConfigurationError,
 )
 from .client import Fleet, Environment
