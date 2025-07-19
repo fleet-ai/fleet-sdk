@@ -29,7 +29,7 @@ from .instance import (
     ValidatorType,
     ExecuteFunctionResponse,
 )
-from .config import DEFAULT_MAX_RETRIES, REGION_BASE_URL
+from .config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT, REGION_BASE_URL
 from .instance.base import default_httpx_client
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
@@ -91,8 +91,9 @@ class AsyncFleet:
         base_url: Optional[str] = None,
         httpx_client: Optional[httpx.AsyncClient] = None,
         max_retries: int = DEFAULT_MAX_RETRIES,
+        timeout: float = DEFAULT_TIMEOUT,
     ):
-        self._httpx_client = httpx_client or default_httpx_client(max_retries)
+        self._httpx_client = httpx_client or default_httpx_client(max_retries, timeout)
         self.client = AsyncWrapper(
             api_key=api_key,
             base_url=base_url,

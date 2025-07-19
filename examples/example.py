@@ -16,7 +16,7 @@ async def main():
     print("Environments:", len(environments))
 
     # Create a new instance
-    env = await flt.env.make_async("hubspot:v1.2.7")
+    env = await flt.env.make_async("hubspot")
     print(f"New Instance: {env.instance_id} ({env.region})")
 
     response = await env.reset(seed=42)

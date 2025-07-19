@@ -15,7 +15,7 @@ def main():
     print("Instances:", len(instances))
 
     # Create a new instance
-    env = flt.env.make("hubspot:v1.2.7")
+    env = flt.env.make("hubspot")
     print("New Instance:", env.instance_id)
 
     response = env.reset(seed=42)

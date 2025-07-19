@@ -3,7 +3,10 @@ import httpx_retries
 from typing import Dict, Any, Optional
 
 
-def default_httpx_client(max_retries: int) -> httpx.AsyncClient:
+def default_httpx_client(max_retries: int, timeout: float) -> httpx.AsyncClient:
+    if max_retries <= 0:
+        return httpx.AsyncClient(timeout=timeout)
+
     policy = httpx_retries.Retry(
         total=max_retries,
         status_forcelist=[
@@ -21,7 +24,7 @@ def default_httpx_client(max_retries: int) -> httpx.AsyncClient:
         transport=httpx.AsyncHTTPTransport(retries=2), retry=policy
     )
     return httpx.AsyncClient(
-        timeout=300.0,
+        timeout=timeout,
         transport=retry,
     )
 
