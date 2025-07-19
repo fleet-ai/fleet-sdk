@@ -16,7 +16,7 @@ from fleet.verifiers import DatabaseSnapshot
 
 from ..exceptions import FleetEnvironmentError, FleetAPIError
 
-from .base import AsyncWrapper
+from .base import AsyncWrapper, default_httpx_client
 from .models import (
     ResetRequest,
     ResetResponse,
@@ -51,7 +51,7 @@ class AsyncInstanceClient:
         self.base_url = url
         self.client = AsyncWrapper(
             url=self.base_url,
-            httpx_client=httpx_client or httpx.AsyncClient(timeout=180.0),
+            httpx_client=httpx_client or default_httpx_client(),
         )
         self._resources: Optional[List[ResourceModel]] = None
         self._resources_state: Dict[str, Dict[str, Resource]] = {

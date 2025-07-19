@@ -29,6 +29,8 @@ from .instance import (
     ValidatorType,
     ExecuteFunctionResponse,
 )
+from .config import DEFAULT_MAX_RETRIES
+from .instance.base import default_httpx_client
 from .resources.base import Resource
 from .resources.sqlite import SQLiteResource
 from .resources.browser import BrowserResource
@@ -37,15 +39,17 @@ logger = logging.getLogger(__name__)
 
 
 class Environment(EnvironmentBase):
-    def __init__(self, httpx_client: Optional[httpx.Client] = None, **kwargs):
+    def __init__(self, client: SyncWrapper, **kwargs):
         super().__init__(**kwargs)
-        self._httpx_client = httpx_client or httpx.Client(timeout=180.0)
+        self._client = client
         self._instance: Optional[InstanceClient] = None
 
     @property
     def instance(self) -> InstanceClient:
         if self._instance is None:
-            self._instance = InstanceClient(self.manager_url, self._httpx_client)
+            self._instance = InstanceClient(
+                self.manager_url, self._client.httpx_client
+            )
         return self._instance
 
     def reset(
@@ -66,7 +70,10 @@ class Environment(EnvironmentBase):
         return self.instance.resources()
 
     def close(self) -> InstanceRecord:
-        return Fleet().delete(self.instance_id)
+        response = self.client.request(
+            "DELETE", f"/v1/env/instances/{self.instance_id}"
+        )
+        return InstanceRecord(**response.json())
 
     def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
         return self.instance.verify(validator)
@@ -83,8 +90,9 @@ class Fleet:
         api_key: Optional[str] = os.getenv("FLEET_API_KEY"),
         base_url: Optional[str] = None,
         httpx_client: Optional[httpx.Client] = None,
+        max_retries: int = DEFAULT_MAX_RETRIES,
     ):
-        self._httpx_client = httpx_client or httpx.Client(timeout=180.0)
+        self._httpx_client = httpx_client or default_httpx_client(max_retries)
         self.client = SyncWrapper(
             api_key=api_key,
             base_url=base_url,
@@ -96,7 +104,7 @@ class Fleet:
         return [EnvironmentModel(**env_data) for env_data in response.json()]
 
     def list_regions(self) -> List[str]:
-        response = self.client.request("GET", "/v1/env/regions")
+        response = self.client.request("GET", "/v1/regions")
         return response.json()
 
     def environment(self, env_key: str) -> EnvironmentModel:
@@ -118,7 +126,7 @@ class Fleet:
         response = self.client.request(
             "POST", "/v1/env/instances", json=request.model_dump()
         )
-        instance = Environment(**response.json())
+        instance = Environment(client=self.client, **response.json())
         instance.instance.load()
         return instance
 
@@ -132,11 +140,14 @@ class Fleet:
             params["region"] = region
 
         response = self.client.request("GET", "/v1/env/instances", params=params)
-        return [Environment(**instance_data) for instance_data in response.json()]
+        return [
+            Environment(client=self.client, **instance_data)
+            for instance_data in response.json()
+        ]
 
     def instance(self, instance_id: str) -> Environment:
         response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
-        instance = Environment(**response.json())
+        instance = Environment(client=self.client, **response.json())
         instance.instance.load()
         return instance
 
