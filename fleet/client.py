@@ -29,7 +29,7 @@ from .instance import (
     ValidatorType,
     ExecuteFunctionResponse,
 )
-from .config import DEFAULT_MAX_RETRIES
+from .config import DEFAULT_MAX_RETRIES, REGION_BASE_URL
 from .instance.base import default_httpx_client
 from .resources.base import Resource
 from .resources.sqlite import SQLiteResource
@@ -70,7 +70,7 @@ class Environment(EnvironmentBase):
         return self.instance.resources()
 
     def close(self) -> InstanceRecord:
-        response = self.client.request(
+        response = self._client.request(
             "DELETE", f"/v1/env/instances/{self.instance_id}"
         )
         return InstanceRecord(**response.json())
@@ -123,8 +123,12 @@ class Fleet:
             version = None
 
         request = InstanceRequest(env_key=env_key_part, version=version, region=region)
+        region_base_url = REGION_BASE_URL.get(region)
         response = self.client.request(
-            "POST", "/v1/env/instances", json=request.model_dump()
+            "POST",
+            "/v1/env/instances",
+            json=request.model_dump(),
+            base_url=region_base_url,
         )
         instance = Environment(client=self.client, **response.json())
         instance.instance.load()

@@ -29,7 +29,7 @@ from .instance import (
     ValidatorType,
     ExecuteFunctionResponse,
 )
-from .config import DEFAULT_MAX_RETRIES
+from .config import DEFAULT_MAX_RETRIES, REGION_BASE_URL
 from .instance.base import default_httpx_client
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
@@ -123,8 +123,12 @@ class AsyncFleet:
             version = None
 
         request = InstanceRequest(env_key=env_key_part, version=version, region=region)
+        region_base_url = REGION_BASE_URL.get(region)
         response = await self.client.request(
-            "POST", "/v1/env/instances", json=request.model_dump()
+            "POST",
+            "/v1/env/instances",
+            json=request.model_dump(),
+            base_url=region_base_url,
         )
         instance = AsyncEnvironment(client=self.client, **response.json())
         await instance.instance.load()
