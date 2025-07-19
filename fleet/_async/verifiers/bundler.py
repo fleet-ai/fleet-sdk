@@ -1,29 +1,19 @@
-"""Fleet SDK Verifier Decorator - Async Version.
+"""Fleet SDK Function Bundler - Dependency Detection and Bundle Creation.
 
-Provides a @verifier decorator that can wrap any sync function to support
-both local execution and remote execution via .remote() method.
-
+Handles dependency detection and bundle creation for verifier functions with basic static analysis.
 The client performs dependency detection and creates lightweight bundles.
 The server uses uv to resolve dependencies and create the execution environment.
 """
 
 import inspect
-import functools
-import traceback
-import hashlib
-import json
 import tempfile
 import zipfile
-import shutil
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, TypeVar, Union, List, Set
+from typing import Any, Callable, Dict, Optional, List, Set
 from io import BytesIO
-import uuid
 import logging
 import ast
 from collections import defaultdict
-
-import modulegraph2  # Required dependency for comprehensive dependency detection
 
 try:
     import importlib.metadata as imd
@@ -32,16 +22,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-F = TypeVar('F', bound=Callable[..., Any])
-
 
 class FunctionBundler:
-    """Handles dependency detection and bundle creation for verifier functions with tree shaking."""
+    """Handles dependency detection and bundle creation for verifier functions with basic static analysis."""
     
     def __init__(self):
-        self.cache_dir = Path.home() / ".fleet" / "verifier_cache"
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.bundle_cache = {}  # func_signature -> bundle_bytes
+        pass
     
     def create_bundle(
         self, 
@@ -49,24 +35,16 @@ class FunctionBundler:
         extra_requirements: Optional[List[str]] = None,
         verifier_id: Optional[str] = None
     ) -> bytes:
-        """Create a tree-shaken bundle with minimal code."""
+        """Create a function bundle with statically extracted code."""
         
-        # Create cache key
-        src = inspect.getsource(func)
-        cache_key = f"{src}{extra_requirements or []}{verifier_id or ''}"
-        
-        if cache_key in self.bundle_cache:
-            logger.debug(f"Using cached bundle for {func.__name__}")
-            return self.bundle_cache[cache_key]
-        
-        logger.info(f"Creating optimized bundle for {func.__name__}")
+        logger.info(f"Creating function bundle for {func.__name__}")
         
         # 1. Parse the main function and find dependencies
         mod_file = Path(func.__code__.co_filename)
         project_root = self._find_project_root(mod_file)
         
-        # 2. Analyze dependencies with tree shaking
-        dependencies = self._analyze_dependencies_with_tree_shaking(func, mod_file, project_root)
+        # 2. Analyze dependencies with static analysis
+        dependencies = self._analyze_dependencies_with_static_analysis(func, mod_file, project_root)
         
         # 3. Map external packages
         requirements = self._map_to_pypi_packages(dependencies['external_packages'])
@@ -75,21 +53,20 @@ class FunctionBundler:
         requirements.append("fleet-python")
         
         # 4. Build optimized bundle
-        bundle_bytes = self._build_optimized_bundle(
+        src = inspect.getsource(func)
+        bundle_bytes = self._build_function_bundle(
             func, src, requirements, dependencies['extracted_code'], project_root, verifier_id
         )
         
-        # Cache the result
-        self.bundle_cache[cache_key] = bundle_bytes
         return bundle_bytes
     
-    def _analyze_dependencies_with_tree_shaking(
+    def _analyze_dependencies_with_static_analysis(
         self, 
         func: Callable, 
         mod_file: Path, 
         project_root: Path
     ) -> Dict[str, Any]:
-        """Analyze dependencies and extract only required functions."""
+        """Analyze dependencies and extract functions using basic static analysis."""
         
         # Parse the main function - handle indentation
         main_func_code = inspect.getsource(func)
@@ -371,7 +348,7 @@ class FunctionBundler:
         logger.debug(f"Final package list: {package_list}")
         return package_list
     
-    def _build_optimized_bundle(
+    def _build_function_bundle(
         self, 
         func: Callable,
         src: str,
@@ -380,7 +357,7 @@ class FunctionBundler:
         project_root: Path,
         verifier_id: Optional[str] = None
     ) -> bytes:
-        """Build an optimized bundle with tree-shaken code."""
+        """Build a function bundle with statically extracted code."""
         
         with tempfile.TemporaryDirectory() as temp_dir:
             build_dir = Path(temp_dir) / "build"
@@ -393,43 +370,31 @@ class FunctionBundler:
                 
                 # Create verifier.py with the main function
                 verifier_file = build_dir / "verifier.py"
-                verifier_content = f"""# Auto-generated verifier module (tree-shaken)
+                verifier_content = f"""# Auto-generated verifier module
 {src}
 """
                 verifier_file.write_text(verifier_content)
                 
-                # Create optimized local files with only extracted functions
+                # Create local files with only extracted functions
                 for relative_path, code in extracted_code.items():
                     dest_path = build_dir / relative_path
                     dest_path.parent.mkdir(parents=True, exist_ok=True)
                     
-                    optimized_content = f"""# Optimized module (tree-shaken)
+                    extracted_content = f"""# Extracted module (static analysis)
 {code}
 """
-                    dest_path.write_text(optimized_content)
-                    logger.debug(f"Created optimized file: {relative_path}")
+                    dest_path.write_text(extracted_content)
+                    logger.debug(f"Created extracted file: {relative_path}")
                     
                     # Ensure __init__.py files exist
                     self._ensure_init_files(Path(relative_path), build_dir)
-                
-                # Create manifest
-                manifest_file = build_dir / "manifest.json"
-                manifest = {
-                    'function_name': func.__name__,
-                    'entry': f'verifier.{func.__name__}',
-                    'version': '1.0',
-                    'optimized': True,
-                    'tree_shaken': True,
-                    'verifier_id': verifier_id
-                }
-                manifest_file.write_text(json.dumps(manifest, indent=2))
                 
                 # Create zip bundle
                 return self._create_zip_bundle(build_dir)
                 
             except Exception as e:
-                logger.error(f"Failed to build optimized bundle: {e}")
-                raise RuntimeError(f"Optimized bundle creation failed: {e}")
+                logger.error(f"Failed to build function bundle: {e}")
+                raise RuntimeError(f"Function bundle creation failed: {e}")
     
     def _ensure_init_files(self, rel_path: Path, build_dir: Path):
         """Ensure __init__.py files exist for all parent directories."""
@@ -454,217 +419,5 @@ class FunctionBundler:
                     zf.write(file_path, arcname)
         
         bundle_size = len(zip_buffer.getvalue())
-        logger.debug(f"Created optimized zip bundle ({bundle_size:,} bytes)")
-        return zip_buffer.getvalue()
-
-
-class AsyncVerifiedFunction:
-    """Wrapper for a verified function that supports local execution with env-first pattern."""
-    
-    def __init__(
-        self,
-        func: F,
-        name: str,
-        verifier_id: str,
-        extra_requirements: Optional[List[str]] = None
-    ):
-        self.func = func
-        self.name = name
-        self.verifier_id = verifier_id
-        self.extra_requirements = extra_requirements or []
-        self._bundler = FunctionBundler()
-        self._bundle_sent_to_envs = set()  # Track environments that have our bundle
-        
-        # Copy function metadata
-        functools.update_wrapper(self, func)
-    
-    async def __call__(self, env, *args, **kwargs) -> float:
-        """Local execution of the verifier function with env as first parameter."""
-        try:
-            result = self.func(env, *args, **kwargs)
-            
-            # Handle different return types
-            if isinstance(result, (int, float)):
-                # Direct score return
-                return float(result)
-            elif isinstance(result, dict) and "score" in result:
-                return float(result["score"])
-            else:
-                # Try to extract score from object attributes
-                if hasattr(result, 'score'):
-                    return float(result.score)
-                else:
-                    raise ValueError(f"Verifier function must return a score (number). Got {type(result)}")
-                    
-        except Exception as e:
-            logger.error(f"Error in verifier {self.name}: {e}")
-            # Return error score 0
-            return 0.0
-    
-    async def remote(self, env, *args, **kwargs) -> float:
-        """Remote execution of the verifier function with bundle tracking optimization."""
-        try:
-            # Generate environment identifier for tracking
-            env_id = self._get_env_id(env)
-            
-            if env_id not in self._bundle_sent_to_envs:
-                # First time sending to this environment - send bundle
-                logger.info(f"Sending bundle for {self.name} to environment {env_id}")
-                bundle_data = self._bundler.create_bundle(
-                    self.func, 
-                    self.extra_requirements,
-                    self.verifier_id
-                )
-                
-                response = await env.instance.execute_verifier_remote(
-                    bundle_data=bundle_data,
-                    verifier_id=self.verifier_id,
-                    args=args,
-                    kwargs=kwargs
-                )
-                
-                # Mark environment as having our bundle
-                self._bundle_sent_to_envs.add(env_id)
-                
-            else:
-                # Bundle already sent - just execute using verifier_id
-                logger.info(f"Executing cached bundle for {self.name} on environment {env_id}")
-                try:
-                    response = await env.instance.execute_verifier_by_id(
-                        verifier_id=self.verifier_id,
-                        args=args,
-                        kwargs=kwargs
-                    )
-                except Exception as e:
-                    # Handle server restart or bundle not found
-                    if self._is_bundle_not_found_error(e):
-                        logger.info(f"Bundle not found on server, re-sending for {self.name}")
-                        # Remove from tracking and retry with bundle
-                        self._bundle_sent_to_envs.discard(env_id)
-                        return await self.remote(env, *args, **kwargs)
-                    else:
-                        raise
-            
-            # Handle response
-            if response.success:
-                return self._process_result(response.result)
-            else:
-                self._raise_remote_error(response.error)
-                
-        except Exception as e:
-            logger.error(f"Remote execution failed for {self.name}: {e}")
-            raise
-    
-    def _process_result(self, result: Any) -> float:
-        """Process remote execution result, handling different return types."""
-        # Handle different return types like local execution
-        if isinstance(result, (int, float)):
-            return float(result)
-        elif isinstance(result, dict) and "score" in result:
-            return float(result["score"])
-        else:
-            # Try to extract score from object attributes
-            if hasattr(result, 'score'):
-                return float(result.score)
-            else:
-                # Best effort conversion
-                try:
-                    return float(result)
-                except (ValueError, TypeError):
-                    logger.warning(f"Could not convert result to float: {result}")
-                    return 0.0
-    
-    def _raise_remote_error(self, error_info: Dict[str, Any]):
-        """Reconstruct remote error as local exception."""
-        error_type = error_info.get("type", "RuntimeError")
-        message = error_info.get("message", "Remote execution failed")
-        traceback_str = error_info.get("traceback", "")
-        
-        # Create a rich error message
-        full_message = f"""
-Remote verifier execution failed:
-{message}
-
-Remote traceback:
-{traceback_str}
-        """.strip()
-        
-        # Try to raise the original exception type
-        try:
-            exception_class = getattr(__builtins__, error_type, RuntimeError)
-            raise exception_class(full_message)
-        except:
-            raise RuntimeError(full_message)
-    
-    def _get_env_id(self, env) -> str:
-        """Generate a unique identifier for the environment."""
-        # Use instance base URL or similar unique identifier
-        if hasattr(env, 'instance') and hasattr(env.instance, 'base_url'):
-            return f"{env.instance.base_url}"
-        else:
-            # Fallback to object id (less ideal but works)
-            return str(id(env))
-    
-    def _is_bundle_not_found_error(self, error: Exception) -> bool:
-        """Check if the error indicates the bundle was not found on the server."""
-        # Check for common "bundle not found" error patterns
-        error_msg = str(error).lower()
-        return (
-            "bundle not found" in error_msg or
-            "verifier not found" in error_msg or
-            "404" in error_msg or
-            "not found" in error_msg
-        )
-
-
-def verifier(
-    name: Optional[str] = None,
-    verifier_id: Optional[str] = None,
-    extra_requirements: Optional[List[str]] = None
-) -> Callable[[F], AsyncVerifiedFunction]:
-    """
-    Decorator to create a verifier function with env-first pattern.
-    
-    The decorated function must take 'env' as its first parameter, making it explicit
-    that verifiers operate within an environment context. This makes verifiers reusable
-    across different environments.
-    
-    Args:
-        name: Optional name for the verifier. Defaults to function name.
-        verifier_id: Optional unique ID for the verifier. Defaults to generated UUID.
-        extra_requirements: Additional PyPI packages needed by the verifier.
-    
-    Example:
-        @verifier(
-            name="test_database_state",
-            extra_requirements=["torch==2.3.0"]
-        )
-        def check_user_count(env, expected_count: int) -> float:
-            db = env.db()
-            result = db.query("SELECT COUNT(*) FROM users")
-            actual_count = result.rows[0][0]
-            return 1.0 if actual_count >= expected_count else 0.0
-        
-        # Usage with different environments
-        env1 = flt.env.make("fira")
-        env2 = flt.env.make("another_env")
-        
-        # Local execution
-        result = await check_user_count(env1, 5)
-        result = await check_user_count(env2, 5)  # Same verifier, different env
-        
-        # Remote execution
-        result = await check_user_count.remote(env1, 5)
-    """
-    def decorator(func: F) -> AsyncVerifiedFunction:
-        verifier_name = name or func.__name__
-        verifier_uuid = verifier_id or str(uuid.uuid4())
-        
-        return AsyncVerifiedFunction(
-            func,
-            verifier_name,
-            verifier_uuid,
-            extra_requirements
-        )
-    
-    return decorator
+        logger.debug(f"Created function bundle ({bundle_size:,} bytes)")
+        return zip_buffer.getvalue() 

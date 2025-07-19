@@ -2,7 +2,7 @@
 
 from fleet.verifiers.db import DatabaseSnapshot, IgnoreConfig, SnapshotDiff
 from fleet.verifiers.code import TASK_SUCCESSFUL_SCORE
-from .decorator import (
+from .verifier import (
     verifier,
     AsyncVerifiedFunction,
 )

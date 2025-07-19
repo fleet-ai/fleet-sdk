@@ -23,13 +23,21 @@ from .exceptions import (
 from .client import Fleet, Environment
 from .models import InstanceRecord
 from .instance.models import Resource, ResetResponse
+
+# Import sync verifiers with explicit naming
 from .verifiers import (
-    verifier,
+    verifier as verifier_sync,
     SyncVerifiedFunction,
     DatabaseSnapshot,
     IgnoreConfig,
     SnapshotDiff,
     TASK_SUCCESSFUL_SCORE,
+)
+
+# Import async verifiers (default verifier is async for modern usage)
+from ._async.verifiers import (
+    verifier,
+    AsyncVerifiedFunction,
 )
 
 # Create a module-level env attribute for convenient access
@@ -50,8 +58,10 @@ __all__ = [
     "FleetAPIError", 
     "FleetTimeoutError",
     "FleetConfigurationError",
-    # Verifiers
+    # Verifiers (async is default)
     "verifier",
+    "verifier_sync", 
+    "AsyncVerifiedFunction",
     "SyncVerifiedFunction",
     "DatabaseSnapshot",
     "IgnoreConfig", 
