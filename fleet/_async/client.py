@@ -70,7 +70,7 @@ class AsyncEnvironment(EnvironmentBase):
         return await self.instance.resources()
 
     async def close(self) -> InstanceRecord:
-        response = await self.client.request(
+        response = await self._client.request(
             "DELETE", f"/v1/env/instances/{self.instance_id}"
         )
         return InstanceRecord(**response.json())
