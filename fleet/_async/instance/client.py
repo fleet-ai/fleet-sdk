@@ -1,7 +1,6 @@
 """Fleet SDK Instance Client."""
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
-import asyncio
 import httpx
 import inspect
 import time
@@ -14,7 +13,7 @@ from ..resources.base import Resource
 
 from fleet.verifiers import DatabaseSnapshot
 
-from ..exceptions import FleetEnvironmentError, FleetAPIError
+from ..exceptions import FleetEnvironmentError
 
 from .base import AsyncWrapper, default_httpx_client
 from .models import (

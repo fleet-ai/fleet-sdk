@@ -9,6 +9,13 @@ from .exceptions import (
     FleetRateLimitError,
     FleetInstanceLimitError,
     FleetTimeoutError,
+    FleetTeamNotFoundError,
+    FleetEnvironmentAccessError,
+    FleetRegionError,
+    FleetEnvironmentNotFoundError,
+    FleetVersionNotFoundError,
+    FleetBadRequestError,
+    FleetPermissionError,
 )
 
 
@@ -103,8 +110,8 @@ class SyncWrapper(BaseWrapper):
         # Handle specific error types
         if status_code == 401:
             raise FleetAuthenticationError(error_message)
-        elif status_code == 429:
-            # Check if it's an instance limit error vs rate limit error (fallback for unstructured errors)
+        elif status_code == 403:
+            # Handle 403 errors - instance limit, permissions, team not found
             if "instance limit" in error_message.lower():
                 # Try to extract instance counts from the error message
                 running_instances = None
@@ -129,8 +136,85 @@ class SyncWrapper(BaseWrapper):
                     running_instances=running_instances,
                     instance_limit=instance_limit,
                 )
+            elif "team not found" in error_message.lower():
+                raise FleetTeamNotFoundError(error_message)
+            elif (
+                "does not have permission" in error_message.lower()
+                and "environment" in error_message.lower()
+            ):
+                # Extract environment key from error message if possible
+                env_key = None
+                if "'" in error_message:
+                    # Look for quoted environment key
+                    parts = error_message.split("'")
+                    if len(parts) >= 2:
+                        env_key = parts[1]
+                raise FleetEnvironmentAccessError(error_message, env_key=env_key)
             else:
-                raise FleetRateLimitError(error_message)
+                raise FleetPermissionError(error_message)
+        elif status_code == 400:
+            # Handle 400 errors - bad requests, region errors, environment/version not found
+            if "region" in error_message.lower() and (
+                "not supported" in error_message.lower()
+                or "unsupported" in error_message.lower()
+            ):
+                # Extract region and supported regions if possible
+                region = None
+                supported_regions = []
+                if "Region" in error_message:
+                    # Try to extract region from "Region X not supported"
+                    try:
+                        parts = error_message.split("Region ")[1].split(
+                            " not supported"
+                        )
+                        if parts:
+                            region = parts[0]
+                    except (IndexError, ValueError):
+                        pass
+                    # Try to extract supported regions from "Please use [...]"
+                    if "Please use" in error_message and "[" in error_message:
+                        try:
+                            regions_str = error_message.split("[")[1].split("]")[0]
+                            supported_regions = [
+                                r.strip().strip("'\"") for r in regions_str.split(",")
+                            ]
+                        except (IndexError, ValueError):
+                            pass
+                raise FleetRegionError(
+                    error_message, region=region, supported_regions=supported_regions
+                )
+            elif (
+                "environment" in error_message.lower()
+                and "not found" in error_message.lower()
+            ):
+                # Extract env_key if possible
+                env_key = None
+                if "'" in error_message:
+                    parts = error_message.split("'")
+                    if len(parts) >= 2:
+                        env_key = parts[1]
+                raise FleetEnvironmentNotFoundError(error_message, env_key=env_key)
+            elif (
+                "version" in error_message.lower()
+                and "not found" in error_message.lower()
+            ):
+                # Extract version and env_key if possible
+                version = None
+                env_key = None
+                if "'" in error_message:
+                    parts = error_message.split("'")
+                    if len(parts) >= 2:
+                        version = parts[1]
+                    if len(parts) >= 4:
+                        env_key = parts[3]
+                raise FleetVersionNotFoundError(
+                    error_message, version=version, env_key=env_key
+                )
+            else:
+                raise FleetBadRequestError(error_message)
+        elif status_code == 429:
+            # Rate limit errors (not instance limit which is now 403)
+            raise FleetRateLimitError(error_message)
         else:
             raise FleetAPIError(
                 error_message,

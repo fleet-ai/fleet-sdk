@@ -13,7 +13,7 @@ from ..resources.base import Resource
 
 from ..verifiers import DatabaseSnapshot
 
-from ..exceptions import FleetEnvironmentError, FleetAPIError
+from ..exceptions import FleetEnvironmentError
 
 from .base import SyncWrapper, default_httpx_client
 from .models import (
