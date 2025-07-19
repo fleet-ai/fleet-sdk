@@ -59,6 +59,8 @@ unasync:
 		'async_playwright': 'sync_playwright', \
 		'asyncio.sleep': 'time.sleep', \
 		'httpx.AsyncClient': 'httpx.Client', \
+		'httpx.AsyncHTTPTransport': 'httpx.HTTPTransport', \
+		'httpx.SyncHTTPTransport': 'httpx.HTTPTransport', \
 	}); \
 	files = [os.path.join(root, f) for root, dirs, files in os.walk('fleet/_async/') for f in files if f.endswith('.py') and f != '__init__.py']; \
 	unasync.unasync_files(files, [rule])"

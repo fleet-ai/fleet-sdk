@@ -18,7 +18,7 @@ def default_httpx_client(max_retries: int) -> httpx.Client:
         backoff_factor=0.5,
     )
     retry = httpx_retries.RetryTransport(
-        transport=httpx.SyncHTTPTransport(retries=2), retry=policy
+        transport=httpx.HTTPTransport(retries=2), retry=policy
     )
     return httpx.Client(
         timeout=300.0,

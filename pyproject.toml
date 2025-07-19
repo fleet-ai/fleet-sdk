@@ -108,4 +108,6 @@ testpaths = ["tests"]
 "async_playwright" = "sync_playwright"
 "asyncio.sleep" = "time.sleep"
 "httpx.AsyncClient" = "httpx.Client"
+"httpx.AsyncHTTPTransport" = "httpx.HTTPTransport"
+"httpx.SyncHTTPTransport" = "httpx.HTTPTransport"
 "aiohttp" = "httpx" 
