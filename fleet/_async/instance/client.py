@@ -14,6 +14,7 @@ from ..resources.base import Resource
 from fleet.verifiers import DatabaseSnapshot
 
 from ..exceptions import FleetEnvironmentError
+from ..config import DEFAULT_MAX_RETRIES
 
 from .base import AsyncWrapper, default_httpx_client
 from .models import (
@@ -50,7 +51,7 @@ class AsyncInstanceClient:
         self.base_url = url
         self.client = AsyncWrapper(
             url=self.base_url,
-            httpx_client=httpx_client or default_httpx_client(),
+            httpx_client=httpx_client or default_httpx_client(DEFAULT_MAX_RETRIES),
         )
         self._resources: Optional[List[ResourceModel]] = None
         self._resources_state: Dict[str, Dict[str, Resource]] = {
