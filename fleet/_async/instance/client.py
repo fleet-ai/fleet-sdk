@@ -1,7 +1,6 @@
 """Fleet SDK Instance Client."""
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
-import asyncio
 import httpx
 import inspect
 import time
@@ -14,9 +13,10 @@ from ..resources.base import Resource
 
 from fleet.verifiers import DatabaseSnapshot
 
-from ..exceptions import FleetEnvironmentError, FleetAPIError
+from ..exceptions import FleetEnvironmentError
+from ..config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
 
-from .base import AsyncWrapper
+from .base import AsyncWrapper, default_httpx_client
 from .models import (
     ResetRequest,
     ResetResponse,
@@ -55,7 +55,7 @@ class AsyncInstanceClient:
         self.base_url = url
         self.client = AsyncWrapper(
             url=self.base_url,
-            httpx_client=httpx_client or httpx.AsyncClient(timeout=180.0),
+            httpx_client=httpx_client or default_httpx_client(DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT),
         )
         self._resources: Optional[List[ResourceModel]] = None
         self._resources_state: Dict[str, Dict[str, Resource]] = {

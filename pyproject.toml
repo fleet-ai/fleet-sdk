@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fleet-python"
-version = "0.2.9"
+version = "0.2.12"
 description = "Python SDK for Fleet environments"
 authors = [
     {name = "Fleet AI", email = "nic@fleet.so"},
@@ -27,6 +27,7 @@ dependencies = [
     "aiohttp>=3.8.0",
     "pydantic>=2.0.0",
     "httpx>=0.27.0",
+    "httpx-retries>=0.4.0",
     "typing-extensions>=4.0.0",
     "modulegraph2>=0.2.0",
 ]
@@ -94,6 +95,7 @@ testpaths = ["tests"]
 "AsyncFleetPlaywrightWrapper" = "FleetPlaywrightWrapper"
 "make_async" = "make"
 "list_envs_async" = "list_envs"
+"list_regions_async" = "list_regions"
 "list_instances_async" = "list_instances"
 "get_async" = "get"
 "async def" = "def"
@@ -108,4 +110,6 @@ testpaths = ["tests"]
 "async_playwright" = "sync_playwright"
 "asyncio.sleep" = "time.sleep"
 "httpx.AsyncClient" = "httpx.Client"
+"httpx.AsyncHTTPTransport" = "httpx.HTTPTransport"
+"httpx.SyncHTTPTransport" = "httpx.HTTPTransport"
 "aiohttp" = "httpx" 

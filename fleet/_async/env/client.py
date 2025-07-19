@@ -11,6 +11,10 @@ async def list_envs_async() -> List[EnvironmentModel]:
     return await AsyncFleet().list_envs()
 
 
+async def list_regions_async() -> List[str]:
+    return await AsyncFleet().list_regions()
+
+
 async def list_instances_async(
     status: Optional[str] = None, region: Optional[str] = None
 ) -> List[AsyncEnvironment]:

@@ -25,6 +25,9 @@ def fix_file(filepath: Path) -> bool:
     # Fix any remaining AsyncFleetPlaywrightWrapper references in docstrings
     content = content.replace('AsyncFleetPlaywrightWrapper', 'FleetPlaywrightWrapper')
     
+    # Fix httpx transport classes
+    content = content.replace('httpx.SyncHTTPTransport', 'httpx.HTTPTransport')
+    
     # Fix playwright imports for sync version
     if 'playwright' in str(filepath):
         # Fix the import statement
@@ -54,6 +57,7 @@ def main():
     # Files to fix
     files_to_fix = [
         sync_dir / "instance" / "client.py",
+        sync_dir / "instance" / "base.py",
         sync_dir / "playwright.py",
         # Add other files here as needed
     ]
