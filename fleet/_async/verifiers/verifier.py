@@ -75,14 +75,14 @@ class AsyncVerifiedFunction:
         
         # 2. Check if bundle exists on server (pseudocode)
         # TODO: Add endpoint to check if bundle SHA exists in S3
-        # try:
-        #     exists = await env.instance.check_bundle_exists(bundle_sha)
-        #     if exists:
-        #         logger.info(f"Bundle {bundle_sha[:8]}... found on server, updating cache")
-        #         _uploaded_bundle_shas.add(bundle_sha)
-        #         return bundle_sha, False  # Found on server, no upload needed
-        # except Exception as e:
-        #     logger.warning(f"Failed to check bundle existence: {e}")
+        try:
+            exists = await env.check_bundle_exists(bundle_sha)
+            if exists.success:
+                logger.info(f"Bundle {bundle_sha[:8]}... found on server, updating cache")
+                _uploaded_bundle_shas.add(bundle_sha)
+                return bundle_sha, False  # Found on server, no upload needed
+        except Exception as e:
+            logger.warning(f"Failed to check bundle existence: {e}")
         
         # 3. Bundle not found locally or on server - upload needed
         logger.info(f"Bundle {bundle_sha[:8]}... needs to be uploaded")

@@ -25,8 +25,6 @@ from .models import (
     HealthResponse,
     ExecuteFunctionRequest,
     ExecuteFunctionResponse,
-    ExecuteVerifierRemoteRequest,
-    ExecuteVerifierRemoteResponse,
 )
 
 
@@ -44,8 +42,6 @@ ValidatorType = Callable[
 ]
 
 
-
-
 class AsyncInstanceClient:
     def __init__(
         self,
@@ -55,7 +51,8 @@ class AsyncInstanceClient:
         self.base_url = url
         self.client = AsyncWrapper(
             url=self.base_url,
-            httpx_client=httpx_client or default_httpx_client(DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT),
+            httpx_client=httpx_client
+            or default_httpx_client(DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT),
         )
         self._resources: Optional[List[ResourceModel]] = None
         self._resources_state: Dict[str, Dict[str, Resource]] = {
@@ -122,8 +119,6 @@ class AsyncInstanceClient:
         )
         return ExecuteFunctionResponse(**response.json())
 
-
-
     async def _load_resources(self) -> None:
         if self._resources is None:
             response = await self.client.request("GET", "/resources")
@@ -172,40 +167,6 @@ class AsyncInstanceClient:
     async def manager_health_check(self) -> Optional[HealthResponse]:
         response = await self.client.request("GET", "/health")
         return HealthResponse(**response.json())
-
-    async def execute_verifier_remote(
-        self, 
-        bundle_data: bytes,
-        args: tuple,
-        kwargs: dict,
-        timeout: Optional[int] = 30
-    ) -> ExecuteVerifierRemoteResponse:
-        """Execute a verifier function remotely using a bundle."""
-        import base64
-        
-        # Convert bundle bytes to base64
-        bundle_b64 = base64.b64encode(bundle_data).decode('utf-8')
-        
-        # Create request
-        request = ExecuteVerifierRemoteRequest(
-            bundle_data=bundle_b64,
-            args=list(args),
-            kwargs=kwargs,
-            timeout=timeout,
-            env_context={
-                "instance_id": self.base_url,  # This will need to be improved
-                "manager_url": self.base_url
-            }
-        )
-        
-        # Make API call
-        response = await self.client.request(
-            "POST",
-            "/v1/verifiers/execute",
-            json=request.model_dump()
-        )
-        
-        return ExecuteVerifierRemoteResponse(**response.json())
 
     async def __aenter__(self):
         """Async context manager entry."""

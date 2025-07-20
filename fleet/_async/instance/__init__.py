@@ -9,8 +9,6 @@ from .models import (
     ChromeStartResponse,
     ChromeStatusResponse,
     ExecuteFunctionResponse,
-    ExecuteVerifierRemoteRequest,
-    ExecuteVerifierRemoteResponse,
 )
 
 __all__ = [
@@ -22,6 +20,4 @@ __all__ = [
     "ChromeStartResponse",
     "ChromeStatusResponse",
     "ExecuteFunctionResponse",
-    "ExecuteVerifierRemoteRequest",
-    "ExecuteVerifierRemoteResponse",
 ]
