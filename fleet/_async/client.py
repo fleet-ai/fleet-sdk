@@ -38,6 +38,11 @@ from .resources.browser import AsyncBrowserResource
 logger = logging.getLogger(__name__)
 
 
+async def _delete_instance(client: AsyncWrapper, instance_id: str) -> InstanceRecord:
+    response = await client.request("DELETE", f"/v1/env/instances/{instance_id}")
+    return InstanceRecord(**response.json())
+
+
 class AsyncEnvironment(EnvironmentBase):
     def __init__(self, client: AsyncWrapper, **kwargs):
         super().__init__(**kwargs)
@@ -70,10 +75,7 @@ class AsyncEnvironment(EnvironmentBase):
         return await self.instance.resources()
 
     async def close(self) -> InstanceRecord:
-        response = await self._client.request(
-            "DELETE", f"/v1/env/instances/{self.instance_id}"
-        )
-        return InstanceRecord(**response.json())
+        return await _delete_instance(self._client, self.instance_id)
 
     async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
         return await self.instance.verify(validator)
@@ -157,7 +159,4 @@ class AsyncFleet:
         return instance
 
     async def delete(self, instance_id: str) -> InstanceRecord:
-        response = await self.client.request(
-            "DELETE", f"/v1/env/instances/{instance_id}"
-        )
-        return InstanceRecord(**response.json())
+        return await _delete_instance(self.client, instance_id)

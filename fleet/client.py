@@ -38,6 +38,11 @@ from .resources.browser import BrowserResource
 logger = logging.getLogger(__name__)
 
 
+def _delete_instance(client: SyncWrapper, instance_id: str) -> InstanceRecord:
+    response = client.request("DELETE", f"/v1/env/instances/{instance_id}")
+    return InstanceRecord(**response.json())
+
+
 class Environment(EnvironmentBase):
     def __init__(self, client: SyncWrapper, **kwargs):
         super().__init__(**kwargs)
@@ -70,10 +75,7 @@ class Environment(EnvironmentBase):
         return self.instance.resources()
 
     def close(self) -> InstanceRecord:
-        response = self._client.request(
-            "DELETE", f"/v1/env/instances/{self.instance_id}"
-        )
-        return InstanceRecord(**response.json())
+        return _delete_instance(self._client, self.instance_id)
 
     def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
         return self.instance.verify(validator)
@@ -157,7 +159,4 @@ class Fleet:
         return instance
 
     def delete(self, instance_id: str) -> InstanceRecord:
-        response = self.client.request(
-            "DELETE", f"/v1/env/instances/{instance_id}"
-        )
-        return InstanceRecord(**response.json())
+        return _delete_instance(self.client, instance_id)
