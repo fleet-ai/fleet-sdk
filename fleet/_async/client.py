@@ -21,7 +21,7 @@ import logging
 from typing import Optional, List
 
 from .base import EnvironmentBase, AsyncWrapper
-from .models import (
+from ..models import (
     InstanceRequest,
     InstanceRecord,
     Environment as EnvironmentModel,
@@ -36,7 +36,7 @@ from .instance import (
     ResetResponse,
     ExecuteFunctionResponse,
 )
-from .config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT, REGION_BASE_URL
+from ..config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT, REGION_BASE_URL
 from .instance.base import default_httpx_client
 from .instance.client import ValidatorType
 from .resources.base import Resource

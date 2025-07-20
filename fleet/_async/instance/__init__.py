@@ -1,7 +1,7 @@
 """Fleet SDK Environment Module."""
 
-from .client import AsyncInstanceClient
-from .models import (
+from .client import AsyncInstanceClient, ValidatorType
+from ...instance.models import (
     ResetRequest,
     ResetResponse,
     CDPDescribeResponse,

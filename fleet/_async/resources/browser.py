@@ -1,5 +1,5 @@
 from typing import Optional
-from ..instance.models import (
+from ...instance.models import (
     Resource as ResourceModel,
     CDPDescribeResponse,
     ChromeStartRequest,

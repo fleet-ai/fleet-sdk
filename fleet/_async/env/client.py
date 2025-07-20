@@ -1,5 +1,5 @@
 from ..client import AsyncFleet, AsyncEnvironment
-from ..models import Environment as EnvironmentModel
+from ...models import Environment as EnvironmentModel
 from typing import List, Optional
 
 

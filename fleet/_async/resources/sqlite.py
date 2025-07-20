@@ -1,6 +1,6 @@
 from typing import Any, List, Optional
-from ..instance.models import Resource as ResourceModel
-from ..instance.models import DescribeResponse, QueryRequest, QueryResponse
+from ...instance.models import Resource as ResourceModel
+from ...instance.models import DescribeResponse, QueryRequest, QueryResponse
 from .base import Resource
 
 from typing import TYPE_CHECKING

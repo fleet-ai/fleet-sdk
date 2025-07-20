@@ -28,6 +28,28 @@ def fix_file(filepath: Path) -> bool:
     # Fix httpx transport classes
     content = content.replace('httpx.SyncHTTPTransport', 'httpx.HTTPTransport')
     
+    # Fix imports based on file location
+    # Since async code now imports from sync models/config, we need to fix the generated sync imports
+    rel_path = filepath.relative_to(Path(__file__).parent.parent / "fleet")
+    
+    # Fix imports for files in different subdirectories
+    if "fleet/instance" in str(filepath):
+        # Files in fleet/instance/ should use .. for fleet level imports
+        content = content.replace('from ...config import', 'from ..config import')
+        content = content.replace('from ...instance.models import', 'from .models import')
+    elif "fleet/env" in str(filepath):
+        # Files in fleet/env/ should use .. for fleet level imports
+        content = content.replace('from ...models import', 'from ..models import')
+    elif "fleet/resources" in str(filepath):
+        # Files in fleet/resources/ should use .. for fleet level imports
+        content = content.replace('from ...instance.models import', 'from ..instance.models import')
+    
+    # Fix imports in top-level fleet files
+    if rel_path.parts[0] in ['base.py', 'client.py'] and len(rel_path.parts) == 1:
+        # Top-level files should use . for fleet level imports
+        content = content.replace('from ..models import', 'from .models import')
+        content = content.replace('from ..config import', 'from .config import')
+    
     # Fix playwright imports for sync version
     if 'playwright' in str(filepath):
         # Fix the import statement
@@ -54,20 +76,16 @@ def main():
     """Fix all sync files."""
     sync_dir = Path(__file__).parent.parent / "fleet"
     
-    # Files to fix
-    files_to_fix = [
-        sync_dir / "instance" / "client.py",
-        sync_dir / "instance" / "base.py",
-        sync_dir / "playwright.py",
-        # Add other files here as needed
-    ]
-    
-    for filepath in files_to_fix:
-        if filepath.exists():
+    # Process all Python files in the fleet directory (excluding _async)
+    fixed_count = 0
+    for filepath in sync_dir.rglob("*.py"):
+        if "_async" not in str(filepath):
             if fix_file(filepath):
                 print(f"Fixed {filepath}")
-            else:
-                print(f"No changes needed for {filepath}")
+                fixed_count += 1
+    
+    if fixed_count == 0:
+        print("No files needed fixing")
 
 if __name__ == "__main__":
     main()

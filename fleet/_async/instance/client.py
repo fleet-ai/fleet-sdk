@@ -14,10 +14,10 @@ from ..resources.base import Resource
 from fleet.verifiers import DatabaseSnapshot
 
 from ..exceptions import FleetEnvironmentError
-from ..config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
+from ...config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
 
 from .base import AsyncWrapper, default_httpx_client
-from .models import (
+from ...instance.models import (
     ResetRequest,
     ResetResponse,
     Resource as ResourceModel,
