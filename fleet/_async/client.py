@@ -15,10 +15,11 @@
 """Fleet API Client for making HTTP requests to Fleet services."""
 
 import base64
-import os
+import cloudpickle
 import httpx
 import logging
-from typing import Optional, List
+import os
+from typing import List, Optional
 
 from .base import EnvironmentBase, AsyncWrapper
 from ..models import (
@@ -103,6 +104,15 @@ class AsyncEnvironment(EnvironmentBase):
         return await _execute_verifier_remote(
             self._load_client, bundle_data, args, kwargs, timeout
         )
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_client", None)
+        state.pop("_instance", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
 
 class AsyncFleet:
@@ -213,10 +223,12 @@ async def _execute_verifier_remote(
 ) -> VerificationResponse:
     bundle_b64 = base64.b64encode(bundle_data).decode("utf-8")
 
+    args_kwargs_pickled = cloudpickle.dumps({"args": args, "kwargs": kwargs})
+    args_kwargs_b64 = base64.b64encode(args_kwargs_pickled).decode("utf-8")
+
     request_data = {
         "bundle_data": bundle_b64,
-        "args": list(args),
-        "kwargs": kwargs,
+        "args": args_kwargs_b64,
         "timeout": timeout,
     }
 
