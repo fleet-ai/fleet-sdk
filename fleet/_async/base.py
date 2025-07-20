@@ -2,7 +2,7 @@ import httpx
 from typing import Dict, Any, Optional
 import json
 
-from .models import InstanceResponse
+from ..models import InstanceResponse
 from .exceptions import (
     FleetAPIError,
     FleetAuthenticationError,

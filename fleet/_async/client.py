@@ -20,7 +20,7 @@ import logging
 from typing import Optional, List
 
 from .base import EnvironmentBase, AsyncWrapper
-from .models import InstanceRequest, InstanceRecord, Environment as EnvironmentModel
+from ..models import InstanceRequest, InstanceRecord, Environment as EnvironmentModel
 
 from .instance import (
     AsyncInstanceClient,
@@ -29,7 +29,7 @@ from .instance import (
     ValidatorType,
     ExecuteFunctionResponse,
 )
-from .config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT, REGION_BASE_URL
+from ..config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT, REGION_BASE_URL
 from .instance.base import default_httpx_client
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
