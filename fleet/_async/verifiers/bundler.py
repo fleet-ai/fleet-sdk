@@ -55,7 +55,7 @@ class FunctionBundler:
         # 4. Build optimized bundle
         src = inspect.getsource(func)
         bundle_bytes = self._build_function_bundle(
-            func, src, requirements, dependencies['extracted_code'], project_root, verifier_id
+            func, src, requirements, dependencies['extracted_code'], project_root, verifier_id, dependencies.get('same_module_deps', [])
         )
         
         return bundle_bytes
@@ -105,6 +105,23 @@ class FunctionBundler:
         # Combine all imports
         all_imports = {**imports_in_func, **module_imports}
         
+        # Find function calls within the verifier function
+        called_functions = self._extract_function_calls(main_func_ast)
+        logger.debug(f"Functions called in verifier: {called_functions}")
+        
+        # Find all functions defined in the module
+        module_functions = {}
+        for node in ast.walk(module_ast):
+            if isinstance(node, ast.FunctionDef):
+                module_functions[node.name] = node
+        
+        # Check which called functions are defined in the same module
+        same_module_deps = []
+        for func_name in called_functions:
+            if func_name in module_functions and func_name != func.__name__:
+                same_module_deps.append(func_name)
+                logger.debug(f"Found same-module dependency: {func_name}")
+        
         # Separate local and external imports
         local_imports = {}
         external_packages = set()
@@ -146,7 +163,8 @@ class FunctionBundler:
         return {
             'local_imports': local_imports,
             'external_packages': external_packages,
-            'extracted_code': extracted_code
+            'extracted_code': extracted_code,
+            'same_module_deps': same_module_deps  # Add same-module dependencies
         }
     
     def _extract_imports_from_ast(self, tree: ast.AST) -> Dict[str, List[Dict[str, Any]]]:
@@ -169,6 +187,22 @@ class FunctionBundler:
                     })
         
         return dict(imports)
+    
+    def _extract_function_calls(self, tree: ast.AST) -> Set[str]:
+        """Extract function calls from AST."""
+        function_calls = set()
+        
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                # Handle direct function calls (e.g., func())
+                if isinstance(node.func, ast.Name):
+                    function_calls.add(node.func.id)
+                # Handle method calls (e.g., obj.method())
+                elif isinstance(node.func, ast.Attribute):
+                    # We might want to handle these differently
+                    pass
+        
+        return function_calls
     
     def _extract_specific_functions(self, file_path: Path, function_names: List[str]) -> str:
         """Extract specific functions from a file, including their dependencies."""
@@ -355,7 +389,8 @@ class FunctionBundler:
         requirements: List[str],
         extracted_code: Dict[str, str],
         project_root: Path,
-        verifier_id: Optional[str] = None
+        verifier_id: Optional[str] = None,
+        same_module_deps: List[str] = []
     ) -> bytes:
         """Build a function bundle with statically extracted code."""
         
@@ -368,11 +403,29 @@ class FunctionBundler:
                 requirements_file = build_dir / "requirements.txt"
                 requirements_file.write_text("\n".join(sorted(set(requirements))))
                 
+                # Extract same-module dependencies
+                same_module_code = ""
+                if same_module_deps:
+                    # Read the module file that contains the verifier function
+                    mod_file = Path(func.__code__.co_filename)
+                    with open(mod_file, 'r', encoding='utf-8') as f:
+                        module_content = f.read()
+                    
+                    # Extract the source code for each dependency
+                    for dep_name in same_module_deps:
+                        dep_src = self._extract_function_source(module_content, dep_name)
+                        if dep_src:
+                            same_module_code += f"\n{dep_src}\n"
+                            logger.debug(f"Extracted same-module dependency: {dep_name}")
+                
                 # Create verifier.py with the main function
                 verifier_file = build_dir / "verifier.py"
                 verifier_content = f"""# Auto-generated verifier module
+{same_module_code}
 {src}
 """
+                print(f"Requirements code:\n{requirements_file.read_text()}")
+                print(f"Verifier.py content:\n{verifier_content}")
                 verifier_file.write_text(verifier_content)
                 
                 # Create local files with only extracted functions
@@ -421,3 +474,36 @@ class FunctionBundler:
         bundle_size = len(zip_buffer.getvalue())
         logger.debug(f"Created function bundle ({bundle_size:,} bytes)")
         return zip_buffer.getvalue() 
+    
+    def _extract_function_source(self, module_content: str, function_name: str) -> Optional[str]:
+        """Extract the source code of a specific function from module content."""
+        try:
+            tree = ast.parse(module_content)
+            
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef) and node.name == function_name:
+                    # Get the source lines for this function
+                    lines = module_content.split('\n')
+                    start_line = node.lineno - 1
+                    end_line = node.end_lineno if hasattr(node, 'end_lineno') else start_line + 1
+                    
+                    # Extract the function lines
+                    func_lines = lines[start_line:end_line]
+                    
+                    # Find the minimum indentation (excluding empty lines)
+                    min_indent = float('inf')
+                    for line in func_lines:
+                        if line.strip():  # Non-empty line
+                            indent = len(line) - len(line.lstrip())
+                            min_indent = min(min_indent, indent)
+                    
+                    # Remove the common indentation
+                    if min_indent < float('inf'):
+                        func_lines = [line[min_indent:] if line.strip() else line for line in func_lines]
+                    
+                    return '\n'.join(func_lines)
+                    
+        except Exception as e:
+            logger.warning(f"Failed to extract function {function_name}: {e}")
+            
+        return None 
