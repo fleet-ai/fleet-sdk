@@ -46,11 +46,6 @@ from .resources.browser import AsyncBrowserResource
 logger = logging.getLogger(__name__)
 
 
-async def _delete_instance(client: AsyncWrapper, instance_id: str) -> InstanceRecord:
-    response = await client.request("DELETE", f"/v1/env/instances/{instance_id}")
-    return InstanceRecord(**response.json())
-
-
 class AsyncEnvironment(EnvironmentBase):
     def __init__(self, client: AsyncWrapper, **kwargs):
         super().__init__(**kwargs)
@@ -92,6 +87,16 @@ class AsyncEnvironment(EnvironmentBase):
         self, function_code: str, function_name: str
     ) -> ExecuteFunctionResponse:
         return await self.instance.verify_raw(function_code, function_name)
+
+    async def check_bundle_exists(self, bundle_hash: str) -> VerifiersCheckResponse:
+        return await _check_bundle_exists(self._client, bundle_hash)
+
+    async def execute_verifier_remote(
+        self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
+    ) -> VerificationResponse:
+        return await _execute_verifier_remote(
+            self._client, bundle_data, args, kwargs, timeout
+        )
 
 
 class AsyncFleet:
@@ -167,32 +172,50 @@ class AsyncFleet:
         return instance
 
     async def check_bundle_exists(self, bundle_hash: str) -> VerifiersCheckResponse:
-        response = await self.client.request(
-            "GET", f"/v1/verifiers/check?sha256={bundle_hash}"
-        )
-        return VerifiersCheckResponse(**response.json())
+        return await _check_bundle_exists(self.client, bundle_hash)
 
     async def execute_verifier_remote(
         self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
     ) -> VerificationResponse:
-        bundle_b64 = base64.b64encode(bundle_data).decode("utf-8")
-
-        request = VerificationRequest(
-            bundle_data=bundle_b64,
-            args=list(args),
-            kwargs=kwargs,
-            timeout=timeout,
-            env_context={
-                "instance_id": self.base_url,
-                "manager_url": self.base_url,
-            },
+        return await _execute_verifier_remote(
+            self.client, bundle_data, args, kwargs, timeout
         )
-
-        response = await self.client.request(
-            "POST", "/v1/verifiers/execute", json=request.model_dump()
-        )
-
-        return VerificationResponse(**response.json())
 
     async def delete(self, instance_id: str) -> InstanceRecord:
         return await _delete_instance(self.client, instance_id)
+
+
+# Shared
+async def _delete_instance(client: AsyncWrapper, instance_id: str) -> InstanceRecord:
+    response = await client.request("DELETE", f"/v1/env/instances/{instance_id}")
+    return InstanceRecord(**response.json())
+
+
+async def _check_bundle_exists(self, bundle_hash: str) -> VerifiersCheckResponse:
+    response = await self.client.request(
+        "GET", f"/v1/verifiers/check?sha256={bundle_hash}"
+    )
+    return VerifiersCheckResponse(**response.json())
+
+
+async def _execute_verifier_remote(
+    self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
+) -> VerificationResponse:
+    bundle_b64 = base64.b64encode(bundle_data).decode("utf-8")
+
+    request = VerificationRequest(
+        bundle_data=bundle_b64,
+        args=list(args),
+        kwargs=kwargs,
+        timeout=timeout,
+        env_context={
+            "instance_id": self.base_url,
+            "manager_url": self.base_url,
+        },
+    )
+
+    response = await self.client.request(
+        "POST", "/v1/verifiers/execute", json=request.model_dump()
+    )
+
+    return VerificationResponse(**response.json())

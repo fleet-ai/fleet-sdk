@@ -14,6 +14,7 @@ import hashlib
 from typing import Any, Callable, Dict, Optional, List, TypeVar, Set
 
 from .bundler import FunctionBundler
+from ..client import AsyncEnvironment
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class AsyncVerifiedFunction:
         
         return self._bundle_data, self._bundle_sha
     
-    async def _check_bundle_status(self, env) -> tuple[str, bool]:
+    async def _check_bundle_status(self, env: AsyncEnvironment) -> tuple[str, bool]:
         """Check if bundle needs to be uploaded and return (sha, needs_upload)."""
         bundle_data, bundle_sha = self._get_or_create_bundle()
         
@@ -88,7 +89,7 @@ class AsyncVerifiedFunction:
         logger.info(f"Bundle {bundle_sha[:8]}... needs to be uploaded")
         return bundle_sha, True  # Upload needed
     
-    async def __call__(self, env, *args, **kwargs) -> float:
+    async def __call__(self, env: AsyncEnvironment, *args, **kwargs) -> float:
         """Local execution of the verifier function with env as first parameter."""
         try:
             result = self.func(env, *args, **kwargs)
@@ -111,7 +112,7 @@ class AsyncVerifiedFunction:
             # Return error score 0
             return 0.0
     
-    async def remote(self, env, *args, **kwargs) -> float:
+    async def remote(self, env: AsyncEnvironment, *args, **kwargs) -> float:
         """Remote execution of the verifier function with SHA-based bundle caching."""
         try:
             # Check if bundle needs to be uploaded
@@ -124,7 +125,7 @@ class AsyncVerifiedFunction:
                 
                 # TODO: Replace with dedicated upload endpoint when available
                 # For now, use the existing execute_verifier_remote that includes upload
-                response = await env.instance.execute_verifier_remote(
+                response = await env.execute_verifier_remote(
                     bundle_data=bundle_data,
                     verifier_id=self.verifier_id,
                     args=args,
@@ -139,7 +140,7 @@ class AsyncVerifiedFunction:
                 # Bundle already available - execute using verifier_id only
                 logger.info(f"Executing cached bundle {bundle_sha[:8]}... for {self.name}")
                 try:
-                    response = await env.instance.execute_verifier_by_id(
+                    response = await env.execute_verifier_by_id(
                         verifier_id=self.verifier_id,
                         args=args,
                         kwargs=kwargs
@@ -206,7 +207,7 @@ Remote traceback:
         except:
             raise RuntimeError(full_message)
     
-    def _get_env_id(self, env) -> str:
+    def _get_env_id(self, env: AsyncEnvironment) -> str:
         """Generate a unique identifier for the environment."""
         # Use instance base URL or similar unique identifier
         if hasattr(env, 'instance') and hasattr(env.instance, 'base_url'):
