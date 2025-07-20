@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 class AsyncEnvironment(EnvironmentBase):
-    def __init__(self, client: AsyncWrapper, **kwargs):
+    def __init__(self, client: Optional[AsyncWrapper], **kwargs):
         super().__init__(**kwargs)
         self._client = client
         self._instance: Optional[AsyncInstanceClient] = None
@@ -56,9 +56,15 @@ class AsyncEnvironment(EnvironmentBase):
     def instance(self) -> AsyncInstanceClient:
         if self._instance is None:
             self._instance = AsyncInstanceClient(
-                self.manager_url, self._client.httpx_client
+                self.manager_url, self._client.httpx_client if self._client else None
             )
         return self._instance
+
+    @property
+    def _load_client(self) -> AsyncWrapper:
+        if self._client is None:
+            raise ValueError("Client not initialized")
+        return self._client
 
     async def reset(
         self, seed: Optional[int] = None, timestamp: Optional[int] = None
@@ -78,7 +84,7 @@ class AsyncEnvironment(EnvironmentBase):
         return await self.instance.resources()
 
     async def close(self) -> InstanceRecord:
-        return await _delete_instance(self._client, self.instance_id)
+        return await _delete_instance(self._load_client, self.instance_id)
 
     async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
         return await self.instance.verify(validator)
@@ -89,13 +95,13 @@ class AsyncEnvironment(EnvironmentBase):
         return await self.instance.verify_raw(function_code, function_name)
 
     async def check_bundle_exists(self, bundle_hash: str) -> VerifiersCheckResponse:
-        return await _check_bundle_exists(self._client, bundle_hash)
+        return await _check_bundle_exists(self._load_client, bundle_hash)
 
     async def execute_verifier_remote(
         self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
     ) -> VerificationResponse:
         return await _execute_verifier_remote(
-            self._client, bundle_data, args, kwargs, timeout
+            self._load_client, bundle_data, args, kwargs, timeout
         )
 
 
@@ -191,31 +197,29 @@ async def _delete_instance(client: AsyncWrapper, instance_id: str) -> InstanceRe
     return InstanceRecord(**response.json())
 
 
-async def _check_bundle_exists(self, bundle_hash: str) -> VerifiersCheckResponse:
-    response = await self.client.request(
-        "GET", f"/v1/verifiers/check?sha256={bundle_hash}"
-    )
+async def _check_bundle_exists(
+    client: AsyncWrapper, bundle_hash: str
+) -> VerifiersCheckResponse:
+    response = await client.request("GET", f"/v1/verifiers/check?sha256={bundle_hash}")
     return VerifiersCheckResponse(**response.json())
 
 
 async def _execute_verifier_remote(
-    self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
+    client: AsyncWrapper,
+    bundle_data: bytes,
+    args: tuple,
+    kwargs: dict,
+    timeout: Optional[int] = 30,
 ) -> VerificationResponse:
     bundle_b64 = base64.b64encode(bundle_data).decode("utf-8")
 
-    request = VerificationRequest(
-        bundle_data=bundle_b64,
-        args=list(args),
-        kwargs=kwargs,
-        timeout=timeout,
-        env_context={
-            "instance_id": self.base_url,
-            "manager_url": self.base_url,
-        },
-    )
+    request_data = {
+        "bundle_data": bundle_b64,
+        "args": list(args),
+        "kwargs": kwargs,
+        "timeout": timeout,
+    }
 
-    response = await self.client.request(
-        "POST", "/v1/verifiers/execute", json=request.model_dump()
-    )
+    response = await client.request("POST", "/v1/verifiers/execute", json=request_data)
 
     return VerificationResponse(**response.json())
