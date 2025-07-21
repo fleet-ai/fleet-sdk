@@ -40,6 +40,10 @@ class BaseWrapper:
             "X-Fleet-SDK-Version": "1.0.0",
         }
         headers["Authorization"] = f"Bearer {self.api_key}"
+        # Debug log
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Headers being sent: {headers}")
         return headers
 
 
