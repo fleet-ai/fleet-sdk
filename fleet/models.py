@@ -69,8 +69,8 @@ class ValidationError(BaseModel):
 
 
 class VerifiersCheckResponse(BaseModel):
-    stub: Optional[str] = Field(
-        None, description="Name of the function stub", title="Stub"
+    key: Optional[str] = Field(
+        None, description="Verifier artifact key", title="Key"
     )
     version: Optional[int] = Field(
         None, description="Version of the verifier artifact", title="Version"
@@ -92,21 +92,54 @@ class VerifiersCheckResponse(BaseModel):
     )
 
 
-class VerificationRequest(BaseModel):
-    stub: str = Field(..., description="Name of the function stub", title="Stub")
+class VerifiersExecuteRequest(BaseModel):
+    sha256: str = Field(..., description="SHA256 hash of the function", title="SHA256")
+    key: Optional[str] = Field(None, description="Verifier key", title="Key")
+    bundle: Optional[str] = Field(None, description="Base64 encoded bundle data", title="Bundle")
+    args: Optional[str] = Field(None, description="Base64 encoded arguments", title="Args")
     function_name: Optional[str] = Field(
         "verify", description="Name of the function to execute", title="Function Name"
     )
-    region: Optional[str] = Field(
-        "us-east-1", description="AWS region for execution", title="Region"
-    )
     timeout: Optional[conint(ge=1, le=300)] = Field(
-        30, description="Execution timeout in seconds", title="Timeout"
+        60, description="Execution timeout in seconds", title="Timeout"
     )
-    metadata: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Optional metadata to pass to the function as global variables",
-        title="Metadata",
+    region: Optional[str] = Field(
+        None, description="AWS region for execution", title="Region"
+    )
+
+
+class VerifiersExecuteResponse(BaseModel):
+    key: Optional[str] = Field(
+        None, description="Key of the verifier artifact", title="Key"
+    )
+    version: Optional[int] = Field(
+        None, description="Version of the verifier artifact", title="Version"
+    )
+    display_src: Optional[str] = Field(
+        None, description="Display source code of the verifier", title="Display Src"
+    )
+    created_at: Optional[str] = Field(
+        None, description="Creation timestamp", title="Created At"
+    )
+    comment: Optional[str] = Field(
+        None, description="Comment about the verifier", title="Comment"
+    )
+    success: bool = Field(
+        ..., description="Whether the verification was successful", title="Success"
+    )
+    result: Any = Field(
+        ..., description="The return value of the function", title="Result"
+    )
+    error: Optional[Dict[str, Any]] = Field(
+        None, description="Error details if verification failed", title="Error"
+    )
+    execution_time_ms: int = Field(
+        ..., description="Execution time in milliseconds", title="Execution Time Ms"
+    )
+    bundle_cache_hit: bool = Field(
+        False,
+        description="Whether the bundle was already cached",
+        title="Bundle Cache Hit",
     )
 
 
@@ -128,8 +161,8 @@ class VerificationResponse(BaseModel):
         description="Whether the bundle was already cached",
         title="Bundle Cache Hit",
     )
-    meta: Dict[str, Any] = Field(
-        ..., description="Metadata about the execution", title="Meta"
+    meta: Optional[Dict[str, Any]] = Field(
+        None, description="Metadata about the execution", title="Meta"
     )
 
 

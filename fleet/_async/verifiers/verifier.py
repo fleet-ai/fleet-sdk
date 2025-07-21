@@ -36,13 +36,14 @@ class AsyncVerifiedFunction:
     def __init__(
         self,
         func: F,
-        name: str,
-        verifier_id: str,
-        extra_requirements: Optional[List[str]] = None
+        key: str,
+        extra_requirements: Optional[List[str]] = None,
+        verifier_id: Optional[str] = None
     ):
         self.func = func
-        self.name = name
-        self.verifier_id = verifier_id
+        self.key = key
+        self.name = key  # Keep name for backward compatibility
+        self.verifier_id = verifier_id or str(uuid.uuid4())
         self.extra_requirements = extra_requirements or []
         self._bundler = FunctionBundler()
         self._bundle_sha: Optional[str] = None  # Cached bundle SHA
@@ -99,7 +100,8 @@ class AsyncVerifiedFunction:
                 # Direct score return
                 return float(result)
             elif isinstance(result, dict) and "score" in result:
-                return float(result["score"])
+                # For local execution, return the full dict if that's what the function returns
+                return result
             else:
                 # Try to extract score from object attributes
                 if hasattr(result, 'score'):
@@ -120,16 +122,17 @@ class AsyncVerifiedFunction:
             
             if needs_upload:
                 # Need to upload bundle to S3
-                logger.info(f"Uploading bundle {bundle_sha[:8]}... for {self.name}")
+                logger.info(f"Uploading bundle {bundle_sha[:8]}... for {self.key}")
                 bundle_data, _ = self._get_or_create_bundle()
                 
-                # TODO: Replace with dedicated upload endpoint when available
-                # For now, use the existing execute_verifier_remote that includes upload
                 response = await env.execute_verifier_remote(
                     bundle_data=bundle_data,
-                    verifier_id=self.verifier_id,
+                    bundle_sha=bundle_sha,
+                    key=self.key,
+                    function_name=self.func.__name__,
                     args=args,
-                    kwargs=kwargs
+                    kwargs=kwargs,
+                    needs_upload=True
                 )
                 
                 # Mark as uploaded after successful execution
@@ -137,24 +140,19 @@ class AsyncVerifiedFunction:
                 logger.debug(f"Registered bundle {bundle_sha[:8]}... as uploaded")
                 
             else:
-                # Bundle already available - execute using verifier_id only
-                logger.info(f"Executing cached bundle {bundle_sha[:8]}... for {self.name}")
-                try:
-                    response = await env.execute_verifier_by_id(
-                        verifier_id=self.verifier_id,
-                        args=args,
-                        kwargs=kwargs
-                    )
-                except Exception as e:
-                    # Handle server restart or bundle not found
-                    if self._is_bundle_not_found_error(e):
-                        logger.warning(f"Bundle {bundle_sha[:8]}... not found on server, removing from cache")
-                        # Remove from tracking and retry with upload
-                        _uploaded_bundle_shas.discard(bundle_sha)
-                        logger.info(f"Retrying with upload for {self.name}")
-                        return await self.remote(env, *args, **kwargs)  # Retry - will upload this time
-                    else:
-                        raise
+                # Bundle already available - execute without upload
+                logger.info(f"Executing cached bundle {bundle_sha[:8]}... for {self.key}")
+                bundle_data, _ = self._get_or_create_bundle()
+                
+                response = await env.execute_verifier_remote(
+                    bundle_data=bundle_data,  # Still need bundle_data for local caching
+                    bundle_sha=bundle_sha,
+                    key=self.key,
+                    function_name=self.func.__name__,
+                    args=args,
+                    kwargs=kwargs,
+                    needs_upload=False  # Don't upload, just execute
+                )
             
             # Handle response
             if response.success:
@@ -163,7 +161,10 @@ class AsyncVerifiedFunction:
                 self._raise_remote_error(response.error)
                 
         except Exception as e:
-            logger.error(f"Remote execution failed for {self.name}: {e}")
+            logger.error(f"Remote execution failed for {self.key}: {e}")
+            # If it's an HTTP error, try to get more details
+            if hasattr(e, 'response') and hasattr(e.response, 'text'):
+                logger.error(f"Server response: {e.response.text}")
             raise
     
     def _process_result(self, result: Any) -> float:
@@ -229,8 +230,7 @@ Remote traceback:
 
 
 def verifier(
-    name: Optional[str] = None,
-    verifier_id: Optional[str] = None,
+    key: Optional[str] = None,
     extra_requirements: Optional[List[str]] = None
 ) -> Callable[[F], AsyncVerifiedFunction]:
     """
@@ -268,14 +268,14 @@ def verifier(
         result = await check_user_count.remote(env1, 5)
     """
     def decorator(func: F) -> AsyncVerifiedFunction:
-        verifier_name = name or func.__name__
-        verifier_uuid = verifier_id or str(uuid.uuid4())
+        verifier_key = key or func.__name__
+        verifier_uuid = str(uuid.uuid4())
         
         return AsyncVerifiedFunction(
             func,
-            verifier_name,
-            verifier_uuid,
-            extra_requirements
+            verifier_key,
+            extra_requirements,
+            verifier_uuid
         )
     
     return decorator 

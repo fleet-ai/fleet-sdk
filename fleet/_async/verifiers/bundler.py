@@ -56,7 +56,8 @@ class FunctionBundler:
             requirements = self._merge_requirements(requirements, extra_requirements)
 
         # 4. Build optimized bundle
-        src = inspect.getsource(func)
+        # Get source without decorator
+        src = self._get_function_source_without_decorator(func)
         bundle_bytes = self._build_function_bundle(
             func,
             src,
@@ -540,6 +541,11 @@ class FunctionBundler:
             try:
                 # Create requirements.txt
                 requirements_file = build_dir / "requirements.txt"
+                # Ensure fleet-python is always included
+                if not requirements:
+                    requirements = ["fleet-python"]
+                elif "fleet-python" not in [r.split("==")[0].split(">=")[0] for r in requirements]:
+                    requirements.append("fleet-python")
                 requirements_file.write_text("\n".join(sorted(set(requirements))))
 
                 # Extract same-module dependencies
@@ -567,8 +573,6 @@ class FunctionBundler:
 {same_module_code}
 {src}
 """
-                print(f"Requirements code:\n{requirements_file.read_text()}")
-                print(f"Verifier.py content:\n{verifier_content}")
                 verifier_file.write_text(verifier_content)
 
                 # Create local files with only extracted functions
@@ -659,3 +663,37 @@ class FunctionBundler:
             logger.warning(f"Failed to extract function {function_name}: {e}")
 
         return None
+    
+    def _get_function_source_without_decorator(self, func: Callable) -> str:
+        """Get function source code without the @verifier decorator."""
+        source = inspect.getsource(func)
+        lines = source.split('\n')
+        
+        # Find where the function definition starts
+        func_start = -1
+        for i, line in enumerate(lines):
+            if line.strip().startswith('def '):
+                func_start = i
+                break
+        
+        if func_start == -1:
+            # Couldn't find function definition, return original
+            return source
+        
+        # Return only from the function definition onward
+        func_lines = lines[func_start:]
+        
+        # Remove common indentation
+        if func_lines:
+            # Find minimum indentation (excluding empty lines)
+            min_indent = float('inf')
+            for line in func_lines:
+                if line.strip():
+                    indent = len(line) - len(line.lstrip())
+                    min_indent = min(min_indent, indent)
+            
+            # Remove the common indentation
+            if min_indent < float('inf'):
+                func_lines = [line[min_indent:] if line.strip() else line for line in func_lines]
+        
+        return '\n'.join(func_lines)

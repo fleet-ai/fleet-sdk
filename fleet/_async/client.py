@@ -27,8 +27,8 @@ from ..models import (
     InstanceRecord,
     Environment as EnvironmentModel,
     VerifiersCheckResponse,
-    VerificationRequest,
     VerificationResponse,
+    VerifiersExecuteResponse,
 )
 
 from .instance import (
@@ -99,10 +99,26 @@ class AsyncEnvironment(EnvironmentBase):
         return await _check_bundle_exists(self._load_client, bundle_hash)
 
     async def execute_verifier_remote(
-        self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
-    ) -> VerificationResponse:
+        self, 
+        bundle_data: bytes, 
+        bundle_sha: str,
+        key: str,
+        function_name: str,
+        args: tuple, 
+        kwargs: dict, 
+        timeout: Optional[int] = 30,
+        needs_upload: bool = True,
+    ) -> VerifiersExecuteResponse:
         return await _execute_verifier_remote(
-            self._load_client, bundle_data, args, kwargs, timeout
+            self._load_client, 
+            bundle_data, 
+            bundle_sha,
+            key,
+            function_name,
+            args, 
+            kwargs, 
+            timeout,
+            needs_upload
         )
 
     def __getstate__(self):
@@ -192,7 +208,7 @@ class AsyncFleet:
 
     async def execute_verifier_remote(
         self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
-    ) -> VerificationResponse:
+    ) -> VerifiersExecuteResponse:
         return await _execute_verifier_remote(
             self.client, bundle_data, args, kwargs, timeout
         )
@@ -217,21 +233,46 @@ async def _check_bundle_exists(
 async def _execute_verifier_remote(
     client: AsyncWrapper,
     bundle_data: bytes,
+    bundle_sha: str,
+    key: str,
+    function_name: str,
     args: tuple,
     kwargs: dict,
     timeout: Optional[int] = 30,
+    needs_upload: bool = True,
 ) -> VerificationResponse:
-    bundle_b64 = base64.b64encode(bundle_data).decode("utf-8")
-
-    args_kwargs_pickled = cloudpickle.dumps({"args": args, "kwargs": kwargs})
+    # Pickle args and kwargs together
+    # The first arg should be None as a placeholder for env
+    args_with_none = (None,) + args
+    args_kwargs_pickled = cloudpickle.dumps({"args": args_with_none, "kwargs": kwargs})
     args_kwargs_b64 = base64.b64encode(args_kwargs_pickled).decode("utf-8")
 
+    # Build request data
     request_data = {
-        "bundle_data": bundle_b64,
+        "key": key,
+        "sha256": bundle_sha,
         "args": args_kwargs_b64,
+        "function_name": function_name,
         "timeout": timeout,
+        "region": "us-west-1",  # TODO: make configurable
     }
+    
+    # Add bundle data only if upload is needed
+    if needs_upload:
+        bundle_b64 = base64.b64encode(bundle_data).decode("utf-8")
+        request_data["bundle"] = bundle_b64
+    
+    # Debug logging
+    logger.debug(f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}")
+    logger.debug(f"Request has bundle: {needs_upload}")
+    logger.debug(f"Using client with base_url: {client.base_url}")
 
+    # Note: This should be called on the instance URL, not the orchestrator
+    # The instance has manager URLs for verifier execution
     response = await client.request("POST", "/v1/verifiers/execute", json=request_data)
+    
+    # Debug the response
+    response_json = response.json()
+    logger.debug(f"Verifier execute response: {response_json}")
 
-    return VerificationResponse(**response.json())
+    return VerifiersExecuteResponse(**response_json)
