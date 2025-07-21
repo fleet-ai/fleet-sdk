@@ -266,6 +266,8 @@ async def _execute_verifier_remote(
     logger.debug(f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}")
     logger.debug(f"Request has bundle: {needs_upload}")
     logger.debug(f"Using client with base_url: {client.base_url}")
+    logger.debug(f"Request data keys: {list(request_data.keys())}")
+    logger.debug(f"Bundle size: {len(request_data.get('bundle', ''))} chars" if 'bundle' in request_data else "No bundle")
 
     # Note: This should be called on the instance URL, not the orchestrator
     # The instance has manager URLs for verifier execution
