@@ -22,10 +22,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Set up logging to see debug messages
-logging.basicConfig(level=logging.DEBUG, format='%(name)s - %(levelname)s - %(message)s')
+# logging.basicConfig(level=logging.DEBUG, format='%(name)s - %(levelname)s - %(message)s')
 
 
-@verifier(key="simple_threshold_check")
+@verifier(key="simple_threshold_check_v5")
 def simple_threshold_check(env, value: int, threshold: int = 10) -> float:
     """Simple verifier that checks if a value exceeds a threshold.
     
@@ -35,7 +35,7 @@ def simple_threshold_check(env, value: int, threshold: int = 10) -> float:
     return 1.0 if value > threshold else 0.0
 
 
-@verifier(key="calculate_score")
+@verifier(key="calculate_score_v5")
 def calculate_score(env, scores: list) -> float:
     """Calculate average score from a list of values.
     
@@ -51,35 +51,35 @@ def calculate_score(env, scores: list) -> float:
     return min(1.0, max(0.0, normalized))
 
 
-@verifier(key="data_quality_check", extra_requirements=["numpy>=1.24.0"])
-def data_quality_check(env, data_config: dict) -> dict:
-    """Example verifier with external dependencies and detailed results.
+# @verifier(key="data_quality_check_v3", extra_requirements=["numpy>=1.24.0"])
+# def data_quality_check(env, data_config: dict) -> dict:
+#     """Example verifier with external dependencies and detailed results.
     
-    This would typically use numpy for data analysis, but we'll mock it here.
-    """
-    import random
+#     This would typically use numpy for data analysis, but we'll mock it here.
+#     """
+#     import random
     
-    checks_performed = []
-    total_score = 0.0
+#     checks_performed = []
+#     total_score = 0.0
     
-    # Simulate various data quality checks
-    for check_name, check_params in data_config.items():
-        # Mock check result
-        check_score = random.uniform(0.7, 1.0)
-        checks_performed.append({
-            "name": check_name,
-            "score": check_score,
-            "params": check_params
-        })
-        total_score += check_score
+#     # Simulate various data quality checks
+#     for check_name, check_params in data_config.items():
+#         # Mock check result
+#         check_score = random.uniform(0.7, 1.0)
+#         checks_performed.append({
+#             "name": check_name,
+#             "score": check_score,
+#             "params": check_params
+#         })
+#         total_score += check_score
     
-    final_score = total_score / len(checks_performed) if checks_performed else 0.0
+#     final_score = total_score / len(checks_performed) if checks_performed else 0.0
     
-    return {
-        "score": final_score,
-        "checks_performed": len(checks_performed),
-        "details": checks_performed
-    }
+#     return {
+#         "score": final_score,
+#         "checks_performed": len(checks_performed),
+#         "details": checks_performed
+#     }
 
 
 async def main():
@@ -87,7 +87,7 @@ async def main():
     print("=== Fleet Verifier Examples ===\n")
     
     # Get environment instance
-    env_id = os.getenv("FLEET_ENV_ID", "bb6566cb")
+    env_id = os.getenv("FLEET_ENV_ID", "a562dba8")
     print(f"Creating environment (ID: {env_id})...")
     
     try:
@@ -143,62 +143,62 @@ async def main():
         print(f"Remote execution failed: {e}\n")
 
     # Example 3: Verifier with complex return type and external dependencies
-    print("3. Data Quality Check (with external dependencies)")
-    print("-" * 40)
+    # print("3. Data Quality Check (with external dependencies)")
+    # print("-" * 40)
     
-    quality_config = {
-        "completeness": {"threshold": 0.95},
-        "accuracy": {"tolerance": 0.02},
-        "consistency": {"rules": ["no_nulls", "valid_range"]}
-    }
+    # quality_config = {
+    #     "completeness": {"threshold": 0.95},
+    #     "accuracy": {"tolerance": 0.02},
+    #     "consistency": {"rules": ["no_nulls", "valid_range"]}
+    # }
     
-    result = await data_quality_check(env, data_config=quality_config)
-    print(f"Local execution result:")
-    print(f"   Overall score: {result['score']:.3f}")
-    print(f"   Checks performed: {result['checks_performed']}")
+    # result = await data_quality_check(env, data_config=quality_config)
+    # print(f"Local execution result:")
+    # print(f"   Overall score: {result['score']:.3f}")
+    # print(f"   Checks performed: {result['checks_performed']}")
     
-    # Try remote execution
-    try:
-        remote_result = await data_quality_check.remote(env, data_config=quality_config)
-        print(f"\nRemote execution result:")
-        print(f"   Overall score: {remote_result['score']:.3f}")
-        print(f"   ✓ Complex verifier with numpy requirement executed remotely!\n")
-    except Exception as e:
-        print(f"   Remote execution failed: {e}\n")
+    # # Try remote execution
+    # try:
+    #     remote_result = await data_quality_check.remote(env, data_config=quality_config)
+    #     print(f"\nRemote execution result:")
+    #     print(f"   Overall score: {remote_result['score']:.3f}")
+    #     print(f"   ✓ Complex verifier with numpy requirement executed remotely!\n")
+    # except Exception as e:
+    #     print(f"   Remote execution failed: {e}\n")
 
-    # Example 4: Bundle inspection
-    print("4. Bundle Inspection")
-    print("-" * 40)
+    # # Example 4: Bundle inspection
+    # print("4. Bundle Inspection")
+    # print("-" * 40)
     
-    # Show bundle details for a verifier
-    bundle_data, bundle_sha = data_quality_check._get_or_create_bundle()
-    print(f"Bundle SHA: {bundle_sha[:16]}...")
-    print(f"Bundle size: {len(bundle_data)} bytes")
+    # # Show bundle details for a verifier
+    # bundle_data, bundle_sha = data_quality_check._get_or_create_bundle()
+    # print(f"Bundle SHA: {bundle_sha[:16]}...")
+    # print(f"Bundle size: {len(bundle_data)} bytes")
     
-    # Show bundle contents
-    import zipfile
-    import io
+    # # Show bundle contents
+    # import zipfile
+    # import io
     
-    with zipfile.ZipFile(io.BytesIO(bundle_data), 'r') as zf:
-        print("\nBundle contents:")
-        for filename in sorted(zf.namelist()):
-            file_info = zf.getinfo(filename)
-            print(f"  - {filename} ({file_info.file_size} bytes)")
+    # with zipfile.ZipFile(io.BytesIO(bundle_data), 'r') as zf:
+    #     print("\nBundle contents:")
+    #     for filename in sorted(zf.namelist()):
+    #         file_info = zf.getinfo(filename)
+    #         print(f"  - {filename} ({file_info.file_size} bytes)")
             
-            if filename == "requirements.txt":
-                content = zf.read(filename).decode('utf-8')
-                print(f"    Contents: {content.strip()}")
-            elif filename == "verifier.py":
-                content = zf.read(filename).decode('utf-8')
-                print(f"    First 200 chars: {content[:200]}...")
+    #         if filename == "requirements.txt":
+    #             content = zf.read(filename).decode('utf-8')
+    #             print(f"    Contents: {content.strip()}")
+    #         elif filename == "verifier.py":
+    #             content = zf.read(filename).decode('utf-8')
+    #             print(f"    First 200 chars: {content[:200]}...")
 
-    # Clean up
-    print("\nCleaning up...")
-    try:
-        await env.close()
-    except Exception as e:
-        print(f"Note: Cleanup failed (this is OK): {e}")
-    print("✓ Done!")
+    # # Clean up
+    # print("\nCleaning up...")
+    # try:
+    #     await env.close()
+    # except Exception as e:
+    #     print(f"Note: Cleanup failed (this is OK): {e}")
+    # print("✓ Done!")
 
 
 if __name__ == "__main__":
