@@ -26,10 +26,10 @@ from .instance import (
     InstanceClient,
     ResetRequest,
     ResetResponse,
-    ValidatorType,
     ExecuteFunctionResponse,
 )
 from .config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT, REGION_BASE_URL
+from .instance.client import ValidatorType
 from .instance.base import default_httpx_client
 from .resources.base import Resource
 from .resources.sqlite import SQLiteResource
@@ -84,6 +84,8 @@ class Environment(EnvironmentBase):
         self, function_code: str, function_name: str
     ) -> ExecuteFunctionResponse:
         return self.instance.verify_raw(function_code, function_name)
+
+
 
 
 class Fleet:

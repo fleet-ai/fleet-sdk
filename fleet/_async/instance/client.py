@@ -51,7 +51,8 @@ class AsyncInstanceClient:
         self.base_url = url
         self.client = AsyncWrapper(
             url=self.base_url,
-            httpx_client=httpx_client or default_httpx_client(DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT),
+            httpx_client=httpx_client
+            or default_httpx_client(DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT),
         )
         self._resources: Optional[List[ResourceModel]] = None
         self._resources_state: Dict[str, Dict[str, Resource]] = {

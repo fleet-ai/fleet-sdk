@@ -12,7 +12,6 @@ from ...instance.models import (
 )
 
 __all__ = [
-    "ValidatorType",
     "AsyncInstanceClient",
     "ResetRequest",
     "ResetResponse",
@@ -20,5 +19,5 @@ __all__ = [
     "ChromeStartRequest",
     "ChromeStartResponse",
     "ChromeStatusResponse",
-    "ExecuteFunctionResponse"
+    "ExecuteFunctionResponse",
 ]

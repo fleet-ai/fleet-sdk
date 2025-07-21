@@ -29,6 +29,8 @@ dependencies = [
     "httpx>=0.27.0",
     "httpx-retries>=0.4.0",
     "typing-extensions>=4.0.0",
+    "modulegraph2>=0.2.0",
+    cloudpickle==3.1.1,
 ]
 
 [project.optional-dependencies]
@@ -88,6 +90,7 @@ testpaths = ["tests"]
 "AsyncFleet" = "Fleet"
 "AsyncWrapper" = "SyncWrapper"
 "AsyncResource" = "Resource"
+"AsyncVerifiedFunction" = "VerifiedFunction"
 "AsyncSQLiteResource" = "SQLiteResource"
 "AsyncBrowserResource" = "BrowserResource"
 "AsyncFleetPlaywrightWrapper" = "FleetPlaywrightWrapper"
