@@ -25,7 +25,7 @@ load_dotenv()
 # logging.basicConfig(level=logging.DEBUG, format='%(name)s - %(levelname)s - %(message)s')
 
 
-@verifier(key="simple_threshold_check_v5")
+@verifier(key="simple_threshold_check_v6")
 def simple_threshold_check(env, value: int, threshold: int = 10) -> float:
     """Simple verifier that checks if a value exceeds a threshold.
     
@@ -35,7 +35,7 @@ def simple_threshold_check(env, value: int, threshold: int = 10) -> float:
     return 1.0 if value > threshold else 0.0
 
 
-@verifier(key="calculate_score_v5")
+@verifier(key="calculate_score_v6")
 def calculate_score(env, scores: list) -> float:
     """Calculate average score from a list of values.
     
