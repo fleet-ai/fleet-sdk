@@ -7,7 +7,6 @@ both local execution and remote execution via .remote() method.
 import inspect
 import functools
 import traceback
-import asyncio
 from typing import Any, Callable, Dict, Optional, TypeVar, Union
 import uuid
 import logging
@@ -26,11 +25,12 @@ class SyncVerifiedFunction:
     def __init__(
         self,
         func: F,
-        name: str,
+        key: str,
         verifier_id: str
     ):
         self.func = func
-        self.name = name
+        self.key = key
+        self.name = key  # Keep name for backward compatibility
         self.verifier_id = verifier_id
         
         # Copy function metadata
@@ -55,12 +55,12 @@ class SyncVerifiedFunction:
                     raise ValueError(f"Verifier function must return a score (number). Got {type(result)}")
                     
         except Exception as e:
-            logger.error(f"Error in verifier {self.name}: {e}")
+            logger.error(f"Error in verifier {self.key}: {e}")
             # Return error score 0
             return 0.0
 
 def verifier(
-    name: Optional[str] = None,
+    key: Optional[str] = None,
     verifier_id: Optional[str] = None
 ) -> Callable[[F], SyncVerifiedFunction]:
     """
@@ -71,11 +71,11 @@ def verifier(
     across different environments.
     
     Args:
-        name: Optional name for the verifier. Defaults to function name.
+        key: Optional key for the verifier. Defaults to function name.
         verifier_id: Optional unique ID for the verifier. Defaults to generated UUID.
     
     Example:
-        @verifier(name="test_database_state")
+        @verifier(key="test_database_state")
         def check_user_count(env, expected_count: int) -> float:
             db = env.db()
             result = db.query("SELECT COUNT(*) FROM users")
@@ -91,12 +91,12 @@ def verifier(
         result = await check_user_count(env2, 5)  # Same verifier, different env
     """
     def decorator(func: F) -> SyncVerifiedFunction:
-        verifier_name = name or func.__name__
+        verifier_key = key or func.__name__
         verifier_uuid = verifier_id or str(uuid.uuid4())
         
         return SyncVerifiedFunction(
             func,
-            verifier_name,
+            verifier_key,
             verifier_uuid
         )
     

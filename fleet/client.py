@@ -14,13 +14,22 @@
 
 """Fleet API Client for making HTTP requests to Fleet services."""
 
-import os
+import base64
+import cloudpickle
 import httpx
 import logging
-from typing import Optional, List
+import os
+from typing import List, Optional
 
 from .base import EnvironmentBase, SyncWrapper
-from .models import InstanceRequest, InstanceRecord, Environment as EnvironmentModel
+from .models import (
+    InstanceRequest,
+    InstanceRecord,
+    Environment as EnvironmentModel,
+    VerifiersCheckResponse,
+    VerificationResponse,
+    VerifiersExecuteResponse,
+)
 
 from .instance import (
     InstanceClient,
@@ -29,8 +38,8 @@ from .instance import (
     ExecuteFunctionResponse,
 )
 from .config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT, REGION_BASE_URL
-from .instance.client import ValidatorType
 from .instance.base import default_httpx_client
+from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import SQLiteResource
 from .resources.browser import BrowserResource
@@ -38,13 +47,8 @@ from .resources.browser import BrowserResource
 logger = logging.getLogger(__name__)
 
 
-def _delete_instance(client: SyncWrapper, instance_id: str) -> InstanceRecord:
-    response = client.request("DELETE", f"/v1/env/instances/{instance_id}")
-    return InstanceRecord(**response.json())
-
-
 class Environment(EnvironmentBase):
-    def __init__(self, client: SyncWrapper, **kwargs):
+    def __init__(self, client: Optional[SyncWrapper], **kwargs):
         super().__init__(**kwargs)
         self._client = client
         self._instance: Optional[InstanceClient] = None
@@ -53,9 +57,15 @@ class Environment(EnvironmentBase):
     def instance(self) -> InstanceClient:
         if self._instance is None:
             self._instance = InstanceClient(
-                self.manager_url, self._client.httpx_client
+                self.manager_url, self._client.httpx_client if self._client else None
             )
         return self._instance
+
+    @property
+    def _load_client(self) -> SyncWrapper:
+        if self._client is None:
+            raise ValueError("Client not initialized")
+        return self._client
 
     def reset(
         self, seed: Optional[int] = None, timestamp: Optional[int] = None
@@ -75,7 +85,7 @@ class Environment(EnvironmentBase):
         return self.instance.resources()
 
     def close(self) -> InstanceRecord:
-        return _delete_instance(self._client, self.instance_id)
+        return _delete_instance(self._load_client, self.instance_id)
 
     def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
         return self.instance.verify(validator)
@@ -85,7 +95,40 @@ class Environment(EnvironmentBase):
     ) -> ExecuteFunctionResponse:
         return self.instance.verify_raw(function_code, function_name)
 
+    def check_bundle_exists(self, bundle_hash: str) -> VerifiersCheckResponse:
+        return _check_bundle_exists(self._load_client, bundle_hash)
 
+    def execute_verifier_remote(
+        self, 
+        bundle_data: bytes, 
+        bundle_sha: str,
+        key: str,
+        function_name: str,
+        args: tuple, 
+        kwargs: dict, 
+        timeout: Optional[int] = 30,
+        needs_upload: bool = True,
+    ) -> VerifiersExecuteResponse:
+        return _execute_verifier_remote(
+            self._load_client, 
+            bundle_data, 
+            bundle_sha,
+            key,
+            function_name,
+            args, 
+            kwargs, 
+            timeout,
+            needs_upload
+        )
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_client", None)
+        state.pop("_instance", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
 
 class Fleet:
@@ -160,5 +203,78 @@ class Fleet:
         instance.instance.load()
         return instance
 
+    def check_bundle_exists(self, bundle_hash: str) -> VerifiersCheckResponse:
+        return _check_bundle_exists(self.client, bundle_hash)
+
+    def execute_verifier_remote(
+        self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
+    ) -> VerifiersExecuteResponse:
+        return _execute_verifier_remote(
+            self.client, bundle_data, args, kwargs, timeout
+        )
+
     def delete(self, instance_id: str) -> InstanceRecord:
         return _delete_instance(self.client, instance_id)
+
+
+# Shared
+def _delete_instance(client: SyncWrapper, instance_id: str) -> InstanceRecord:
+    response = client.request("DELETE", f"/v1/env/instances/{instance_id}")
+    return InstanceRecord(**response.json())
+
+
+def _check_bundle_exists(
+    client: SyncWrapper, bundle_hash: str
+) -> VerifiersCheckResponse:
+    response = client.request("GET", f"/v1/verifiers/check?sha256={bundle_hash}")
+    return VerifiersCheckResponse(**response.json())
+
+
+def _execute_verifier_remote(
+    client: SyncWrapper,
+    bundle_data: bytes,
+    bundle_sha: str,
+    key: str,
+    function_name: str,
+    args: tuple,
+    kwargs: dict,
+    timeout: Optional[int] = 30,
+    needs_upload: bool = True,
+) -> VerificationResponse:
+    # Pickle args and kwargs together
+    # The first arg should be None as a placeholder for env
+    args_with_none = (None,) + args
+    args_kwargs_pickled = cloudpickle.dumps({"args": args_with_none, "kwargs": kwargs})
+    args_kwargs_b64 = base64.b64encode(args_kwargs_pickled).decode("utf-8")
+
+    # Build request data
+    request_data = {
+        "key": key,
+        "sha256": bundle_sha,
+        "args": args_kwargs_b64,
+        "function_name": function_name,
+        "timeout": timeout,
+        "region": "us-west-1",  # TODO: make configurable
+    }
+    
+    # Add bundle data only if upload is needed
+    if needs_upload:
+        bundle_b64 = base64.b64encode(bundle_data).decode("utf-8")
+        request_data["bundle"] = bundle_b64
+    
+    # Debug logging
+    logger.debug(f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}")
+    logger.debug(f"Request has bundle: {needs_upload}")
+    logger.debug(f"Using client with base_url: {client.base_url}")
+    logger.debug(f"Request data keys: {list(request_data.keys())}")
+    logger.debug(f"Bundle size: {len(request_data.get('bundle', ''))} chars" if 'bundle' in request_data else "No bundle")
+
+    # Note: This should be called on the instance URL, not the orchestrator
+    # The instance has manager URLs for verifier execution
+    response = client.request("POST", "/v1/verifiers/execute", json=request_data)
+    
+    # Debug the response
+    response_json = response.json()
+    logger.debug(f"Verifier execute response: {response_json}")
+
+    return VerifiersExecuteResponse(**response_json)

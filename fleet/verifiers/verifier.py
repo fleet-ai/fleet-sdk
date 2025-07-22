@@ -14,7 +14,7 @@ import hashlib
 from typing import Any, Callable, Dict, Optional, List, TypeVar, Set
 
 from .bundler import FunctionBundler
-from ..client import AsyncEnvironment
+from ..client import Environment
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def _get_bundle_sha(bundle_data: bytes) -> str:
     return hashlib.sha256(bundle_data).hexdigest()
 
 
-class AsyncVerifiedFunction:
+class SyncVerifiedFunction:
     """Wrapper for a verified function that supports local execution with env-first pattern."""
     
     def __init__(
@@ -66,7 +66,7 @@ class AsyncVerifiedFunction:
         
         return self._bundle_data, self._bundle_sha
     
-    async def _check_bundle_status(self, env: AsyncEnvironment) -> tuple[str, bool]:
+    def _check_bundle_status(self, env: Environment) -> tuple[str, bool]:
         """Check if bundle needs to be uploaded and return (sha, needs_upload)."""
         bundle_data, bundle_sha = self._get_or_create_bundle()
         
@@ -78,7 +78,7 @@ class AsyncVerifiedFunction:
         # 2. Check if bundle exists on server (pseudocode)
         # TODO: Add endpoint to check if bundle SHA exists in S3
         try:
-            exists = await env.check_bundle_exists(bundle_sha)
+            exists = env.check_bundle_exists(bundle_sha)
             if exists.success:
                 logger.info(f"Bundle {bundle_sha[:8]}... found on server, updating cache")
                 _uploaded_bundle_shas.add(bundle_sha)
@@ -90,7 +90,7 @@ class AsyncVerifiedFunction:
         logger.info(f"Bundle {bundle_sha[:8]}... needs to be uploaded")
         return bundle_sha, True  # Upload needed
     
-    async def __call__(self, env: AsyncEnvironment, *args, **kwargs) -> float:
+    def __call__(self, env: Environment, *args, **kwargs) -> float:
         """Local execution of the verifier function with env as first parameter."""
         try:
             result = self.func(env, *args, **kwargs)
@@ -114,18 +114,18 @@ class AsyncVerifiedFunction:
             # Return error score 0
             return 0.0
     
-    async def remote(self, env: AsyncEnvironment, *args, **kwargs) -> float:
+    def remote(self, env: Environment, *args, **kwargs) -> float:
         """Remote execution of the verifier function with SHA-based bundle caching."""
         try:
             # Check if bundle needs to be uploaded
-            bundle_sha, needs_upload = await self._check_bundle_status(env)
+            bundle_sha, needs_upload = self._check_bundle_status(env)
             
             if needs_upload:
                 # Need to upload bundle to S3
                 logger.info(f"Uploading bundle {bundle_sha[:8]}... for {self.key}")
                 bundle_data, _ = self._get_or_create_bundle()
                 
-                response = await env.execute_verifier_remote(
+                response = env.execute_verifier_remote(
                     bundle_data=bundle_data,
                     bundle_sha=bundle_sha,
                     key=self.key,
@@ -144,7 +144,7 @@ class AsyncVerifiedFunction:
                 logger.info(f"Executing cached bundle {bundle_sha[:8]}... for {self.key}")
                 bundle_data, _ = self._get_or_create_bundle()
                 
-                response = await env.execute_verifier_remote(
+                response = env.execute_verifier_remote(
                     bundle_data=bundle_data,  # Still need bundle_data for local caching
                     bundle_sha=bundle_sha,
                     key=self.key,
@@ -208,7 +208,7 @@ Remote traceback:
         except:
             raise RuntimeError(full_message)
     
-    def _get_env_id(self, env: AsyncEnvironment) -> str:
+    def _get_env_id(self, env: Environment) -> str:
         """Generate a unique identifier for the environment."""
         # Use instance base URL or similar unique identifier
         if hasattr(env, 'instance') and hasattr(env.instance, 'base_url'):
@@ -232,7 +232,7 @@ Remote traceback:
 def verifier(
     key: Optional[str] = None,
     extra_requirements: Optional[List[str]] = None
-) -> Callable[[F], AsyncVerifiedFunction]:
+) -> Callable[[F], SyncVerifiedFunction]:
     """
     Decorator to create a verifier function with env-first pattern.
     
@@ -266,15 +266,15 @@ def verifier(
         # Remote execution
         result = await check_user_count.remote(env1, 5)
     """
-    def decorator(func: F) -> AsyncVerifiedFunction:
+    def decorator(func: F) -> SyncVerifiedFunction:
         verifier_key = key or func.__name__
         verifier_uuid = str(uuid.uuid4())
         
-        return AsyncVerifiedFunction(
+        return SyncVerifiedFunction(
             func,
             verifier_key,
             extra_requirements,
             verifier_uuid
         )
     
-    return decorator 
+    return decorator
