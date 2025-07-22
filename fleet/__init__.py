@@ -37,6 +37,9 @@ from .verifiers import (
     TASK_SUCCESSFUL_SCORE,
 )
 
+# Import Playwright wrapper
+from .playwright import FleetPlaywrightWrapper
+
 # Import async verifiers (default verifier is async for modern usage)
 from ._async.verifiers import (
     verifier,
@@ -63,6 +66,8 @@ __all__ = [
     "FleetAPIError", 
     "FleetTimeoutError",
     "FleetConfigurationError",
+    # Playwright wrapper
+    "FleetPlaywrightWrapper",
     # Verifiers (async is default)
     "verifier",
     "verifier_sync", 
