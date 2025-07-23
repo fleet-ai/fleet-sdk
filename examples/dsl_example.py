@@ -135,9 +135,7 @@ async def main():
 
         # Compare snapshots
         print("\nComparing snapshots...")
-        from fleet.verifiers import IgnoreConfig as FleetIgnoreConfig
-        
-        ignore_config = FleetIgnoreConfig(
+        ignore_config = IgnoreConfig(
             tables={"pageviews"},
             table_fields={
                 "entries": {"createdDate", "lastModifiedDate", "createdAt", "updatedAt"},
