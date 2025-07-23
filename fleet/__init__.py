@@ -46,6 +46,12 @@ from ._async.verifiers import (
     AsyncVerifiedFunction,
 )
 
+# Import async tasks (default tasks are async for modern usage)
+from ._async.tasks import (
+    Task,
+    VerifierFunction,
+)
+
 # Create a module-level env attribute for convenient access
 from . import env
 
@@ -61,6 +67,9 @@ __all__ = [
     "InstanceRecord", 
     "Resource",
     "ResetResponse",
+    # Task models
+    "Task",
+    "VerifierFunction",
     # Exceptions
     "FleetError",
     "FleetAPIError", 
