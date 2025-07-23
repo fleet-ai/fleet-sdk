@@ -10,9 +10,9 @@ from __future__ import annotations
 from typing import Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .verifiers import SyncVerifiedFunction
-    from ._async.verifiers import AsyncVerifiedFunction
+    from .verifiers import SyncVerifierFunction
+    from ._async.verifiers import AsyncVerifierFunction
 
 # Union type to support both async and sync verifiers
 # This definition works for both the async and sync versions of the codebase
-VerifierFunction = Union["AsyncVerifiedFunction", "SyncVerifiedFunction"] 
+VerifierFunction = Union["SyncVerifierFunction", "AsyncVerifierFunction"] 
