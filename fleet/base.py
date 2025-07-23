@@ -4,6 +4,7 @@ import json
 import logging
 
 from .models import InstanceResponse
+from .config import GLOBAL_BASE_URL
 from .exceptions import (
     FleetAPIError,
     FleetAuthenticationError,
@@ -34,7 +35,7 @@ class BaseWrapper:
             raise ValueError("api_key is required")
         self.api_key = api_key
         if base_url is None:
-            base_url = "https://orchestrator.fleetai.com"
+            base_url = GLOBAL_BASE_URL
         self.base_url = base_url
 
     def get_headers(self) -> Dict[str, str]:
