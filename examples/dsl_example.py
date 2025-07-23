@@ -84,6 +84,14 @@ async def main():
         print(f"Error: {response.error}")
         print(f"Message: {response.message}")
 
+        # Get the database resource
+        db = env.db()
+        
+        # Take a snapshot before insertion
+        print("\nTaking snapshot before insertion...")
+        snapshot_before = await db.snapshot("before_insertion")
+        print(f"Snapshot created: {snapshot_before.name}")
+
         # Insert the deal entry
         print("\nInserting deal entry...")
         insert_query = """
@@ -103,7 +111,6 @@ async def main():
         """
 
         print("RESOURCES", await env.resources())
-        db = env.db()
         insert_result = await db.exec(insert_query)
         print(f"Insert result: {insert_result}")
 
@@ -111,6 +118,50 @@ async def main():
         print("\nVerifying insertion...")
         query_result = await db.query("SELECT * FROM entries WHERE id = 32302")
         print(f"Query result: {query_result}")
+
+        # Also verify using the new query builder
+        print("\nVerifying with query builder:")
+        entry = await db.table("entries").eq("id", 32302).first()
+        if entry:
+            print(f"Found entry: {entry['name']} (type: {entry['type']})")
+            # Can also use assertions
+            await db.table("entries").eq("id", 32302).assert_eq("type", "deal")
+            print("✓ Entry type assertion passed")
+
+        # Take a snapshot after insertion
+        print("\nTaking snapshot after insertion...")
+        snapshot_after = await db.snapshot("after_insertion")
+        print(f"Snapshot created: {snapshot_after.name}")
+
+        # Compare snapshots
+        print("\nComparing snapshots...")
+        from fleet.verifiers import IgnoreConfig as FleetIgnoreConfig
+        
+        ignore_config = FleetIgnoreConfig(
+            tables={"pageviews"},
+            table_fields={
+                "entries": {"createdDate", "lastModifiedDate", "createdAt", "updatedAt"},
+            },
+        )
+        
+        diff = await snapshot_before.diff(snapshot_after, ignore_config)
+        
+        # Check diff results
+        print("\nDiff validation:")
+        expected_changes = [
+            {
+                "table": "entries",
+                "pk": 32302,
+                "field": None,
+                "after": "__added__",
+            }
+        ]
+        
+        try:
+            await diff.expect_only(expected_changes)
+            print("✓ Diff validation passed - only expected changes detected")
+        except AssertionError as e:
+            print(f"✗ Diff validation failed: {e}")
 
         # Run verifier after insertion (should succeed)
         print("\nRunning verifier after insertion...")

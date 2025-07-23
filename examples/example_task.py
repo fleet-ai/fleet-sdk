@@ -17,56 +17,19 @@ TASK_FAILED_SCORE = 0.0
 load_dotenv()
 
 
-# Define the synchronous version for remote execution
-def create_bug_issue_sync(
-    env, project_key: str = "SCRUM", issue_title: str = "Sample Bug"
-) -> float:
-    """Synchronous verifier that checks if a bug issue was created.
-    
-    This is used for remote execution which doesn't support async functions.
-    """
-    # Define constants locally for remote execution
-    TASK_SUCCESSFUL_SCORE = 1.0
-    TASK_FAILED_SCORE = 0.0
-    
-    try:
-        # Get the database resource
-        db = env.db()
-
-        # Query for issues with the specified title and project
-        query = """
-        SELECT id, issue_type, name, project_key 
-        FROM issues 
-        WHERE project_key = ? AND name = ? AND issue_type = 'Bug'
-        """
-
-        result = db.query(query, args=[project_key, issue_title])
-
-        if result.rows and len(result.rows) > 0:
-            print(f"✓ Found bug issue: {result.rows[0][0]} - {result.rows[0][2]}")
-            return TASK_SUCCESSFUL_SCORE
-        else:
-            print(
-                f"✗ No bug issue found with title '{issue_title}' in project {project_key}"
-            )
-            return TASK_FAILED_SCORE
-
-    except Exception as e:
-        print(f"✗ Error checking for bug issue: {e}")
-        return TASK_FAILED_SCORE
-
-
-# Create the async decorated version with sync_version for remote execution
-@verifier(key="create_bug_issue_v1", sync_version=create_bug_issue_sync)
+# Create the async verifier - it will automatically work for remote execution!
+@verifier(key="create_bug_issue_v1")
 async def create_bug_issue(
     env, project_key: str = "SCRUM", issue_title: str = "Sample Bug"
 ) -> float:
-    """Async verifier for local execution and Task integration.
+    """Verifier that checks if a bug issue was created with the specified title.
     
     This verifier:
     1. Queries the database to find issues with the specified title
     2. Checks if the issue is a Bug type
     3. Returns 1.0 if found, 0.0 otherwise
+    
+    The async/await will be automatically removed for remote execution!
     """
     try:
         # Get the database resource
@@ -144,6 +107,7 @@ async def main():
         print("Testing remote verifier execution...")
         try:
             # Now we can use .remote() directly on the decorated function!
+            # The async/await will be automatically removed for remote execution
             remote_result = await task.verifier.remote(
                 env, project_key="SCRUM", issue_title="Login button not working"
             )
