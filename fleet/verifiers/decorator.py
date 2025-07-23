@@ -19,7 +19,7 @@ F = TypeVar('F', bound=Callable[..., Any])
 
 
 
-class SyncVerifiedFunction:
+class SyncVerifierFunction:
     """Wrapper for a verified function that supports local execution with env-first pattern."""
     
     def __init__(
@@ -62,7 +62,7 @@ class SyncVerifiedFunction:
 def verifier(
     key: Optional[str] = None,
     verifier_id: Optional[str] = None
-) -> Callable[[F], SyncVerifiedFunction]:
+) -> Callable[[F], SyncVerifierFunction]:
     """
     Decorator to create a verifier function with env-first pattern.
     
@@ -90,11 +90,11 @@ def verifier(
         result = await check_user_count(env1, 5)
         result = await check_user_count(env2, 5)  # Same verifier, different env
     """
-    def decorator(func: F) -> SyncVerifiedFunction:
+    def decorator(func: F) -> SyncVerifierFunction:
         verifier_key = key or func.__name__
         verifier_uuid = verifier_id or str(uuid.uuid4())
         
-        return SyncVerifiedFunction(
+        return SyncVerifierFunction(
             func,
             verifier_key,
             verifier_uuid

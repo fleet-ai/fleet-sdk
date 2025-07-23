@@ -4,7 +4,7 @@ from fleet.verifiers.db import DatabaseSnapshot, IgnoreConfig, SnapshotDiff
 from fleet.verifiers.code import TASK_SUCCESSFUL_SCORE
 from .verifier import (
     verifier,
-    AsyncVerifiedFunction,
+    AsyncVerifierFunction,
 )
 
 __all__ = [
@@ -13,5 +13,5 @@ __all__ = [
     "SnapshotDiff",
     "TASK_SUCCESSFUL_SCORE",
     "verifier",
-    "AsyncVerifiedFunction",
+    "AsyncVerifierFunction",
 ] 

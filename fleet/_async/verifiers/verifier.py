@@ -30,7 +30,7 @@ def _get_bundle_sha(bundle_data: bytes) -> str:
     return hashlib.sha256(bundle_data).hexdigest()
 
 
-class AsyncVerifiedFunction:
+class AsyncVerifierFunction:
     """Wrapper for a verified function that supports local execution with env-first pattern."""
     
     def __init__(
@@ -232,7 +232,7 @@ Remote traceback:
 def verifier(
     key: Optional[str] = None,
     extra_requirements: Optional[List[str]] = None
-) -> Callable[[F], AsyncVerifiedFunction]:
+) -> Callable[[F], AsyncVerifierFunction]:
     """
     Decorator to create a verifier function with env-first pattern.
     
@@ -266,11 +266,11 @@ def verifier(
         # Remote execution
         result = await check_user_count.remote(env1, 5)
     """
-    def decorator(func: F) -> AsyncVerifiedFunction:
+    def decorator(func: F) -> AsyncVerifierFunction:
         verifier_key = key or func.__name__
         verifier_uuid = str(uuid.uuid4())
         
-        return AsyncVerifiedFunction(
+        return AsyncVerifierFunction(
             func,
             verifier_key,
             extra_requirements,

@@ -30,7 +30,7 @@ from .instance.models import Resource, ResetResponse
 # Import sync verifiers with explicit naming
 from .verifiers import (
     verifier as verifier_sync,
-    SyncVerifiedFunction,
+    SyncVerifierFunction,
     DatabaseSnapshot,
     IgnoreConfig,
     SnapshotDiff,
@@ -43,14 +43,14 @@ from .playwright import FleetPlaywrightWrapper
 # Import async verifiers (default verifier is async for modern usage)
 from ._async.verifiers import (
     verifier,
-    AsyncVerifiedFunction,
+    AsyncVerifierFunction,
 )
 
 # Import async tasks (default tasks are async for modern usage)
-from ._async.tasks import (
-    Task,
-    VerifierFunction,
-)
+from ._async.tasks import Task
+
+# Import shared types
+from .types import VerifierFunction
 
 # Create a module-level env attribute for convenient access
 from . import env
@@ -80,8 +80,8 @@ __all__ = [
     # Verifiers (async is default)
     "verifier",
     "verifier_sync", 
-    "AsyncVerifiedFunction",
-    "SyncVerifiedFunction",
+    "AsyncVerifierFunction",
+    "SyncVerifierFunction",
     "DatabaseSnapshot",
     "IgnoreConfig", 
     "SnapshotDiff",
