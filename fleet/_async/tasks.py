@@ -20,7 +20,7 @@ class Task(BaseModel):
     prompt: str = Field(..., description="Task prompt or instruction")
     env_id: str = Field(..., description="Environment identifier")
     created_at: Optional[datetime] = Field(None, description="Task creation timestamp")
-    verifier: Optional[VerifierFunction] = Field(None, description="Verifier function with decorator (async or sync)")
+    verifier: Optional[Any] = Field(None, description="Verifier function with decorator (async or sync)")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional task metadata")
 
     @validator('key')
