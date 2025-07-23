@@ -39,26 +39,6 @@ class FunctionBundler:
 
         logger.info(f"Creating function bundle for {func.__name__}")
 
-        # Check if this is a dynamically generated function
-        if hasattr(func, '__source__'):
-            logger.info(f"Using stored source for dynamically generated function {func.__name__}")
-            # For dynamically generated functions, create a minimal bundle
-            src = func.__source__
-            
-            # Use minimal requirements - just ensure fleet-python is included
-            requirements = extra_requirements or []
-            if "fleet-python" not in [r.split("==")[0].split(">=")[0] for r in requirements]:
-                requirements.append("fleet-python")
-            
-            # Create bundle without dependency analysis
-            return self._build_simple_function_bundle(
-                func.__name__,
-                src,
-                requirements,
-                verifier_id
-            )
-
-        # Original logic for regular functions
         # 1. Parse the main function and find dependencies
         mod_file = Path(func.__code__.co_filename)
         project_root = self._find_project_root(mod_file)
@@ -542,42 +522,6 @@ class FunctionBundler:
 
         return sorted(final_requirements)
 
-    def _build_simple_function_bundle(
-        self,
-        func_name: str,
-        src: str,
-        requirements: List[str],
-        verifier_id: Optional[str] = None,
-    ) -> bytes:
-        """Build a simple function bundle for dynamically generated functions."""
-        
-        with tempfile.TemporaryDirectory() as temp_dir:
-            build_dir = Path(temp_dir) / "build"
-            build_dir.mkdir()
-            
-            try:
-                # Create requirements.txt
-                requirements_file = build_dir / "requirements.txt"
-                requirements_file.write_text("\n".join(sorted(set(requirements))))
-                
-                # Create verifier.py with the function source
-                verifier_file = build_dir / "verifier.py"
-                verifier_content = f"""# Auto-generated verifier module
-# Constants that might be used
-TASK_SUCCESSFUL_SCORE = 1.0
-TASK_FAILED_SCORE = 0.0
-
-{src}
-"""
-                verifier_file.write_text(verifier_content)
-                
-                # Create zip bundle
-                return self._create_zip_bundle(build_dir)
-                
-            except Exception as e:
-                logger.error(f"Failed to build simple function bundle: {e}")
-                raise RuntimeError(f"Simple function bundle creation failed: {e}")
-
     def _build_function_bundle(
         self,
         func: Callable,
@@ -722,24 +666,13 @@ TASK_FAILED_SCORE = 0.0
     
     def _get_function_source_without_decorator(self, func: Callable) -> str:
         """Get function source code without the @verifier decorator."""
-        # Check if this is a dynamically generated function with stored source
-        if hasattr(func, '__source__'):
-            return func.__source__
-        
-        try:
-            source = inspect.getsource(func)
-        except (OSError, TypeError) as e:
-            # If we can't get source, check if there's a fallback
-            if hasattr(func, '__source__'):
-                return func.__source__
-            raise RuntimeError(f"Could not get source code for function {func.__name__}: {e}")
-        
+        source = inspect.getsource(func)
         lines = source.split('\n')
         
         # Find where the function definition starts
         func_start = -1
         for i, line in enumerate(lines):
-            if line.strip().startswith('def ') or line.strip().startswith('async def '):
+            if line.strip().startswith('def '):
                 func_start = i
                 break
         

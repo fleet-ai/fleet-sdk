@@ -13,8 +13,6 @@ import logging
 import hashlib
 import asyncio
 import inspect
-import ast
-import textwrap
 from typing import Any, Callable, Dict, Optional, List, TypeVar, Set, Union
 
 from .bundler import FunctionBundler
@@ -32,186 +30,6 @@ _uploaded_bundle_shas: Set[str] = set()
 def _get_bundle_sha(bundle_data: bytes) -> str:
     """Calculate SHA256 hash of bundle data with LRU caching."""
     return hashlib.sha256(bundle_data).hexdigest()
-
-
-class AsyncToSyncTransformer(ast.NodeTransformer):
-    """Transform async functions to sync by removing async/await keywords."""
-    
-    def visit_AsyncFunctionDef(self, node):
-        """Convert async function to regular function."""
-        # Create a new FunctionDef node with the same properties
-        new_node = ast.FunctionDef(
-            name=node.name,
-            args=node.args,
-            body=node.body,
-            decorator_list=[],  # Remove decorators
-            returns=node.returns,
-            lineno=node.lineno,
-            col_offset=node.col_offset,
-        )
-        # Continue visiting child nodes
-        self.generic_visit(new_node)
-        return new_node
-    
-    def visit_Await(self, node):
-        """Remove await expressions."""
-        # Just return the inner value without await
-        return self.visit(node.value)
-    
-    def visit_AsyncWith(self, node):
-        """Convert async with to regular with."""
-        new_node = ast.With(
-            items=node.items,
-            body=node.body,
-            lineno=node.lineno,
-            col_offset=node.col_offset,
-        )
-        self.generic_visit(new_node)
-        return new_node
-    
-    def visit_AsyncFor(self, node):
-        """Convert async for to regular for."""
-        new_node = ast.For(
-            target=node.target,
-            iter=node.iter,
-            body=node.body,
-            orelse=node.orelse,
-            lineno=node.lineno,
-            col_offset=node.col_offset,
-        )
-        self.generic_visit(new_node)
-        return new_node
-
-
-def create_sync_function_from_async(async_func: Callable) -> Callable:
-    """Create a synchronous version of an async function by transforming the AST."""
-    try:
-        # Get the source code
-        source = inspect.getsource(async_func)
-        
-        # Parse the source into AST
-        tree = ast.parse(source)
-        
-        # Find the async function definition (it should be the first/only one)
-        async_func_def = None
-        for node in tree.body:
-            if isinstance(node, ast.AsyncFunctionDef) and node.name == async_func.__name__:
-                async_func_def = node
-                break
-        
-        if not async_func_def:
-            raise ValueError(f"Could not find async function definition for {async_func.__name__}")
-        
-        # Create a new sync function definition
-        sync_func_def = ast.FunctionDef(
-            name=async_func_def.name,
-            args=async_func_def.args,
-            body=async_func_def.body,
-            decorator_list=[],  # Remove decorators
-            returns=async_func_def.returns,
-            lineno=1,
-            col_offset=0,
-        )
-        
-        # Transform the function body to remove async/await
-        transformer = AsyncToSyncTransformer()
-        sync_func_def = transformer.visit(sync_func_def)
-        
-        # Create a module with the function
-        module = ast.Module(body=[sync_func_def], type_ignores=[])
-        
-        # Fix line numbers
-        for node in ast.walk(module):
-            if hasattr(node, 'lineno'):
-                node.lineno = max(1, node.lineno)
-            if hasattr(node, 'col_offset'):
-                node.col_offset = 0
-        
-        # Generate the source code for the sync function
-        sync_source = ast.unparse(sync_func_def)
-        
-        # Compile and execute
-        code = compile(module, filename=f"<generated_{async_func.__name__}>", mode='exec')
-        
-        # Create a namespace with necessary imports and constants
-        namespace = {
-            'TASK_SUCCESSFUL_SCORE': 1.0,
-            'TASK_FAILED_SCORE': 0.0,
-            '__name__': '__main__',
-            '__builtins__': __builtins__,
-            'print': print,  # Ensure print is available
-        }
-        
-        # Execute the code to define the function
-        exec(code, namespace)
-        
-        # Get the generated function
-        sync_func = namespace[async_func.__name__]
-        
-        # Store the source code as an attribute for the bundler
-        sync_func.__source__ = sync_source
-        
-        # Copy metadata
-        sync_func.__doc__ = f"Auto-generated sync version of {async_func.__name__}"
-        sync_func.__module__ = async_func.__module__
-        
-        logger.info(f"Successfully generated sync version of {async_func.__name__}")
-        return sync_func
-        
-    except Exception as e:
-        logger.warning(f"Failed to auto-generate sync version of {async_func.__name__}: {e}")
-        
-        # Fallback: create a simple sync wrapper that just removes await
-        # This works for most Fleet verifiers since db operations are sync in remote env
-        def sync_wrapper(env, *args, **kwargs):
-            """Auto-generated sync wrapper for remote execution."""
-            # Define constants locally for remote execution
-            TASK_SUCCESSFUL_SCORE = 1.0
-            TASK_FAILED_SCORE = 0.0
-            
-            # Get the original async function's source
-            try:
-                source = inspect.getsource(async_func)
-                # Simple transformation: remove async def and await keywords
-                # This works for Fleet verifiers where env.db() returns sync resources
-                source = source.replace('async def', 'def')
-                source = source.replace('await ', '')
-                
-                # Execute the transformed source
-                exec_namespace = {
-                    'TASK_SUCCESSFUL_SCORE': TASK_SUCCESSFUL_SCORE,
-                    'TASK_FAILED_SCORE': TASK_FAILED_SCORE,
-                    'print': print,
-                    '__builtins__': __builtins__,
-                }
-                
-                exec(source, exec_namespace)
-                
-                # Get the transformed function
-                transformed_func = exec_namespace[async_func.__name__]
-                
-                # Call it with the provided arguments
-                return transformed_func(env, *args, **kwargs)
-                
-            except Exception as e:
-                print(f"⚠️  Remote execution error for '{async_func.__name__}': {e}")
-                return TASK_FAILED_SCORE
-        
-        sync_wrapper.__name__ = async_func.__name__
-        sync_wrapper.__doc__ = f"Fallback sync wrapper for {async_func.__name__}"
-        
-        # Store a simple source representation for the bundler
-        sync_wrapper.__source__ = f"""def {async_func.__name__}(env, *args, **kwargs):
-    # Auto-generated fallback wrapper
-    TASK_SUCCESSFUL_SCORE = 1.0
-    TASK_FAILED_SCORE = 0.0
-    
-    # This is a fallback - the actual implementation failed to convert
-    print("⚠️  Using fallback sync wrapper for remote execution")
-    return TASK_FAILED_SCORE
-"""
-        
-        return sync_wrapper
 
 
 class AsyncVerifierFunction:
@@ -234,21 +52,15 @@ class AsyncVerifierFunction:
         self._bundle_data: Optional[bytes] = None  # Cached bundle data
         self._is_async = asyncio.iscoroutinefunction(func)
         
-        # Create a sync wrapper function for remote execution
-        if self._is_async:
-            self._sync_wrapper = create_sync_function_from_async(func)
-        else:
-            self._sync_wrapper = func
-        
         # Copy function metadata
         functools.update_wrapper(self, func)
     
     def _get_or_create_bundle(self) -> tuple[bytes, str]:
         """Get or create bundle data and return (bundle_data, sha)."""
         if self._bundle_data is None or self._bundle_sha is None:
-            # Create bundle using the sync wrapper for remote execution
+            # Create bundle and cache it
             self._bundle_data = self._bundler.create_bundle(
-                self._sync_wrapper,  # Use sync wrapper for bundling
+                self.func, 
                 self.extra_requirements,
                 self.verifier_id
             )
@@ -312,6 +124,13 @@ class AsyncVerifierFunction:
     
     async def remote(self, env: AsyncEnvironment, *args, **kwargs) -> float:
         """Remote execution of the verifier function with SHA-based bundle caching."""
+        if self._is_async:
+            raise NotImplementedError(
+                f"Async verifier '{self.name}' cannot be executed remotely. "
+                "The remote execution environment only supports synchronous functions. "
+                "Please provide a synchronous version of your verifier."
+            )
+        
         try:
             # Check if bundle needs to be uploaded
             bundle_sha, needs_upload = await self._check_bundle_status(env)
@@ -325,7 +144,7 @@ class AsyncVerifierFunction:
                     bundle_data=bundle_data,
                     bundle_sha=bundle_sha,
                     key=self.key,
-                    function_name=self._sync_wrapper.__name__,  # Use sync wrapper name
+                    function_name=self.func.__name__,
                     args=args,
                     kwargs=kwargs,
                     needs_upload=True
@@ -344,7 +163,7 @@ class AsyncVerifierFunction:
                     bundle_data=bundle_data,  # Still need bundle_data for local caching
                     bundle_sha=bundle_sha,
                     key=self.key,
-                    function_name=self._sync_wrapper.__name__,  # Use sync wrapper name
+                    function_name=self.func.__name__,
                     args=args,
                     kwargs=kwargs,
                     needs_upload=False  # Don't upload, just execute
@@ -427,8 +246,7 @@ Remote traceback:
 
 def verifier(
     key: Optional[str] = None,
-    extra_requirements: Optional[List[str]] = None,
-    sync_version: Optional[Callable] = None
+    extra_requirements: Optional[List[str]] = None
 ) -> Callable[[F], AsyncVerifierFunction]:
     """
     Decorator to create a verifier function with env-first pattern.
@@ -437,15 +255,9 @@ def verifier(
     that verifiers operate within an environment context. This makes verifiers reusable
     across different environments.
     
-    For async functions, the decorator will automatically create a synchronous version
-    for remote execution by removing async/await keywords. This works for most cases
-    where the async operations are Fleet resource operations (db, browser, etc).
-    
     Args:
         key: Optional key for the verifier. Defaults to function name.
         extra_requirements: Additional PyPI packages needed by the verifier.
-        sync_version: Optional synchronous version of an async verifier for remote execution.
-                     If not provided, an automatic conversion will be attempted.
     
     Example:
         # Synchronous verifier (works locally and remotely)
@@ -456,7 +268,7 @@ def verifier(
             actual_count = result.rows[0][0]
             return 1.0 if actual_count >= expected_count else 0.0
         
-        # Async verifier (auto-converted for remote execution)
+        # Async verifier (only works locally)
         @verifier(key="check_user_async")
         async def check_user_async(env, expected_count: int) -> float:
             db = env.db()
@@ -468,26 +280,16 @@ def verifier(
         env = await flt.env.make_async("fira")
         
         # Local execution
-        result = await check_user_async(env, 5)
+        result = await check_user_count(env, 5)        # sync verifier
+        result = await check_user_async(env, 5)       # async verifier
         
-        # Remote execution (automatically uses sync version)
-        result = await check_user_async.remote(env, 5)
+        # Remote execution
+        result = await check_user_count.remote(env, 5) # sync verifier works
+        # await check_user_async.remote(env, 5)        # raises NotImplementedError
     """
     def decorator(func: F) -> AsyncVerifierFunction:
         verifier_key = key or func.__name__
         verifier_uuid = str(uuid.uuid4())
-        
-        # If a sync version is provided, use it for remote execution
-        if sync_version is not None and asyncio.iscoroutinefunction(func):
-            # Create a custom wrapper that uses the sync version for bundling
-            wrapper = AsyncVerifierFunction(
-                func,
-                verifier_key,
-                extra_requirements,
-                verifier_uuid
-            )
-            wrapper._sync_wrapper = sync_version
-            return wrapper
         
         return AsyncVerifierFunction(
             func,

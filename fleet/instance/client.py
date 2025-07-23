@@ -137,7 +137,7 @@ class InstanceClient:
 
             self._resources = [ResourceModel(**resource) for resource in resources_list]
             for resource in self._resources:
-                if resource.type not in self._resources_state:
+                if resource.type.value not in self._resources_state:
                     self._resources_state[resource.type.value] = {}
                 self._resources_state[resource.type.value][resource.name] = (
                     RESOURCE_TYPES[resource.type](resource, self.client)
