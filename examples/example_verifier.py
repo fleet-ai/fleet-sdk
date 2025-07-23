@@ -8,8 +8,8 @@ def validate_finish_blue_green_deployment(
     env: flt.Environment, final_answer: str | None = None
 ) -> int:
     """Validate that DEBT-722 and DEBT-720 are marked as Done"""
-    before = env.db("seed")
-    after = env.db("current")
+    before = env.db("seed").snapshot()
+    after = env.db("current").snapshot()
 
     # Check final state
     try:
@@ -51,7 +51,8 @@ def validate_finish_blue_green_deployment(
                 },
             ]
         )
-    except:
+    except Exception as e:
+        print(e)
         return 0
 
     return 1

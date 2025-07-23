@@ -10,7 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, validator
 
 # Import the shared VerifierFunction type that works for both async and sync
-from .types import VerifierFunction
+from ..types import VerifierFunction
 
 
 class Task(BaseModel):
@@ -20,7 +20,7 @@ class Task(BaseModel):
     prompt: str = Field(..., description="Task prompt or instruction")
     env_id: str = Field(..., description="Environment identifier")
     created_at: Optional[datetime] = Field(None, description="Task creation timestamp")
-    verifier: Optional[VerifierFunction] = Field(None, description="Verifier function with decorator (async or sync)")
+    verifier: Optional[Any] = Field(None, description="Verifier function with decorator (async or sync)")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional task metadata")
 
     @validator('key')
@@ -41,4 +41,4 @@ class Task(BaseModel):
             datetime: lambda v: v.isoformat(),
         }
         # Allow arbitrary types for the verifier field
-        arbitrary_types_allowed = True
+        arbitrary_types_allowed = True 

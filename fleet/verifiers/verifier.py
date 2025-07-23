@@ -9,9 +9,11 @@ that verifiers operate within an environment context.
 
 import functools
 import uuid
+import asyncio
 import logging
 import hashlib
-from typing import Any, Callable, Dict, Optional, List, TypeVar, Set
+import inspect
+from typing import Any, Callable, Dict, Optional, List, TypeVar, Set, Union
 
 from .bundler import FunctionBundler
 from ..client import Environment
@@ -48,6 +50,7 @@ class SyncVerifierFunction:
         self._bundler = FunctionBundler()
         self._bundle_sha: Optional[str] = None  # Cached bundle SHA
         self._bundle_data: Optional[bytes] = None  # Cached bundle data
+        self._is_async = asyncio.iscoroutinefunction(func)
         
         # Copy function metadata
         functools.update_wrapper(self, func)
@@ -93,7 +96,12 @@ class SyncVerifierFunction:
     def __call__(self, env: Environment, *args, **kwargs) -> float:
         """Local execution of the verifier function with env as first parameter."""
         try:
-            result = self.func(env, *args, **kwargs)
+            if self._is_async:
+                # For async functions, await the result
+                result = self.func(env, *args, **kwargs)
+            else:
+                # For sync functions, call directly
+                result = self.func(env, *args, **kwargs)
             
             # Handle different return types
             if isinstance(result, (int, float)):
@@ -116,6 +124,13 @@ class SyncVerifierFunction:
     
     def remote(self, env: Environment, *args, **kwargs) -> float:
         """Remote execution of the verifier function with SHA-based bundle caching."""
+        if self._is_async:
+            raise NotImplementedError(
+                f"Async verifier '{self.name}' cannot be executed remotely. "
+                "The remote execution environment only supports synchronous functions. "
+                "Please provide a synchronous version of your verifier."
+            )
+        
         try:
             # Check if bundle needs to be uploaded
             bundle_sha, needs_upload = self._check_bundle_status(env)
@@ -245,26 +260,32 @@ def verifier(
         extra_requirements: Additional PyPI packages needed by the verifier.
     
     Example:
-        @verifier(
-            key="test_database_state",
-            extra_requirements=["torch==2.3.0"]
-        )
+        # Synchronous verifier (works locally and remotely)
+        @verifier(key="check_user_count")
         def check_user_count(env, expected_count: int) -> float:
             db = env.db()
             result = db.query("SELECT COUNT(*) FROM users")
             actual_count = result.rows[0][0]
             return 1.0 if actual_count >= expected_count else 0.0
         
-        # Usage with different environments
-        env1 = flt.env.make("fira")
-        env2 = flt.env.make("another_env")
+        # Async verifier (only works locally)
+        @verifier(key="check_user_async")
+        async def check_user_async(env, expected_count: int) -> float:
+            db = env.db()
+            result = await db.query("SELECT COUNT(*) FROM users")
+            actual_count = result.rows[0][0]
+            return 1.0 if actual_count >= expected_count else 0.0
+        
+        # Usage
+        env = await flt.env.make_async("fira")
         
         # Local execution
-        result = await check_user_count(env1, 5)
-        result = await check_user_count(env2, 5)  # Same verifier, different env
+        result = await check_user_count(env, 5)        # sync verifier
+        result = await check_user_async(env, 5)       # async verifier
         
         # Remote execution
-        result = await check_user_count.remote(env1, 5)
+        result = await check_user_count.remote(env, 5) # sync verifier works
+        # await check_user_async.remote(env, 5)        # raises NotImplementedError
     """
     def decorator(func: F) -> SyncVerifierFunction:
         verifier_key = key or func.__name__
@@ -277,4 +298,4 @@ def verifier(
             verifier_uuid
         )
     
-    return decorator
+    return decorator 
