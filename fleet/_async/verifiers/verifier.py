@@ -11,7 +11,9 @@ import functools
 import uuid
 import logging
 import hashlib
-from typing import Any, Callable, Dict, Optional, List, TypeVar, Set
+import asyncio
+import inspect
+from typing import Any, Callable, Dict, Optional, List, TypeVar, Set, Union
 
 from .bundler import FunctionBundler
 from ..client import AsyncEnvironment
@@ -48,16 +50,61 @@ class AsyncVerifierFunction:
         self._bundler = FunctionBundler()
         self._bundle_sha: Optional[str] = None  # Cached bundle SHA
         self._bundle_data: Optional[bytes] = None  # Cached bundle data
+        self._is_async = asyncio.iscoroutinefunction(func)
+        
+        # Create a sync wrapper function for remote execution
+        if self._is_async:
+            self._sync_wrapper = self._create_sync_wrapper()
+        else:
+            self._sync_wrapper = func
         
         # Copy function metadata
         functools.update_wrapper(self, func)
     
+    def _create_sync_wrapper(self) -> Callable:
+        """Create a synchronous wrapper for async functions to use in remote execution."""
+        # Get the source code of the async function
+        source = inspect.getsource(self.func)
+        lines = source.split('\n')
+        
+        # Find the function definition
+        func_start = -1
+        for i, line in enumerate(lines):
+            if line.strip().startswith('async def '):
+                func_start = i
+                break
+        
+        if func_start == -1:
+            # Fallback to using the original function
+            return self.func
+        
+        # Create a sync version by removing 'async' and 'await' keywords
+        # This is a simple approach - for complex async functions, users should provide their own sync version
+        func_name = f"{self.func.__name__}_sync_generated"
+        
+        # Create a simple sync wrapper that calls the async function
+        # Note: This won't work for functions that use await, but it's better than nothing
+        def sync_wrapper(env, *args, **kwargs):
+            """Auto-generated sync wrapper for remote execution."""
+            # Import constants that might be needed
+            TASK_SUCCESSFUL_SCORE = 1.0
+            TASK_FAILED_SCORE = 0.0
+            
+            # For now, we'll need to handle this case by case
+            # The best approach is still for users to provide a sync version
+            raise NotImplementedError(
+                f"Async function '{self.func.__name__}' cannot be automatically converted to sync. "
+                "Please provide a synchronous version of your verifier for remote execution."
+            )
+        
+        return sync_wrapper
+    
     def _get_or_create_bundle(self) -> tuple[bytes, str]:
         """Get or create bundle data and return (bundle_data, sha)."""
         if self._bundle_data is None or self._bundle_sha is None:
-            # Create bundle and cache it
+            # Create bundle using the sync wrapper for remote execution
             self._bundle_data = self._bundler.create_bundle(
-                self.func, 
+                self._sync_wrapper,  # Use sync wrapper for bundling
                 self.extra_requirements,
                 self.verifier_id
             )
@@ -93,7 +140,12 @@ class AsyncVerifierFunction:
     async def __call__(self, env: AsyncEnvironment, *args, **kwargs) -> float:
         """Local execution of the verifier function with env as first parameter."""
         try:
-            result = self.func(env, *args, **kwargs)
+            if self._is_async:
+                # For async functions, await the result
+                result = await self.func(env, *args, **kwargs)
+            else:
+                # For sync functions, call directly
+                result = self.func(env, *args, **kwargs)
             
             # Handle different return types
             if isinstance(result, (int, float)):
@@ -129,7 +181,7 @@ class AsyncVerifierFunction:
                     bundle_data=bundle_data,
                     bundle_sha=bundle_sha,
                     key=self.key,
-                    function_name=self.func.__name__,
+                    function_name=self._sync_wrapper.__name__,  # Use sync wrapper name
                     args=args,
                     kwargs=kwargs,
                     needs_upload=True
@@ -148,7 +200,7 @@ class AsyncVerifierFunction:
                     bundle_data=bundle_data,  # Still need bundle_data for local caching
                     bundle_sha=bundle_sha,
                     key=self.key,
-                    function_name=self.func.__name__,
+                    function_name=self._sync_wrapper.__name__,  # Use sync wrapper name
                     args=args,
                     kwargs=kwargs,
                     needs_upload=False  # Don't upload, just execute
@@ -231,7 +283,8 @@ Remote traceback:
 
 def verifier(
     key: Optional[str] = None,
-    extra_requirements: Optional[List[str]] = None
+    extra_requirements: Optional[List[str]] = None,
+    sync_version: Optional[Callable] = None
 ) -> Callable[[F], AsyncVerifierFunction]:
     """
     Decorator to create a verifier function with env-first pattern.
@@ -243,32 +296,56 @@ def verifier(
     Args:
         key: Optional key for the verifier. Defaults to function name.
         extra_requirements: Additional PyPI packages needed by the verifier.
+        sync_version: Optional synchronous version of an async verifier for remote execution.
+                     If not provided and the verifier is async, remote execution will fail.
     
     Example:
-        @verifier(
-            key="test_database_state",
-            extra_requirements=["torch==2.3.0"]
-        )
+        # Synchronous verifier (works locally and remotely)
+        @verifier(key="check_user_count")
         def check_user_count(env, expected_count: int) -> float:
             db = env.db()
             result = db.query("SELECT COUNT(*) FROM users")
             actual_count = result.rows[0][0]
             return 1.0 if actual_count >= expected_count else 0.0
         
-        # Usage with different environments
-        env1 = flt.env.make("fira")
-        env2 = flt.env.make("another_env")
+        # Async verifier with sync version for remote execution
+        def check_user_count_sync(env, expected_count: int) -> float:
+            db = env.db()
+            result = db.query("SELECT COUNT(*) FROM users")
+            actual_count = result.rows[0][0]
+            return 1.0 if actual_count >= expected_count else 0.0
+        
+        @verifier(key="check_user_count", sync_version=check_user_count_sync)
+        async def check_user_count(env, expected_count: int) -> float:
+            db = env.db()
+            result = await db.query("SELECT COUNT(*) FROM users")
+            actual_count = result.rows[0][0]
+            return 1.0 if actual_count >= expected_count else 0.0
+        
+        # Usage
+        env = await flt.env.make_async("fira")
         
         # Local execution
-        result = await check_user_count(env1, 5)
-        result = await check_user_count(env2, 5)  # Same verifier, different env
+        result = await check_user_count(env, 5)
         
         # Remote execution
-        result = await check_user_count.remote(env1, 5)
+        result = await check_user_count.remote(env, 5)
     """
     def decorator(func: F) -> AsyncVerifierFunction:
         verifier_key = key or func.__name__
         verifier_uuid = str(uuid.uuid4())
+        
+        # If a sync version is provided, use it for remote execution
+        if sync_version is not None and asyncio.iscoroutinefunction(func):
+            # Create a custom wrapper that uses the sync version for bundling
+            wrapper = AsyncVerifierFunction(
+                func,
+                verifier_key,
+                extra_requirements,
+                verifier_uuid
+            )
+            wrapper._sync_wrapper = sync_version
+            return wrapper
         
         return AsyncVerifierFunction(
             func,

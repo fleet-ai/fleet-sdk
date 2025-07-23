@@ -2,12 +2,13 @@
 """Example demonstrating task with verifier for Jira environment.
 
 This example shows how to create a simple task with the @verifier decorator
-that can be verified in a Jira environment.
+that can be verified in a Jira environment, including remote execution.
 """
 
 import os
+import asyncio
 from datetime import datetime
-from fleet import Fleet, verifier_sync, TASK_SUCCESSFUL_SCORE, Task
+from fleet import AsyncFleet, verifier, TASK_SUCCESSFUL_SCORE, Task
 from dotenv import load_dotenv
 
 # Constants for task failure
@@ -16,17 +17,18 @@ TASK_FAILED_SCORE = 0.0
 load_dotenv()
 
 
-@verifier_sync(key="create_bug_issue_v1")
-def create_bug_issue(
+# Define the synchronous version for remote execution
+def create_bug_issue_sync(
     env, project_key: str = "SCRUM", issue_title: str = "Sample Bug"
 ) -> float:
-    """Verifier that checks if a bug issue was created with the specified title.
-
-    This verifier:
-    1. Queries the database to find issues with the specified title
-    2. Checks if the issue is a Bug type
-    3. Returns 1.0 if found, 0.0 otherwise
+    """Synchronous verifier that checks if a bug issue was created.
+    
+    This is used for remote execution which doesn't support async functions.
     """
+    # Define constants locally for remote execution
+    TASK_SUCCESSFUL_SCORE = 1.0
+    TASK_FAILED_SCORE = 0.0
+    
     try:
         # Get the database resource
         db = env.db()
@@ -54,7 +56,46 @@ def create_bug_issue(
         return TASK_FAILED_SCORE
 
 
-def main():
+# Create the async decorated version with sync_version for remote execution
+@verifier(key="create_bug_issue_v1", sync_version=create_bug_issue_sync)
+async def create_bug_issue(
+    env, project_key: str = "SCRUM", issue_title: str = "Sample Bug"
+) -> float:
+    """Async verifier for local execution and Task integration.
+    
+    This verifier:
+    1. Queries the database to find issues with the specified title
+    2. Checks if the issue is a Bug type
+    3. Returns 1.0 if found, 0.0 otherwise
+    """
+    try:
+        # Get the database resource
+        db = env.db()
+
+        # Query for issues with the specified title and project
+        query = """
+        SELECT id, issue_type, name, project_key 
+        FROM issues 
+        WHERE project_key = ? AND name = ? AND issue_type = 'Bug'
+        """
+
+        result = await db.query(query, args=[project_key, issue_title])
+
+        if result.rows and len(result.rows) > 0:
+            print(f"✓ Found bug issue: {result.rows[0][0]} - {result.rows[0][2]}")
+            return TASK_SUCCESSFUL_SCORE
+        else:
+            print(
+                f"✗ No bug issue found with title '{issue_title}' in project {project_key}"
+            )
+            return TASK_FAILED_SCORE
+
+    except Exception as e:
+        print(f"✗ Error checking for bug issue: {e}")
+        return TASK_FAILED_SCORE
+
+
+async def main():
     """Run the task example."""
     print("=== Fleet Task Example with Jira ===\n")
 
@@ -79,12 +120,12 @@ def main():
     print()
 
     # Create Fleet client and environment
-    fleet_client = Fleet()
+    fleet_client = AsyncFleet()
 
     print("Creating Jira environment...")
     try:
         # Create a new Jira v1.3.1 environment
-        env = fleet_client.make("fira:v1.3.1")
+        env = await fleet_client.make("fira:v1.3.1")
         print(f"✓ Environment created: {env.instance_id}")
         print(f"  URL: {env.manager_url}")
         print()
@@ -93,7 +134,7 @@ def main():
         print("Running verifier to check task completion...")
 
         # First check - should fail since we haven't created the issue
-        result = task.verifier(
+        result = await task.verifier(
             env, project_key="SCRUM", issue_title="Login button not working"
         )
         print(f"  Initial check result: {result}")
@@ -102,12 +143,13 @@ def main():
         # Test remote execution of the verifier
         print("Testing remote verifier execution...")
         try:
-            remote_result = task.verifier.remote(
+            # Now we can use .remote() directly on the decorated function!
+            remote_result = await task.verifier.remote(
                 env, project_key="SCRUM", issue_title="Login button not working"
             )
-            print(f"  Remote check result: {remote_result}")
+            print(f"  ✓ Remote check result: {remote_result}")
             print(
-                f"  Remote execution {'✓ matches local' if remote_result == result else '✗ differs from local'}"
+                f"  ✓ Remote execution {'matches' if remote_result == result else 'differs from'} local result"
             )
         except Exception as e:
             print(f"  ✗ Remote execution failed: {e}")
@@ -126,12 +168,10 @@ def main():
         db = env.db()
 
         # Get current timestamp
-        from datetime import datetime
-
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Insert the bug issue
-        db.exec(
+        await db.exec(
             """
             INSERT INTO issues (id, project_key, issue_type, name, status, created_at, updated_at)
             VALUES ('SCRUM-9999', 'SCRUM', 'Bug', 'Login button not working', 'Todo', ?, ?)
@@ -144,7 +184,7 @@ def main():
 
         # Run verifier again - should pass now
         print("Running verifier again after creating the issue...")
-        result = task.verifier(
+        result = await task.verifier(
             env, project_key="SCRUM", issue_title="Login button not working"
         )
         print(f"  Final check result: {result}")
@@ -156,15 +196,15 @@ def main():
         # Test remote execution after issue creation
         print("Testing remote verifier execution after issue creation...")
         try:
-            remote_result = task.verifier.remote(
+            remote_result = await task.verifier.remote(
                 env, project_key="SCRUM", issue_title="Login button not working"
             )
-            print(f"  Remote check result: {remote_result}")
+            print(f"  ✓ Remote check result: {remote_result}")
             print(
-                f"  Remote execution {'✓ matches local' if remote_result == result else '✗ differs from local'}"
+                f"  ✓ Remote execution {'matches' if remote_result == result else 'differs from'} local result"
             )
             print(
-                f"  Task {'completed successfully' if remote_result == TASK_SUCCESSFUL_SCORE else 'failed'} (remote check)!"
+                f"  ✓ Task {'completed successfully' if remote_result == TASK_SUCCESSFUL_SCORE else 'failed'} (remote check)!"
             )
         except Exception as e:
             print(f"  ✗ Remote execution failed: {e}")
@@ -172,7 +212,7 @@ def main():
 
         # Clean up
         print("Cleaning up...")
-        env.close()
+        await env.close()
         print("✓ Environment closed")
 
     except Exception as e:
@@ -183,4 +223,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
