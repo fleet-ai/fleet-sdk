@@ -5,10 +5,79 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple
 
 from pydantic import BaseModel, Field, conint
 
+class ToolLogEntry(BaseModel):
+    id: int
+    timestamp: str
+    tool_name: str
+    action: str
+    parameters: Dict[str, Any]
+    result: Optional[Dict[str, Any]] = None
+    success: bool = True
+    error: Optional[str] = None
+    duration_ms: Optional[int] = None
+    session_id: Optional[str] = None
+    user_agent: Optional[str] = None
+
+
+class ActionLogEntry(BaseModel):
+    id: int
+    timestamp: str
+    action_type: str
+    payload: str
+    sql: Optional[str] = None
+    args: Optional[str] = None
+    path: Optional[str] = None
+
+
+class EnvironmentSnapshot(BaseModel):
+    env_key: str
+    instance_id: str
+    timestamp: str
+    session_id: str
+    tool_logs: List[ToolLogEntry]
+    action_logs: List[ActionLogEntry]
+    page_url: str
+    viewport_size: Tuple[int, int]
+    metadata: Dict[str, Any] = {}
+
+
+class SnapshotValidation(BaseModel):
+    success: bool
+    page_match: bool
+    action_log_match: bool
+    discrepancies: List[str] = []
+    message: str
+
+
+class ToolLogResponse(BaseModel):
+    success: bool
+    log_id: Optional[int] = None
+    message: str
+
+
+class ToolSessionStartRequest(BaseModel):
+    session_id: str
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ToolSessionStartResponse(BaseModel):
+    success: bool
+    session_id: str
+    message: str
+
+
+class ToolLogQueryRequest(BaseModel):
+    tool_name: Optional[str] = None
+    action: Optional[str] = None
+    session_id: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    limit: Optional[int] = 10000
+    offset: int = 0
 
 class Environment(BaseModel):
     env_key: str = Field(..., title="Env Key")
