@@ -120,7 +120,7 @@ class Environment(EnvironmentBase):
         super().__init__(**kwargs)
         self._client = client
         self._instance: Optional[InstanceClient] = None
-        self._session_id: Optional[str] = None
+        self._session_id: Optional[str] = None  # ADD THIS
 
     @property
     def instance(self) -> InstanceClient:
@@ -129,6 +129,11 @@ class Environment(EnvironmentBase):
                 self.manager_url, self._client.httpx_client if self._client else None
             )
         return self._instance
+
+    @property
+    def session_id(self) -> Optional[str]:  # ADD THIS PROPERTY
+        """Get the current tool logging session ID."""
+        return self._session_id
 
     @property
     def _load_client(self) -> SyncWrapper:
@@ -163,7 +168,7 @@ class Environment(EnvironmentBase):
     def close(self) -> InstanceRecord:
         if hasattr(self, '_session_id') and self._session_id:
             try:
-                self.instance._client.request(
+                self.instance.client.request(
                     "POST",
                     f"/end-tool-session/{self._session_id}"
                 )
@@ -233,7 +238,7 @@ class Environment(EnvironmentBase):
         session_id = self._get_current_session_id() or f"snapshot-{int(time.time())}"
         
         # Query tool logs
-        tool_logs_response = self.instance._client.request(
+        tool_logs_response = self.instance.client.request(
             "POST",
             "/query-tool-logs",
             json={
@@ -251,7 +256,7 @@ class Environment(EnvironmentBase):
             ORDER BY timestamp DESC
             LIMIT 10000
         """
-        action_logs_response = self.instance._client.request(
+        action_logs_response = self.instance.client.request(
             "POST",
             "/resources/sqlite/action_log/query",
             json={
@@ -319,7 +324,7 @@ class Environment(EnvironmentBase):
         
         # Otherwise, try to get the most recent session ID from tool logs
         try:
-            response = self.instance._client.request(
+            response = self.instance.client.request(
                 "POST",
                 "/query-tool-logs",
                 json={
@@ -389,7 +394,7 @@ class Fleet:
             session_id = f"env-{instance.instance_id}-{int(time.time())}"
         
         try:
-            instance.instance._client.request(
+            instance.instance.client.request(
                 "POST",
                 "/start-tool-session",
                 json={
@@ -466,7 +471,7 @@ class Fleet:
         
         # Start a new tool session for tracking
         replay_session_id = f"replay-{snapshot.session_id}-{int(time.time())}"
-        new_env.instance._client.request(
+        new_env.instance.client.request(
             "POST",
             "/start-tool-session",
             json={
@@ -529,7 +534,7 @@ class Fleet:
                 validation_errors.append(error_msg)
         
         # End replay session
-        new_env.instance._client.request(
+        new_env.instance.client.request(
             "POST",
             f"/end-tool-session/{replay_session_id}"
         )

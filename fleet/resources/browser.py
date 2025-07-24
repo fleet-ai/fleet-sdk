@@ -19,15 +19,12 @@ class BrowserResource(Resource):
         self.client = client
     
     def start(self, width: int = 1920, height: int = 1080) -> CDPDescribeResponse:
-        """Start browser and log the action."""
-        parameters = {"width": width, "height": height, "resolution": f"{width}x{height}"}
-        try:
-            result = super().start(width, height)
-            self._log_tool_action("start", parameters, {"success": True})
-            return result
-        except Exception as e:
-            self._log_tool_action("start", parameters, error=str(e))
-            raise
+        """Start browser and return CDP information."""
+        request = ChromeStartRequest(resolution=f"{width}x{height}")
+        response = self.client.request("POST", "/resources/cdp/start", json=request.model_dump())
+        
+        # After starting, get the CDP information via describe
+        return self.describe()
         
     def describe(self) -> CDPDescribeResponse:
         response = self.client.request("GET", "/resources/cdp/describe")
