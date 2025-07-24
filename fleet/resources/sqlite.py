@@ -672,3 +672,24 @@ class SQLiteResource(Resource):
         snapshot = SyncDatabaseSnapshot(self, name)
         snapshot._ensure_fetched()
         return snapshot
+
+    def diff(
+        self,
+        other: "SQLiteResource",
+        ignore_config: IgnoreConfig | None = None,
+    ) -> SyncSnapshotDiff:
+        """Compare this database with another SQLiteResource.
+        
+        Args:
+            other: Another SQLiteResource to compare against
+            ignore_config: Optional configuration for ignoring specific tables/fields
+            
+        Returns:
+            SyncSnapshotDiff: Object containing the differences between the two databases
+        """
+        # Create snapshots of both databases
+        before_snapshot = self.snapshot(name=f"before_{datetime.utcnow().isoformat()}")
+        after_snapshot = other.snapshot(name=f"after_{datetime.utcnow().isoformat()}")
+        
+        # Return the diff between the snapshots
+        return before_snapshot.diff(after_snapshot, ignore_config)

@@ -672,3 +672,24 @@ class AsyncSQLiteResource(Resource):
         snapshot = AsyncDatabaseSnapshot(self, name)
         await snapshot._ensure_fetched()
         return snapshot
+
+    async def diff(
+        self,
+        other: "AsyncSQLiteResource",
+        ignore_config: IgnoreConfig | None = None,
+    ) -> AsyncSnapshotDiff:
+        """Compare this database with another AsyncSQLiteResource.
+        
+        Args:
+            other: Another AsyncSQLiteResource to compare against
+            ignore_config: Optional configuration for ignoring specific tables/fields
+            
+        Returns:
+            AsyncSnapshotDiff: Object containing the differences between the two databases
+        """
+        # Create snapshots of both databases
+        before_snapshot = await self.snapshot(name=f"before_{datetime.utcnow().isoformat()}")
+        after_snapshot = await other.snapshot(name=f"after_{datetime.utcnow().isoformat()}")
+        
+        # Return the diff between the snapshots
+        return await before_snapshot.diff(after_snapshot, ignore_config)
