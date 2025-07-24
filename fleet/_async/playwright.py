@@ -1,7 +1,7 @@
 import base64
 from typing import List, Dict, Any
 from playwright.async_api import async_playwright, Browser, Page
-from .client import AsyncEnvironment
+from .client import AsyncEnv
 
 
 # Key mapping for computer use actions
@@ -65,7 +65,7 @@ class AsyncFleetPlaywrightWrapper:
 
     def __init__(
         self,
-        env: AsyncEnvironment,
+        env: AsyncEnv,
         display_width: int = 1920,
         display_height: int = 1080,
     ):

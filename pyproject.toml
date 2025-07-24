@@ -86,7 +86,7 @@ testpaths = ["tests"]
 [tool.unasync.replacements]
 "AsyncClient" = "Client"
 "AsyncInstanceClient" = "InstanceClient"
-"AsyncEnvironment" = "Environment"
+"AsyncEnv" = "Environment"
 "AsyncFleet" = "Fleet"
 "AsyncWrapper" = "SyncWrapper"
 "AsyncResource" = "Resource"

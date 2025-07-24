@@ -47,7 +47,7 @@ from .resources.browser import AsyncBrowserResource
 logger = logging.getLogger(__name__)
 
 
-class AsyncEnvironment(EnvironmentBase):
+class AsyncEnv(EnvironmentBase):
     def __init__(self, client: Optional[AsyncWrapper], **kwargs):
         super().__init__(**kwargs)
         self._client = client
@@ -161,7 +161,7 @@ class AsyncFleet:
 
     async def make(
         self, env_key: str, region: Optional[str] = None
-    ) -> AsyncEnvironment:
+    ) -> AsyncEnv:
         if ":" in env_key:
             env_key_part, version = env_key.split(":", 1)
             if not version.startswith("v"):
@@ -178,13 +178,13 @@ class AsyncFleet:
             json=request.model_dump(),
             base_url=region_base_url,
         )
-        instance = AsyncEnvironment(client=self.client, **response.json())
+        instance = AsyncEnv(client=self.client, **response.json())
         await instance.instance.load()
         return instance
 
     async def instances(
         self, status: Optional[str] = None, region: Optional[str] = None
-    ) -> List[AsyncEnvironment]:
+    ) -> List[AsyncEnv]:
         params = {}
         if status:
             params["status"] = status
@@ -193,13 +193,13 @@ class AsyncFleet:
 
         response = await self.client.request("GET", "/v1/env/instances", params=params)
         return [
-            AsyncEnvironment(client=self.client, **instance_data)
+            AsyncEnv(client=self.client, **instance_data)
             for instance_data in response.json()
         ]
 
-    async def instance(self, instance_id: str) -> AsyncEnvironment:
+    async def instance(self, instance_id: str) -> AsyncEnv:
         response = await self.client.request("GET", f"/v1/env/instances/{instance_id}")
-        instance = AsyncEnvironment(client=self.client, **response.json())
+        instance = AsyncEnv(client=self.client, **response.json())
         await instance.instance.load()
         return instance
 

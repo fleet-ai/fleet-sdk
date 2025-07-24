@@ -23,7 +23,7 @@ from .exceptions import (
     FleetConfigurationError,
 )
 from .client import Fleet, Environment
-from ._async.client import AsyncFleet, AsyncEnvironment
+from ._async.client import AsyncFleet, AsyncEnv
 from .models import InstanceRecord
 from .instance.models import Resource, ResetResponse
 
@@ -62,7 +62,7 @@ __all__ = [
     "Fleet",
     "Environment",
     "AsyncFleet",
-    "AsyncEnvironment",
+    "AsyncEnv",
     # Models
     "InstanceRecord", 
     "Resource",
