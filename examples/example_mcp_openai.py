@@ -9,11 +9,11 @@ client = OpenAI()
 def main():
     env = flt.env.make("fira:v1.3.3")
     print("Created environment:", env.urls.app)
-    print("MCP URL:", env.mcp().url)
+    print("MCP URL:", env.mcp.url)
 
     response = client.responses.create(
         model="gpt-4.1",
-        tools=[env.mcp().openai()],
+        tools=[env.mcp.openai()],
         input="Get the current authorized user.",
     )
 

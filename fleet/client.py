@@ -174,6 +174,7 @@ class Environment(EnvironmentBase):
     def db(self, name: str = "current") -> SQLiteResource:
         return self.instance.db(name)
 
+    @property
     def mcp(self) -> MCPResource:
         return self.instance.mcp()
 
