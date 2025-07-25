@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from ..resources.sqlite import SQLiteResource
 from ..resources.browser import BrowserResource
 from ..resources.base import Resource
+from ..resources.mcp import MCPResource
 
 from ..verifiers import DatabaseSnapshot
 
@@ -46,9 +47,11 @@ class InstanceClient:
     def __init__(
         self,
         url: str,
+        env_key: str,
         httpx_client: Optional[httpx.Client] = None,
     ):
         self.base_url = url
+        self._env_key = env_key
         self.client = SyncWrapper(
             url=self.base_url,
             httpx_client=httpx_client
@@ -62,9 +65,7 @@ class InstanceClient:
     def load(self) -> None:
         self._load_resources()
 
-    def reset(
-        self, reset_request: Optional[ResetRequest] = None
-    ) -> ResetResponse:
+    def reset(self, reset_request: Optional[ResetRequest] = None) -> ResetResponse:
         response = self.client.request(
             "POST", "/reset", json=reset_request.model_dump() if reset_request else None
         )
@@ -87,6 +88,14 @@ class InstanceClient:
         return SQLiteResource(
             self._resources_state[ResourceType.db.value][name], self.client
         )
+
+    def mcp(self) -> MCPResource:
+        import time
+        time.sleep(5)
+        mcp_url = f"{self.base_url}/mcp"
+        if mcp_url.endswith("/api/v1/env/mcp"):
+            mcp_url = mcp_url.replace("/api/v1/env/mcp", "/mcp")
+        return MCPResource(mcp_url, self._env_key)
 
     def browser(self, name: str) -> BrowserResource:
         return BrowserResource(
