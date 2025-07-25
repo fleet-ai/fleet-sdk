@@ -70,7 +70,7 @@ async def main():
 
             print("\n".join(output_text))
 
-    await env.close()
+    env.close()
 
 
 if __name__ == "__main__":
