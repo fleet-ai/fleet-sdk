@@ -15,7 +15,7 @@ async def main():
     print("Created environment:", env.urls.app)
     print("MCP URL:", env.mcp.url)
 
-    async with streamablehttp_client(url="http://localhost:3003/mcp") as streams:
+    async with streamablehttp_client(url=env.mcp.url) as streams:
         async with ClientSession(read_stream=streams[0], write_stream=streams[1]) as session:
             await session.initialize()
 
