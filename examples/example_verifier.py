@@ -62,6 +62,9 @@ def main():
     print(f"New Instance: {env.instance_id}")
 
     print(validate_finish_blue_green_deployment(env))
+    print(validate_finish_blue_green_deployment.remote(env))
+
+    env.close()
 
 
 if __name__ == "__main__":
