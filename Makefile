@@ -12,15 +12,15 @@ help:
 	@echo "unasync        Generate sync code from async sources"
 
 install-dev:
-	python3.11 -m pip install --upgrade pip
+	python -m pip install --upgrade pip
 	pip install build twine
 	pip install -e .
 
 build: clean unasync
-	python3.11 -m build
+	python -m build
 
 test:
-	python3.11 -m pytest
+	python -m pytest
 
 clean:
 	rm -rf build/
@@ -31,7 +31,7 @@ clean:
 
 unasync:
 	@echo "Running unasync to generate sync code from async sources..."
-	@python3.11 -c "import os, unasync; \
+	@python -c "import os, unasync; \
 	rule = unasync.Rule('fleet/_async/', 'fleet/', { \
 		'AsyncClient': 'Client', \
 		'AsyncInstanceClient': 'InstanceClient', \
@@ -64,7 +64,7 @@ unasync:
 	}); \
 	files = [os.path.join(root, f) for root, dirs, files in os.walk('fleet/_async/') for f in files if f.endswith('.py') and f != '__init__.py']; \
 	unasync.unasync_files(files, [rule])"
-	@python3.11 scripts/fix_sync_imports.py
+	@python scripts/fix_sync_imports.py
 	@echo "✅ Sync code generated successfully!"
 
 validate-tag:
