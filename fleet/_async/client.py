@@ -70,7 +70,7 @@ class AsyncEnv(EnvironmentBase):
             # Remove the current app name (e.g., /sentry) to get the root
             if '/' in base_url:
                 parts = base_url.rsplit('/', 1)
-                if len(parts) == 2:
+                if len(parts) == 2 and parts[0] != "https:/":
                     base_url = parts[0]
             
             self._apps[name] = AsyncInstanceClient(
