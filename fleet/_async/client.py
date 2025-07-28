@@ -19,7 +19,7 @@ import cloudpickle
 import httpx
 import logging
 import os
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from .base import EnvironmentBase, AsyncWrapper
 from ..models import (
@@ -51,6 +51,7 @@ class AsyncEnv(EnvironmentBase):
     def __init__(self, client: Optional[AsyncWrapper], **kwargs):
         super().__init__(**kwargs)
         self._client = client
+        self._apps: Dict[str, AsyncInstanceClient] = {}
         self._instance: Optional[AsyncInstanceClient] = None
 
     @property
@@ -60,6 +61,23 @@ class AsyncEnv(EnvironmentBase):
                 self.manager_url, self._client.httpx_client if self._client else None
             )
         return self._instance
+    
+    def app(self, name: str) -> AsyncInstanceClient:
+        if name not in self._apps:
+            # Extract base URL by removing the current app path (e.g., /sentry/api/v1/env)
+            # manager_url looks like: https://xxx.fleetai.com/sentry/api/v1/env
+            base_url = self.manager_url.split('/api/v1/env')[0]
+            # Remove the current app name (e.g., /sentry) to get the root
+            if '/' in base_url:
+                parts = base_url.rsplit('/', 1)
+                if len(parts) == 2:
+                    base_url = parts[0]
+            
+            self._apps[name] = AsyncInstanceClient(
+                f"{base_url}/{name}/api/v1/env",
+                self._client.httpx_client if self._client else None,
+            )
+        return self._apps[name]
 
     @property
     def _load_client(self) -> AsyncWrapper:

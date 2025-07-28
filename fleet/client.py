@@ -143,6 +143,7 @@ class Environment(EnvironmentBase):
         super().__init__(**kwargs)
         self._client = client
         self._instance: Optional[InstanceClient] = None
+        self._apps: Dict[str, InstanceClient] = {}
         self._session_id: Optional[str] = None  # ADD THIS
 
     @property
@@ -154,6 +155,24 @@ class Environment(EnvironmentBase):
                 self._client.httpx_client if self._client else None,
             )
         return self._instance
+
+    def app(self, name: str) -> InstanceClient:
+        if name not in self._apps:
+            # Extract base URL by removing the current app path (e.g., /sentry/api/v1/env)
+            # manager_url looks like: https://xxx.fleetai.com/sentry/api/v1/env
+            base_url = self.manager_url.split('/api/v1/env')[0]
+            # Remove the current app name (e.g., /sentry) to get the root
+            if '/' in base_url:
+                parts = base_url.rsplit('/', 1)
+                if len(parts) == 2:
+                    base_url = parts[0]
+            
+            self._apps[name] = InstanceClient(
+                f"{base_url}/{name}/api/v1/env",
+                self.env_key,
+                self._client.httpx_client if self._client else None,
+            )
+        return self._apps[name]
 
     @property
     def session_id(self) -> Optional[str]:  # ADD THIS PROPERTY
