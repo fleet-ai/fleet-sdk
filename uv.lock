@@ -251,6 +251,15 @@ wheels = [
 ]
 
 [[package]]
+name = "cloudpickle"
+version = "3.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/39/069100b84d7418bc358d81669d5748efb14b9cceacd2f9c75f550424132f/cloudpickle-3.1.1.tar.gz", hash = "sha256:b216fa8ae4019d5482a8ac3c95d8f6346115d8835911fd4aefd1a445e4242c64", size = 22113, upload-time = "2025-01-14T17:02:05.085Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/e8/64c37fadfc2816a7701fa8a6ed8d87327c7d54eacfbfb6edab14a2f2be75/cloudpickle-3.1.1-py3-none-any.whl", hash = "sha256:c8c5a44295039331ee9dad40ba100a9c7297b6f988e50e87ccdf3765a668350e", size = 20992, upload-time = "2025-01-14T17:02:02.417Z" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -365,9 +374,10 @@ sdist = { url = "https://files.pythonhosted.org/packages/6b/b6/82c7e601d6d3c3278
 
 [[package]]
 name = "fleet-python"
-version = "0.2.17"
+version = "0.2.18"
 source = { editable = "." }
 dependencies = [
+    { name = "cloudpickle" },
     { name = "httpx" },
     { name = "httpx-retries" },
     { name = "pydantic" },
@@ -391,6 +401,7 @@ examples = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cloudpickle", specifier = ">=3.1.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "httpx-retries", specifier = ">=0.4.0" },
     { name = "pydantic", specifier = ">=2.11.7" },
