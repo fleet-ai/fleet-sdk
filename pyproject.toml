@@ -39,8 +39,10 @@ dev = [
 ]
 examples = [
     "anthropic>=0.60.0",
+    "mcp>=1.12.2",
     "nova-act>=1.0.4013.0",
     "openai>=1.97.1",
+    "playwright>=1.52.0",
 ]
 
 [tool.uv.build-backend]
