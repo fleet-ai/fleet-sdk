@@ -6,7 +6,7 @@ authors = [
     {name = "Fleet AI", email = "nic@fleet.so"},
 ]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -19,7 +19,11 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-dependencies = []
+dependencies = [
+    "httpx>=0.28.1",
+    "httpx-retries>=0.4.0",
+    "pydantic>=2.11.7",
+]
 
 [build-system]
 requires = ["uv_build>=0.7.10,<0.8"]
@@ -32,6 +36,11 @@ dev = [
     "ruff>=0.12.5",
     "ty>=0.0.1a16",
     "unasync>=0.6.0",
+]
+examples = [
+    "anthropic>=0.60.0",
+    "nova-act>=1.0.4013.0",
+    "openai>=1.97.1",
 ]
 
 [tool.uv.build-backend]
