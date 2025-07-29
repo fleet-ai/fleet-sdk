@@ -1,7 +1,3 @@
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "fleet-python"
 version = "0.2.17"
@@ -23,94 +19,31 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-dependencies = [
-    "aiohttp>=3.8.0",
-    "pydantic>=2.0.0",
-    "httpx>=0.27.0",
-    "httpx-retries>=0.4.0",
-    "typing-extensions>=4.0.0",
-    "modulegraph2>=0.2.0",
-    "cloudpickle==3.1.1",
-]
+dependencies = []
 
-[project.optional-dependencies]
+[build-system]
+requires = ["uv_build>=0.7.10,<0.8"]
+build-backend = "uv_build"
+
+[dependency-groups]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "black>=22.0.0",
-    "isort>=5.0.0",
-    "mypy>=1.0.0",
-    "ruff>=0.1.0",
+    "pytest>=8.4.1",
+    "ruff>=0.12.5",
+    "ty>=0.0.1a16",
     "unasync>=0.6.0",
-    "python-dotenv>=1.1.1",
-]
-playwright = [
-    "playwright>=1.40.0",
 ]
 
-[project.urls]
-Homepage = "https://fleetai.com"
-Documentation = "https://docs.fleetai.com"
-Repository = "https://github.com/fleet-ai/fleet-sdk"
-Issues = "https://github.com/fleet-ai/fleet-sdk/issues"
-
-[tool.setuptools.packages.find]
-where = ["."]
-
-[tool.black]
-line-length = 88
-target-version = ['py38']
-
-[tool.isort]
-profile = "black"
-line_length = 88
-
-[tool.mypy]
-python_version = "3.8"
-strict = true
-warn_return_any = true
-warn_unused_configs = true
-
-[tool.ruff]
-line-length = 88
-target-version = "py38"
+[tool.uv.build-backend]
+module-root = ""
+module-name = "fleet"
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
 testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
 
-[tool.unasync]
-[tool.unasync.files]
-"fleet/_async/" = "fleet/"
+[tool.ty.environment]
+root          = ["./fleet"]
 
-[tool.unasync.replacements]
-"AsyncClient" = "Client"
-"AsyncInstanceClient" = "InstanceClient"
-"AsyncEnv" = "Environment"
-"AsyncFleet" = "Fleet"
-"AsyncWrapper" = "SyncWrapper"
-"AsyncResource" = "Resource"
-"AsyncVerifiedFunction" = "VerifiedFunction"
-"AsyncSQLiteResource" = "SQLiteResource"
-"AsyncBrowserResource" = "BrowserResource"
-"AsyncFleetPlaywrightWrapper" = "FleetPlaywrightWrapper"
-"make_async" = "make"
-"list_envs_async" = "list_envs"
-"list_regions_async" = "list_regions"
-"list_instances_async" = "list_instances"
-"get_async" = "get"
-"async def" = "def"
-"from fleet.verifiers" = "from ..verifiers"
-"await asyncio.sleep" = "time.sleep"
-"await " = ""
-"async with" = "with"
-"async for" = "for"
-"__aenter__" = "__enter__"
-"__aexit__" = "__exit__"
-"playwright.async_api" = "playwright.sync_api"
-"async_playwright" = "sync_playwright"
-"asyncio.sleep" = "time.sleep"
-"httpx.AsyncClient" = "httpx.Client"
-"httpx.AsyncHTTPTransport" = "httpx.HTTPTransport"
-"httpx.SyncHTTPTransport" = "httpx.HTTPTransport"
-"aiohttp" = "httpx" 
+[tool.ty.rules]
+index-out-of-bounds = "ignore"
