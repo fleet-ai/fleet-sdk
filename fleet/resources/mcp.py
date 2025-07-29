@@ -1,5 +1,4 @@
 from typing import Dict
-import aiohttp
 
 
 class MCPResource:
@@ -29,6 +28,7 @@ class MCPResource:
         Returns:
             List of available tools with name, description, and input_schema
         """
+        import aiohttp
         async with aiohttp.ClientSession() as session:
             payload = {
                 "jsonrpc": "2.0",
