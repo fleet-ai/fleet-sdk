@@ -1,6 +1,5 @@
 from typing import Dict
 import aiohttp
-import json
 
 
 class MCPResource:

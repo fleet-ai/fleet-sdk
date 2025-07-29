@@ -6,7 +6,7 @@ authors = [
     {name = "Fleet AI", email = "nic@fleet.so"},
 ]
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = {text = "Apache-2.0"}
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -28,6 +28,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=8.4.1",
+    "python-dotenv>=1.1.1",
     "ruff>=0.12.5",
     "ty>=0.0.1a16",
     "unasync>=0.6.0",
