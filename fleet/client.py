@@ -537,6 +537,12 @@ class Fleet:
         browser = new_env.browser()
         browser.start(width=snapshot.viewport_size[0], height=snapshot.viewport_size[1])
 
+        from fleet.playwright import FleetPlaywrightWrapper
+
+        playwright_wrapper = FleetPlaywrightWrapper(
+            cdp_url=browser.cdp_url(), instance_client=new_env.instance
+        )
+
         # Replay tool logs in order
         validation_errors = []
         last_timestamp = None
@@ -553,7 +559,7 @@ class Fleet:
 
                 # Replay the tool action
                 _replay_tool_action(
-                    None,
+                    playwright_wrapper,
                     tool_log,
                     new_env.instance._client,
                     replay_session_id,
@@ -582,7 +588,7 @@ class Fleet:
 
         if validate:
             validation = _validate_resumed_state(
-                new_env, snapshot, None, validation_errors
+                new_env, snapshot, playwright_wrapper, validation_errors
             )
 
         return new_env, validation
@@ -658,7 +664,7 @@ def _execute_verifier_remote(
 
 
 def _replay_tool_action(
-    playwright_wrapper,
+    playwright_wrapper: "FleetPlaywrightWrapper",
     tool_log: ToolLogEntry,
     client: "SyncWrapper",
     session_id: str,
@@ -754,7 +760,7 @@ def _replay_tool_action(
 def _validate_resumed_state(
     new_env: Environment,
     snapshot: EnvironmentSnapshot,
-    playwright_wrapper,
+    playwright_wrapper: "FleetPlaywrightWrapper",
     existing_errors: List[str],
 ) -> SnapshotValidation:
     """Validate that the resumed state matches the snapshot."""
