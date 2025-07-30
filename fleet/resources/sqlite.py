@@ -379,6 +379,9 @@ class SyncSnapshotDiff:
         
     def _expect_only_targeted(self, allowed_changes: list[dict[str, Any]]):
         """Optimized version that only queries specific rows mentioned in allowed_changes."""
+        import concurrent.futures
+        from threading import Lock
+        
         # Group allowed changes by table
         changes_by_table: dict[str, list[dict[str, Any]]] = {}
         for change in allowed_changes:
@@ -387,19 +390,12 @@ class SyncSnapshotDiff:
                 changes_by_table[table] = []
             changes_by_table[table].append(change)
         
-        # For each table with allowed changes, query only those specific rows
-        for table, table_changes in changes_by_table.items():
-            if self.ignore_config.should_ignore_table(table):
-                continue
-                
-            # Get primary key columns
-            pk_columns = self._get_primary_key_columns(table)
-            
-            # Extract unique PKs to check
-            pks_to_check = {change["pk"] for change in table_changes}
-            
-            # Query only these specific rows from both snapshots
-            for pk in pks_to_check:
+        errors = []
+        errors_lock = Lock()
+        
+        # Function to check a single row
+        def check_row(table: str, pk: Any, table_changes: list[dict[str, Any]], pk_columns: list[str]):
+            try:
                 # Build WHERE clause for this PK
                 where_sql = self._build_pk_where_clause(pk_columns, pk)
                 
@@ -423,38 +419,99 @@ class SyncSnapshotDiff:
                         if not _values_equivalent(before_val, after_val):
                             # Check if this change is allowed
                             if not self._is_field_change_allowed(table_changes, pk, field, after_val):
-                                raise AssertionError(
+                                error_msg = (
                                     f"Unexpected change in table '{table}', "
                                     f"row {pk}, field '{field}': "
                                     f"{repr(before_val)} -> {repr(after_val)}"
                                 )
+                                with errors_lock:
+                                    errors.append(AssertionError(error_msg))
+                                return  # Stop checking this row
                 elif not before_row and after_row:
                     # Added row
                     if not self._is_row_change_allowed(table_changes, pk, "__added__"):
-                        raise AssertionError(f"Unexpected row added in table '{table}': {pk}")
+                        error_msg = f"Unexpected row added in table '{table}': {pk}"
+                        with errors_lock:
+                            errors.append(AssertionError(error_msg))
                 elif before_row and not after_row:
                     # Removed row
                     if not self._is_row_change_allowed(table_changes, pk, "__removed__"):
-                        raise AssertionError(f"Unexpected row removed from table '{table}': {pk}")
+                        error_msg = f"Unexpected row removed from table '{table}': {pk}"
+                        with errors_lock:
+                            errors.append(AssertionError(error_msg))
+            except Exception as e:
+                with errors_lock:
+                    errors.append(e)
+        
+        # Prepare all row checks
+        row_checks = []
+        for table, table_changes in changes_by_table.items():
+            if self.ignore_config.should_ignore_table(table):
+                continue
+                
+            # Get primary key columns once per table
+            pk_columns = self._get_primary_key_columns(table)
+            
+            # Extract unique PKs to check
+            pks_to_check = {change["pk"] for change in table_changes}
+            
+            for pk in pks_to_check:
+                row_checks.append((table, pk, table_changes, pk_columns))
+        
+        # Execute row checks in parallel
+        if row_checks:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [
+                    executor.submit(check_row, table, pk, table_changes, pk_columns)
+                    for table, pk, table_changes, pk_columns in row_checks
+                ]
+                concurrent.futures.wait(futures)
+        
+        # Check for errors from row checks
+        if errors:
+            raise errors[0]
         
         # Now check tables not mentioned in allowed_changes to ensure no changes
         all_tables = set(self.before.tables()) | set(self.after.tables())
+        tables_to_verify = []
+        
         for table in all_tables:
-            if table in changes_by_table or self.ignore_config.should_ignore_table(table):
-                continue
-            
-            # For tables with no allowed changes, just check row counts
-            before_count_response = self.before.resource.query(f"SELECT COUNT(*) FROM {table}")
-            before_count = before_count_response.rows[0][0] if before_count_response.rows else 0
-            
-            after_count_response = self.after.resource.query(f"SELECT COUNT(*) FROM {table}")
-            after_count = after_count_response.rows[0][0] if after_count_response.rows else 0
-            
-            if before_count != after_count:
-                raise AssertionError(
-                    f"Unexpected change in table '{table}': "
-                    f"row count changed from {before_count} to {after_count}"
-                )
+            if table not in changes_by_table and not self.ignore_config.should_ignore_table(table):
+                tables_to_verify.append(table)
+        
+        # Function to verify no changes in a table
+        def verify_no_changes(table: str):
+            try:
+                # For tables with no allowed changes, just check row counts
+                before_count_response = self.before.resource.query(f"SELECT COUNT(*) FROM {table}")
+                before_count = before_count_response.rows[0][0] if before_count_response.rows else 0
+                
+                after_count_response = self.after.resource.query(f"SELECT COUNT(*) FROM {table}")
+                after_count = after_count_response.rows[0][0] if after_count_response.rows else 0
+                
+                if before_count != after_count:
+                    error_msg = (
+                        f"Unexpected change in table '{table}': "
+                        f"row count changed from {before_count} to {after_count}"
+                    )
+                    with errors_lock:
+                        errors.append(AssertionError(error_msg))
+            except Exception as e:
+                with errors_lock:
+                    errors.append(e)
+        
+        # Execute table verification in parallel
+        if tables_to_verify:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [
+                    executor.submit(verify_no_changes, table)
+                    for table in tables_to_verify
+                ]
+                concurrent.futures.wait(futures)
+        
+        # Final error check
+        if errors:
+            raise errors[0]
         
         return self
         
@@ -500,6 +557,9 @@ class SyncSnapshotDiff:
     def _expect_no_changes(self):
         """Efficiently verify that no changes occurred between snapshots using row counts."""
         try:
+            import concurrent.futures
+            from threading import Lock
+            
             # Get all tables from both snapshots
             before_tables = set(self.before.tables())
             after_tables = set(self.after.tables())
@@ -516,41 +576,84 @@ class SyncSnapshotDiff:
                 if not self.ignore_config.should_ignore_table(table):
                     raise AssertionError(f"Unexpected table removed: {table}")
             
-            # For each table, compare row counts
+            # Prepare tables to check
+            tables_to_check = []
             all_tables = before_tables | after_tables
             for table in all_tables:
-                if self.ignore_config.should_ignore_table(table):
-                    continue
+                if not self.ignore_config.should_ignore_table(table):
+                    tables_to_check.append(table)
+            
+            # If no tables to check, we're done
+            if not tables_to_check:
+                return self
+            
+            # Use ThreadPoolExecutor to parallelize count queries
+            # We use threads instead of processes since the queries are I/O bound
+            errors = []
+            errors_lock = Lock()
+            tables_needing_verification = []
+            verification_lock = Lock()
+            
+            def check_table_counts(table: str):
+                """Check row counts for a single table."""
+                try:
+                    # Get row counts from both snapshots
+                    before_count = 0
+                    after_count = 0
                     
-                # Get row counts from both snapshots
-                before_count = 0
-                after_count = 0
+                    if table in before_tables:
+                        before_count_response = self.before.resource.query(f"SELECT COUNT(*) FROM {table}")
+                        before_count = before_count_response.rows[0][0] if before_count_response.rows else 0
+                        
+                    if table in after_tables:
+                        after_count_response = self.after.resource.query(f"SELECT COUNT(*) FROM {table}")
+                        after_count = after_count_response.rows[0][0] if after_count_response.rows else 0
+                    
+                    if before_count != after_count:
+                        error_msg = (
+                            f"Unexpected change in table '{table}': "
+                            f"row count changed from {before_count} to {after_count}"
+                        )
+                        with errors_lock:
+                            errors.append(AssertionError(error_msg))
+                    elif before_count > 0 and before_count <= 1000:
+                        # Mark for detailed verification
+                        with verification_lock:
+                            tables_needing_verification.append(table)
+                            
+                except Exception as e:
+                    with errors_lock:
+                        errors.append(e)
+            
+            # Execute count checks in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(check_table_counts, table) for table in tables_to_check]
+                concurrent.futures.wait(futures)
+            
+            # Check if any errors occurred during count checking
+            if errors:
+                # Raise the first error
+                raise errors[0]
+            
+            # Now verify small tables for data changes (also in parallel)
+            if tables_needing_verification:
+                verification_errors = []
                 
-                if table in before_tables:
-                    before_count_response = self.before.resource.query(f"SELECT COUNT(*) FROM {table}")
-                    before_count = before_count_response.rows[0][0] if before_count_response.rows else 0
-                    
-                if table in after_tables:
-                    after_count_response = self.after.resource.query(f"SELECT COUNT(*) FROM {table}")
-                    after_count = after_count_response.rows[0][0] if after_count_response.rows else 0
+                def verify_table(table: str):
+                    """Verify a single table's data hasn't changed."""
+                    try:
+                        self._verify_table_unchanged(table)
+                    except AssertionError as e:
+                        with errors_lock:
+                            verification_errors.append(e)
                 
-                if before_count != after_count:
-                    raise AssertionError(
-                        f"Unexpected change in table '{table}': "
-                        f"row count changed from {before_count} to {after_count}"
-                    )
-                    
-                # If counts match but there could be modifications, we need to check further
-                # For now, we'll do a more detailed check only if counts are small
-                # to avoid performance issues
-                if before_count > 0 and before_count <= 1000:  # Threshold for detailed check
-                    # Do a quick hash check of the data
-                    self._verify_table_unchanged(table)
-                elif before_count > 1000:
-                    # For large tables, we could sample or use checksums
-                    # For now, we'll trust that count matching means no changes
-                    # This is a reasonable assumption for expect_only([])
-                    pass
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+                    futures = [executor.submit(verify_table, table) for table in tables_needing_verification]
+                    concurrent.futures.wait(futures)
+                
+                # Check if any errors occurred during verification
+                if verification_errors:
+                    raise verification_errors[0]
                     
             return self
             
