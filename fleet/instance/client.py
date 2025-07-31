@@ -7,6 +7,8 @@ import time
 import logging
 from urllib.parse import urlparse
 
+from fleet.verifiers.parse import convert_verifier_string
+
 from ..resources.sqlite import SQLiteResource
 from ..resources.browser import BrowserResource
 from ..resources.base import Resource
@@ -118,6 +120,11 @@ class InstanceClient:
     def verify_raw(
         self, function_code: str, function_name: str
     ) -> ExecuteFunctionResponse:
+        try:
+            function_code = convert_verifier_string(function_code)
+        except:
+            pass
+
         response = self.client.request(
             "POST",
             "/execute_verifier_function",

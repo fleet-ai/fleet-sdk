@@ -419,7 +419,7 @@ class Fleet:
     ) -> Environment:
         if ":" in env_key:
             env_key_part, version = env_key.split(":", 1)
-            if not version.startswith("v"):
+            if not version.startswith("v") and len(version) != 0 and version[0].isdigit():
                 version = f"v{version}"
         else:
             env_key_part = env_key
