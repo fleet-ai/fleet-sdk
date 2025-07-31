@@ -152,12 +152,14 @@ class AsyncEnv(EnvironmentBase):
 class AsyncFleet:
     def __init__(
         self,
-        api_key: Optional[str] = os.getenv("FLEET_API_KEY"),
+        api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         httpx_client: Optional[httpx.AsyncClient] = None,
         max_retries: int = DEFAULT_MAX_RETRIES,
         timeout: float = DEFAULT_TIMEOUT,
     ):
+        if api_key is None:
+            api_key = os.getenv("FLEET_API_KEY")
         self._httpx_client = httpx_client or default_httpx_client(max_retries, timeout)
         self.client = AsyncWrapper(
             api_key=api_key,
