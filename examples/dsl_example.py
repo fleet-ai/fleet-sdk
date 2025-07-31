@@ -85,6 +85,7 @@ async def main():
         print(f"Message: {response.message}")
 
         # Get the database resource
+        await env.instance.load()
         db = env.db()
         
         # Take a snapshot before insertion
