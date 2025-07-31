@@ -227,7 +227,7 @@ class Environment(EnvironmentBase):
         return self.instance.verify(validator)
 
     def verify_raw(
-        self, function_code: str, function_name: str
+        self, function_code: str, function_name: str | None = None
     ) -> ExecuteFunctionResponse:
         return self.instance.verify_raw(function_code, function_name)
 

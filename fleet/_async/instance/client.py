@@ -12,7 +12,7 @@ from ..resources.browser import AsyncBrowserResource
 from ..resources.base import Resource
 
 from fleet.verifiers import DatabaseSnapshot
-from fleet.verifiers.parse import convert_verifier_string
+from fleet.verifiers.parse import convert_verifier_string, extract_function_name
 
 from ..exceptions import FleetEnvironmentError
 from ...config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
@@ -108,12 +108,15 @@ class AsyncInstanceClient:
         return await self.verify_raw(function_code, function_name)
 
     async def verify_raw(
-        self, function_code: str, function_name: str
+        self, function_code: str, function_name: str | None = None
     ) -> ExecuteFunctionResponse:
         try:
             function_code = convert_verifier_string(function_code)
         except:
             pass
+
+        if function_name is None:
+            function_name = extract_function_name(function_code)
 
         response = await self.client.request(
             "POST",

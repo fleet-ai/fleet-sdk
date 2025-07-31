@@ -34,6 +34,7 @@ from .verifiers import (
     DatabaseSnapshot,
     IgnoreConfig,
     SnapshotDiff,
+    TASK_FAILED_SCORE,
     TASK_SUCCESSFUL_SCORE,
 )
 
@@ -80,6 +81,7 @@ __all__ = [
     "DatabaseSnapshot",
     "IgnoreConfig", 
     "SnapshotDiff",
+    "TASK_FAILED_SCORE",
     "TASK_SUCCESSFUL_SCORE",
     # Environment module
     "env",

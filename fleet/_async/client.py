@@ -109,7 +109,7 @@ class AsyncEnv(EnvironmentBase):
         return await self.instance.verify(validator)
 
     async def verify_raw(
-        self, function_code: str, function_name: str
+        self, function_code: str, function_name: str | None = None
     ) -> ExecuteFunctionResponse:
         return await self.instance.verify_raw(function_code, function_name)
 

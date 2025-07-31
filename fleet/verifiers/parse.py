@@ -1,5 +1,29 @@
 import re
 
+
+def extract_function_name(function_code: str) -> str | None:
+    """
+    Extract function name from Python function code.
+    
+    Handles both regular functions (def) and async functions (async def).
+    
+    Args:
+        function_code: Python function code as a string
+        
+    Returns:
+        The function name if found, None otherwise
+    """
+    # Pattern to match both def and async def functions
+    # Handles various formatting styles and type annotations
+    pattern = r'(?:async\s+)?def\s+(\w+)\s*\('
+    
+    match = re.search(pattern, function_code)
+    if match:
+        return match.group(1)
+    
+    return None
+
+
 def convert_verifier_string(verifier_str: str) -> str:
     """
     Convert a verifier function string from the old format (env: Environment) 
@@ -112,5 +136,8 @@ def convert_verifier_string(verifier_str: str) -> str:
     
     # Add the return statement
     new_func += '\n\n    return verifier(Environment(), transcript)'
-    
+
+    # Replace TASK_FAILED_SCORE with 0 in the function string
+    new_func = new_func.replace('TASK_FAILED_SCORE', '0')
+
     return new_func
