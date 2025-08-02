@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Union, Tuple
 
 from pydantic import BaseModel, Field, conint
 
+
 class ToolLogEntry(BaseModel):
     id: int
     timestamp: str
@@ -79,6 +80,7 @@ class ToolLogQueryRequest(BaseModel):
     limit: Optional[int] = 10000
     offset: int = 0
 
+
 class Environment(BaseModel):
     env_key: str = Field(..., title="Env Key")
     name: str = Field(..., title="Name")
@@ -138,9 +140,7 @@ class ValidationError(BaseModel):
 
 
 class VerifiersCheckResponse(BaseModel):
-    key: Optional[str] = Field(
-        None, description="Verifier artifact key", title="Key"
-    )
+    key: Optional[str] = Field(None, description="Verifier artifact key", title="Key")
     version: Optional[int] = Field(
         None, description="Version of the verifier artifact", title="Version"
     )
@@ -164,8 +164,12 @@ class VerifiersCheckResponse(BaseModel):
 class VerifiersExecuteRequest(BaseModel):
     sha256: str = Field(..., description="SHA256 hash of the function", title="SHA256")
     key: Optional[str] = Field(None, description="Verifier key", title="Key")
-    bundle: Optional[str] = Field(None, description="Base64 encoded bundle data", title="Bundle")
-    args: Optional[str] = Field(None, description="Base64 encoded arguments", title="Args")
+    bundle: Optional[str] = Field(
+        None, description="Base64 encoded bundle data", title="Bundle"
+    )
+    args: Optional[str] = Field(
+        None, description="Base64 encoded arguments", title="Args"
+    )
     function_name: Optional[str] = Field(
         "verify", description="Name of the function to execute", title="Function Name"
     )
@@ -274,3 +278,31 @@ class InstanceRecord(BaseModel):
     terminated_at: Optional[str] = None
     team_id: str
     region: str
+
+
+class SnapshotResponse(BaseModel):
+    success: bool
+    backup_id: str
+    instance_id: str
+    s3_key: str
+    created_at: str
+
+
+class RestoreRequest(BaseModel):
+    backup_id: Optional[str] = None
+
+
+class RestoreResponse(BaseModel):
+    success: bool
+    backup_id: str
+    source_instance_id: str
+    target_instance_id: str
+    restored_at: str
+
+
+class RecreateResponse(BaseModel):
+    success: bool
+    instance_id: str
+    env_key: str
+    version: str
+    recreated_at: str
