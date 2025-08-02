@@ -29,6 +29,10 @@ from ..models import (
     VerifiersCheckResponse,
     VerificationResponse,
     VerifiersExecuteResponse,
+    SnapshotResponse,
+    RestoreRequest,
+    RestoreResponse,
+    RecreateResponse,
 )
 
 from .instance import (
@@ -47,7 +51,7 @@ from .resources.browser import AsyncBrowserResource
 logger = logging.getLogger(__name__)
 
 
-class AsyncEnv(EnvironmentBase):
+class AsyncEnvironment(EnvironmentBase):
     def __init__(self, client: Optional[AsyncWrapper], **kwargs):
         super().__init__(**kwargs)
         self._client = client
@@ -61,18 +65,18 @@ class AsyncEnv(EnvironmentBase):
                 self.manager_url, self._client.httpx_client if self._client else None
             )
         return self._instance
-    
+
     def app(self, name: str) -> AsyncInstanceClient:
         if name not in self._apps:
             # Extract base URL by removing the current app path (e.g., /sentry/api/v1/env)
             # manager_url looks like: https://xxx.fleetai.com/sentry/api/v1/env
-            base_url = self.manager_url.split('/api/v1/env')[0]
+            base_url = self.manager_url.split("/api/v1/env")[0]
             # Remove the current app name (e.g., /sentry) to get the root
-            if '/' in base_url:
-                parts = base_url.rsplit('/', 1)
+            if "/" in base_url:
+                parts = base_url.rsplit("/", 1)
                 if len(parts) == 2 and parts[0] != "https:/":
                     base_url = parts[0]
-            
+
             self._apps[name] = AsyncInstanceClient(
                 f"{base_url}/{name}/api/v1/env",
                 self._client.httpx_client if self._client else None,
@@ -117,27 +121,38 @@ class AsyncEnv(EnvironmentBase):
         return await _check_bundle_exists(self._load_client, bundle_hash)
 
     async def execute_verifier_remote(
-        self, 
-        bundle_data: bytes, 
+        self,
+        bundle_data: bytes,
         bundle_sha: str,
         key: str,
         function_name: str,
-        args: tuple, 
-        kwargs: dict, 
+        args: tuple,
+        kwargs: dict,
         timeout: Optional[int] = 30,
         needs_upload: bool = True,
     ) -> VerifiersExecuteResponse:
         return await _execute_verifier_remote(
-            self._load_client, 
-            bundle_data, 
+            self._load_client,
+            bundle_data,
             bundle_sha,
             key,
             function_name,
-            args, 
-            kwargs, 
+            args,
+            kwargs,
             timeout,
-            needs_upload
+            needs_upload,
         )
+
+    async def snapshot(self) -> SnapshotResponse:
+        return await _snapshot_instance(self._load_client, self.instance_id)
+
+    async def restore(self, backup_id: Optional[str] = None) -> RestoreResponse:
+        return await _restore_instance(
+            self._load_client, self.instance_id, RestoreRequest(backup_id=backup_id)
+        )
+
+    async def recreate(self) -> RecreateResponse:
+        return await _recreate_instance(self._load_client, self.instance_id)
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -183,10 +198,14 @@ class AsyncFleet:
 
     async def make(
         self, env_key: str, region: Optional[str] = None
-    ) -> AsyncEnv:
+    ) -> AsyncEnvironment:
         if ":" in env_key:
             env_key_part, version = env_key.split(":", 1)
-            if not version.startswith("v") and len(version) != 0 and version[0].isdigit():
+            if (
+                not version.startswith("v")
+                and len(version) != 0
+                and version[0].isdigit()
+            ):
                 version = f"v{version}"
         else:
             env_key_part = env_key
@@ -200,13 +219,13 @@ class AsyncFleet:
             json=request.model_dump(),
             base_url=region_base_url,
         )
-        instance = AsyncEnv(client=self.client, **response.json())
+        instance = AsyncEnvironment(client=self.client, **response.json())
         await instance.instance.load()
         return instance
 
     async def instances(
         self, status: Optional[str] = None, region: Optional[str] = None
-    ) -> List[AsyncEnv]:
+    ) -> List[AsyncEnvironment]:
         params = {}
         if status:
             params["status"] = status
@@ -215,13 +234,13 @@ class AsyncFleet:
 
         response = await self.client.request("GET", "/v1/env/instances", params=params)
         return [
-            AsyncEnv(client=self.client, **instance_data)
+            AsyncEnvironment(client=self.client, **instance_data)
             for instance_data in response.json()
         ]
 
-    async def instance(self, instance_id: str) -> AsyncEnv:
+    async def instance(self, instance_id: str) -> AsyncEnvironment:
         response = await self.client.request("GET", f"/v1/env/instances/{instance_id}")
-        instance = AsyncEnv(client=self.client, **response.json())
+        instance = AsyncEnvironment(client=self.client, **response.json())
         await instance.instance.load()
         return instance
 
@@ -238,6 +257,19 @@ class AsyncFleet:
     async def delete(self, instance_id: str) -> InstanceRecord:
         return await _delete_instance(self.client, instance_id)
 
+    async def snapshot(self, instance_id: str) -> SnapshotResponse:
+        return await _snapshot_instance(self.client, instance_id)
+
+    async def restore(
+        self, instance_id: str, backup_id: Optional[str] = None
+    ) -> RestoreResponse:
+        return await _restore_instance(
+            self.client, instance_id, RestoreRequest(backup_id=backup_id)
+        )
+
+    async def recreate(self, instance_id: str) -> RecreateResponse:
+        return await _recreate_instance(self.client, instance_id)
+
 
 # Shared
 async def _delete_instance(client: AsyncWrapper, instance_id: str) -> InstanceRecord:
@@ -250,6 +282,29 @@ async def _check_bundle_exists(
 ) -> VerifiersCheckResponse:
     response = await client.request("GET", f"/v1/verifiers/check?sha256={bundle_hash}")
     return VerifiersCheckResponse(**response.json())
+
+
+async def _snapshot_instance(
+    client: AsyncWrapper, instance_id: str
+) -> SnapshotResponse:
+    response = await client.request("POST", f"/v1/env/instances/{instance_id}/snapshot")
+    return SnapshotResponse(**response.json())
+
+
+async def _restore_instance(
+    client: AsyncWrapper, instance_id: str, request: RestoreRequest
+) -> RestoreResponse:
+    response = await client.request(
+        "POST", f"/v1/env/instances/{instance_id}/restore", json=request.model_dump()
+    )
+    return RestoreResponse(**response.json())
+
+
+async def _recreate_instance(
+    client: AsyncWrapper, instance_id: str
+) -> RecreateResponse:
+    response = await client.request("POST", f"/v1/env/instances/{instance_id}/recreate")
+    return RecreateResponse(**response.json())
 
 
 async def _execute_verifier_remote(
@@ -278,23 +333,29 @@ async def _execute_verifier_remote(
         "timeout": timeout,
         "region": "us-west-1",  # TODO: make configurable
     }
-    
+
     # Add bundle data only if upload is needed
     if needs_upload:
         bundle_b64 = base64.b64encode(bundle_data).decode("utf-8")
         request_data["bundle"] = bundle_b64
-    
+
     # Debug logging
-    logger.debug(f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}")
+    logger.debug(
+        f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}"
+    )
     logger.debug(f"Request has bundle: {needs_upload}")
     logger.debug(f"Using client with base_url: {client.base_url}")
     logger.debug(f"Request data keys: {list(request_data.keys())}")
-    logger.debug(f"Bundle size: {len(request_data.get('bundle', ''))} chars" if 'bundle' in request_data else "No bundle")
+    logger.debug(
+        f"Bundle size: {len(request_data.get('bundle', ''))} chars"
+        if "bundle" in request_data
+        else "No bundle"
+    )
 
     # Note: This should be called on the instance URL, not the orchestrator
     # The instance has manager URLs for verifier execution
     response = await client.request("POST", "/v1/verifiers/execute", json=request_data)
-    
+
     # Debug the response
     response_json = response.json()
     logger.debug(f"Verifier execute response: {response_json}")
