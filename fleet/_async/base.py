@@ -31,8 +31,6 @@ class EnvironmentBase(InstanceResponse):
 
 class BaseWrapper:
     def __init__(self, *, api_key: Optional[str], base_url: Optional[str]):
-        if api_key is None:
-            raise ValueError("api_key is required")
         self.api_key = api_key
         if base_url is None:
             base_url = GLOBAL_BASE_URL
@@ -43,11 +41,8 @@ class BaseWrapper:
             "X-Fleet-SDK-Language": "Python",
             "X-Fleet-SDK-Version": "1.0.0",
         }
-        headers["Authorization"] = f"Bearer {self.api_key}"
-        # Debug log
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.debug(f"Headers being sent: {headers}")
+        if self.api_key is not None:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
 
