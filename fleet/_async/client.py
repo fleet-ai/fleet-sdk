@@ -109,7 +109,7 @@ class AsyncEnv(EnvironmentBase):
         return await self.instance.verify(validator)
 
     async def verify_raw(
-        self, function_code: str, function_name: str
+        self, function_code: str, function_name: str | None = None
     ) -> ExecuteFunctionResponse:
         return await self.instance.verify_raw(function_code, function_name)
 
@@ -152,12 +152,14 @@ class AsyncEnv(EnvironmentBase):
 class AsyncFleet:
     def __init__(
         self,
-        api_key: Optional[str] = os.getenv("FLEET_API_KEY"),
+        api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         httpx_client: Optional[httpx.AsyncClient] = None,
         max_retries: int = DEFAULT_MAX_RETRIES,
         timeout: float = DEFAULT_TIMEOUT,
     ):
+        if api_key is None:
+            api_key = os.getenv("FLEET_API_KEY")
         self._httpx_client = httpx_client or default_httpx_client(max_retries, timeout)
         self.client = AsyncWrapper(
             api_key=api_key,
@@ -182,7 +184,7 @@ class AsyncFleet:
     ) -> AsyncEnv:
         if ":" in env_key:
             env_key_part, version = env_key.split(":", 1)
-            if not version.startswith("v"):
+            if not version.startswith("v") and len(version) != 0 and version[0].isdigit():
                 version = f"v{version}"
         else:
             env_key_part = env_key
