@@ -24,11 +24,11 @@ from typing import List, Optional, Dict
 from .base import EnvironmentBase, AsyncWrapper
 from ..models import (
     InstanceRequest,
-    InstanceRecord,
+    InstanceResponse,
     Environment as EnvironmentModel,
     VerifiersCheckResponse,
-    VerificationResponse,
     VerifiersExecuteResponse,
+    TaskListResponse,
 )
 
 from .instance import (
@@ -102,7 +102,7 @@ class AsyncEnv(EnvironmentBase):
     async def resources(self) -> List[Resource]:
         return await self.instance.resources()
 
-    async def close(self) -> InstanceRecord:
+    async def close(self) -> InstanceResponse:
         return await _delete_instance(self._load_client, self.instance_id)
 
     async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
@@ -233,14 +233,30 @@ class AsyncFleet:
             self.client, bundle_data, args, kwargs, timeout
         )
 
-    async def delete(self, instance_id: str) -> InstanceRecord:
+    async def delete(self, instance_id: str) -> InstanceResponse:
         return await _delete_instance(self.client, instance_id)
+
+    async def load_tasks(self, env_key: Optional[str] = None) -> TaskListResponse:
+        """Load tasks for the authenticated team, optionally filtered by environment.
+        
+        Args:
+            env_key: Optional environment key to filter tasks by
+            
+        Returns:
+            TaskListResponse containing list of tasks and total count
+        """
+        params = {}
+        if env_key is not None:
+            params["env_key"] = env_key
+            
+        response = await self.client.request("GET", "/v1/tasks", params=params)
+        return TaskListResponse(**response.json())
 
 
 # Shared
-async def _delete_instance(client: AsyncWrapper, instance_id: str) -> InstanceRecord:
+async def _delete_instance(client: AsyncWrapper, instance_id: str) -> InstanceResponse:
     response = await client.request("DELETE", f"/v1/env/instances/{instance_id}")
-    return InstanceRecord(**response.json())
+    return InstanceResponse(**response.json())
 
 
 async def _check_bundle_exists(
@@ -260,7 +276,7 @@ async def _execute_verifier_remote(
     kwargs: dict,
     timeout: Optional[int] = 30,
     needs_upload: bool = True,
-) -> VerificationResponse:
+) -> VerifiersExecuteResponse:
     # Pickle args and kwargs together
     # The first arg should be None as a placeholder for env
     args_with_none = (None,) + args

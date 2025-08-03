@@ -9,14 +9,13 @@ that verifiers operate within an environment context.
 
 import functools
 import uuid
-import asyncio
 import logging
 import hashlib
 import inspect
 from typing import Any, Callable, Dict, Optional, List, TypeVar, Set, Union
 
 from .bundler import FunctionBundler
-from ..client import Environment
+from ..client import SyncEnv
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +68,7 @@ class SyncVerifierFunction:
         
         return self._bundle_data, self._bundle_sha
     
-    def _check_bundle_status(self, env: Environment) -> tuple[str, bool]:
+    def _check_bundle_status(self, env: SyncEnv) -> tuple[str, bool]:
         """Check if bundle needs to be uploaded and return (sha, needs_upload)."""
         bundle_data, bundle_sha = self._get_or_create_bundle()
         
@@ -93,7 +92,7 @@ class SyncVerifierFunction:
         logger.info(f"Bundle {bundle_sha[:8]}... needs to be uploaded")
         return bundle_sha, True  # Upload needed
     
-    def __call__(self, env: Environment, *args, **kwargs) -> float:
+    def __call__(self, env: SyncEnv, *args, **kwargs) -> float:
         """Local execution of the verifier function with env as first parameter."""
         try:
             if self._is_async:
@@ -122,7 +121,7 @@ class SyncVerifierFunction:
             # Return error score 0
             return 0.0
     
-    def remote(self, env: Environment, *args, **kwargs) -> float:
+    def remote(self, env: SyncEnv, *args, **kwargs) -> float:
         """Remote execution of the verifier function with SHA-based bundle caching."""
         if self._is_async:
             raise NotImplementedError(
@@ -223,7 +222,7 @@ Remote traceback:
         except:
             raise RuntimeError(full_message)
     
-    def _get_env_id(self, env: Environment) -> str:
+    def _get_env_id(self, env: SyncEnv) -> str:
         """Generate a unique identifier for the environment."""
         # Use instance base URL or similar unique identifier
         if hasattr(env, 'instance') and hasattr(env.instance, 'base_url'):
@@ -298,4 +297,4 @@ def verifier(
             verifier_uuid
         )
     
-    return decorator 
+    return decorator

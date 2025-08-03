@@ -41,4 +41,4 @@ class Task(BaseModel):
             datetime: lambda v: v.isoformat(),
         }
         # Allow arbitrary types for the verifier field
-        arbitrary_types_allowed = True 
+        arbitrary_types_allowed = True
