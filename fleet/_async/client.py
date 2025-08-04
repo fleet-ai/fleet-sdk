@@ -30,6 +30,7 @@ from ..models import (
     VerifiersExecuteResponse,
     TaskListResponse,
 )
+from .tasks import Task
 
 from .instance import (
     AsyncInstanceClient,
@@ -236,21 +237,36 @@ class AsyncFleet:
     async def delete(self, instance_id: str) -> InstanceResponse:
         return await _delete_instance(self.client, instance_id)
 
-    async def load_tasks(self, env_key: Optional[str] = None) -> TaskListResponse:
+    async def load_tasks(self, env_key: Optional[str] = None) -> List[Task]:
         """Load tasks for the authenticated team, optionally filtered by environment.
         
         Args:
             env_key: Optional environment key to filter tasks by
             
         Returns:
-            TaskListResponse containing list of tasks and total count
+            List[Task] containing Task objects
         """
         params = {}
         if env_key is not None:
             params["env_key"] = env_key
             
         response = await self.client.request("GET", "/v1/tasks", params=params)
-        return TaskListResponse(**response.json())
+        task_list_response = TaskListResponse(**response.json())
+        
+        # Transform TaskResponse objects to Task objects
+        tasks = []
+        for task_response in task_list_response.tasks:
+            task = Task(
+                key=task_response.key,
+                prompt=task_response.prompt,
+                env_id=task_response.environment_id,  # Map environment_id -> env_id
+                created_at=task_response.created_at,
+                verifier=None,  # Keep blank for now as requested
+                metadata={}  # Default empty metadata
+            )
+            tasks.append(task)
+        
+        return tasks
 
 
 # Shared
