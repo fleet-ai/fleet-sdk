@@ -191,7 +191,7 @@ class AsyncFleet:
             env_key_part = env_key
             version = None
 
-        request = InstanceRequest(env_key=env_key_part, version=version, region=region)
+        request = InstanceRequest(env_key=env_key_part, version=version, region=region, created_from="sdk")
         region_base_url = REGION_BASE_URL.get(region)
         response = await self.client.request(
             "POST",

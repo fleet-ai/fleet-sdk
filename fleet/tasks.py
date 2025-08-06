@@ -10,7 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, validator
 
 # Import the shared VerifierFunction type that works for both async and sync
-from .types import VerifierFunction
+from ..types import VerifierFunction
 
 
 class Task(BaseModel):

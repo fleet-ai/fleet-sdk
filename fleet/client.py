@@ -191,7 +191,7 @@ class Fleet:
             env_key_part = env_key
             version = None
 
-        request = InstanceRequest(env_key=env_key_part, version=version, region=region)
+        request = InstanceRequest(env_key=env_key_part, version=version, region=region, created_from="sdk")
         region_base_url = REGION_BASE_URL.get(region)
         response = self.client.request(
             "POST",
@@ -330,6 +330,3 @@ def _execute_verifier_remote(
     logger.debug(f"Verifier execute response: {response_json}")
 
     return VerifiersExecuteResponse(**response_json)
-
-# Alias for backward compatibility
-Environment = SyncEnv
