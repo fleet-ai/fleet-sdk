@@ -15,7 +15,7 @@ import asyncio
 from typing import Any, Callable, Dict, Optional, List, TypeVar, Set
 
 from .bundler import FunctionBundler
-from ..client import AsyncEnv
+from ..client import AsyncEnvironment
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ class AsyncVerifierFunction:
         
         return self._bundle_data, self._bundle_sha
     
-    async def _check_bundle_status(self, env: AsyncEnv) -> tuple[str, bool]:
+    async def _check_bundle_status(self, env: AsyncEnvironment) -> tuple[str, bool]:
         """Check if bundle needs to be uploaded and return (sha, needs_upload)."""
         bundle_data, bundle_sha = self._get_or_create_bundle()
         
@@ -91,7 +91,7 @@ class AsyncVerifierFunction:
         logger.info(f"Bundle {bundle_sha[:8]}... needs to be uploaded")
         return bundle_sha, True  # Upload needed
     
-    async def __call__(self, env: AsyncEnv, *args, **kwargs) -> float:
+    async def __call__(self, env: AsyncEnvironment, *args, **kwargs) -> float:
         """Local execution of the verifier function with env as first parameter."""
         try:
             if self._is_async:
@@ -120,7 +120,7 @@ class AsyncVerifierFunction:
             # Return error score 0
             return 0.0
     
-    async def remote(self, env: AsyncEnv, *args, **kwargs) -> float:
+    async def remote(self, env: AsyncEnvironment, *args, **kwargs) -> float:
         """Remote execution of the verifier function with SHA-based bundle caching."""
         if self._is_async:
             raise NotImplementedError(
@@ -221,7 +221,7 @@ Remote traceback:
         except:
             raise RuntimeError(full_message)
     
-    def _get_env_id(self, env: AsyncEnv) -> str:
+    def _get_env_id(self, env: AsyncEnvironment) -> str:
         """Generate a unique identifier for the environment."""
         # Use instance base URL or similar unique identifier
         if hasattr(env, 'instance') and hasattr(env.instance, 'base_url'):

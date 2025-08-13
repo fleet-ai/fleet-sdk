@@ -1,5 +1,4 @@
 from typing import Dict
-import json
 
 
 class MCPResource:
@@ -23,13 +22,13 @@ class MCPResource:
         }
 
     async def list_tools(self):
-        import aiohttp
         """
         Make an async request to list available tools from the MCP endpoint.
         
         Returns:
             List of available tools with name, description, and input_schema
         """
+        import aiohttp
         async with aiohttp.ClientSession() as session:
             payload = {
                 "jsonrpc": "2.0",

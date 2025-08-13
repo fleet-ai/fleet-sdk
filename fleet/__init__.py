@@ -22,9 +22,9 @@ from .exceptions import (
     FleetInstanceLimitError,
     FleetConfigurationError,
 )
-from .client import Fleet, SyncEnv
-from ._async.client import AsyncFleet, AsyncEnv
-from .models import InstanceResponse
+from .client import Fleet, Environment
+from ._async.client import AsyncFleet, AsyncEnvironment
+from .models import InstanceRecord
 from .instance.models import Resource, ResetResponse
 
 # Import sync verifiers with explicit naming
@@ -60,7 +60,7 @@ __all__ = [
     "Fleet",
     "SyncEnv",
     "AsyncFleet",
-    "AsyncEnv",
+    "AsyncEnvironment",
     # Models
     "InstanceRecord", 
     "Resource",
