@@ -1,6 +1,6 @@
 """Fleet env module - convenience functions for environment management."""
 
-from .client import make, list_envs, list_regions, get, list_instances
+from .client import make, list_envs, list_regions, get, list_instances, account
 
 # Import async versions from _async
 from .._async.env.client import (
@@ -9,6 +9,7 @@ from .._async.env.client import (
     list_regions_async,
     get_async,
     list_instances_async,
+    account_async,
 )
 
 __all__ = [
@@ -22,4 +23,6 @@ __all__ = [
     "list_regions_async",
     "list_instances_async",
     "get_async",
+    "account",
+    "account_async",
 ]

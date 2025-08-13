@@ -1,5 +1,5 @@
 from ..client import AsyncFleet, AsyncEnv
-from ...models import Environment as EnvironmentModel
+from ...models import Environment as EnvironmentModel, AccountResponse
 from typing import List, Optional
 
 
@@ -23,3 +23,7 @@ async def list_instances_async(
 
 async def get_async(instance_id: str) -> AsyncEnv:
     return await AsyncFleet().instance(instance_id)
+
+
+async def account_async() -> AccountResponse:
+    return await AsyncFleet().account()

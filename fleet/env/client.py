@@ -1,5 +1,5 @@
 from ..client import Fleet, SyncEnv
-from ..models import Environment as EnvironmentModel
+from ..models import Environment as EnvironmentModel, AccountResponse
 from typing import List, Optional
 
 
@@ -23,3 +23,7 @@ def list_instances(
 
 def get(instance_id: str) -> SyncEnv:
     return Fleet().instance(instance_id)
+
+
+def account() -> AccountResponse:
+    return Fleet().account()

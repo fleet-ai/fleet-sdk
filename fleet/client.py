@@ -29,6 +29,7 @@ from .models import (
     VerifiersCheckResponse,
     VerifiersExecuteResponse,
     TaskListResponse,
+    AccountResponse,
 )
 from .tasks import Task
 
@@ -267,6 +268,15 @@ class Fleet:
             tasks.append(task)
         
         return tasks
+
+    def account(self) -> AccountResponse:
+        """Get account information including instance limits and usage.
+        
+        Returns:
+            AccountResponse containing team_id, team_name, instance_limit, and instance_count
+        """
+        response = self.client.request("GET", "/v1/account")
+        return AccountResponse(**response.json())
 
 
 # Shared
