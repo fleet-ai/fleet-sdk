@@ -23,6 +23,7 @@ from ...instance.models import (
     ResetResponse,
     Resource as ResourceModel,
     ResourceType,
+    ResourceMode,
     HealthResponse,
     ExecuteFunctionRequest,
     ExecuteFunctionResponse,
@@ -41,6 +42,12 @@ ValidatorType = Callable[
     [DatabaseSnapshot, DatabaseSnapshot, Optional[str]],
     int,
 ]
+
+
+# DEFAULT_RESOURCES = [
+#     ResourceModel("seed", ResourceType.db, ResourceMode.ro, None),
+#     ResourceModel("current", ResourceType.db, ResourceMode.rw, None),
+# ]
 
 
 class AsyncInstanceClient:
