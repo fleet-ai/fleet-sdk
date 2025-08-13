@@ -22,7 +22,7 @@ from .exceptions import (
     FleetInstanceLimitError,
     FleetConfigurationError,
 )
-from .client import Fleet, Environment
+from .client import Fleet, SyncEnv
 from ._async.client import AsyncFleet, AsyncEnv
 from .models import InstanceResponse
 from .instance.models import Resource, ResetResponse
@@ -58,7 +58,7 @@ __version__ = "0.1.0"
 __all__ = [
     # Core classes
     "Fleet",
-    "Environment",
+    "SyncEnv",
     "AsyncFleet",
     "AsyncEnv",
     # Models
