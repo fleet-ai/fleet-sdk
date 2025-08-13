@@ -12,8 +12,7 @@ import uuid
 import logging
 import hashlib
 import asyncio
-import inspect
-from typing import Any, Callable, Dict, Optional, List, TypeVar, Set, Union
+from typing import Any, Callable, Dict, Optional, List, TypeVar, Set
 
 from .bundler import FunctionBundler
 from ..client import AsyncEnvironment
@@ -44,7 +43,6 @@ class AsyncVerifierFunction:
     ):
         self.func = func
         self.key = key
-        self.name = key  # Keep name for backward compatibility
         self.verifier_id = verifier_id or str(uuid.uuid4())
         self.extra_requirements = extra_requirements or []
         self._bundler = FunctionBundler()
@@ -65,7 +63,7 @@ class AsyncVerifierFunction:
                 self.verifier_id
             )
             self._bundle_sha = _get_bundle_sha(self._bundle_data)
-            logger.debug(f"Created bundle for {self.name} with SHA: {self._bundle_sha}")
+            logger.debug(f"Created bundle for {self.key} with SHA: {self._bundle_sha}")
         
         return self._bundle_data, self._bundle_sha
     
@@ -118,7 +116,7 @@ class AsyncVerifierFunction:
                     raise ValueError(f"Verifier function must return a score (number). Got {type(result)}")
                     
         except Exception as e:
-            logger.error(f"Error in verifier {self.name}: {e}")
+            logger.error(f"Error in verifier {self.key}: {e}")
             # Return error score 0
             return 0.0
     
@@ -126,7 +124,7 @@ class AsyncVerifierFunction:
         """Remote execution of the verifier function with SHA-based bundle caching."""
         if self._is_async:
             raise NotImplementedError(
-                f"Async verifier '{self.name}' cannot be executed remotely. "
+                f"Async verifier '{self.key}' cannot be executed remotely. "
                 "The remote execution environment only supports synchronous functions. "
                 "Please provide a synchronous version of your verifier."
             )

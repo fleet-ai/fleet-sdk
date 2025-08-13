@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 # Import types from verifiers module
-from ...verifiers.db import IgnoreConfig, _get_row_identifier, _format_row_for_error, _values_equivalent
+from fleet.verifiers.db import IgnoreConfig, _get_row_identifier, _format_row_for_error, _values_equivalent
 
 
 class AsyncDatabaseSnapshot:

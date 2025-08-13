@@ -1,6 +1,6 @@
 [project]
 name = "fleet-python"
-version = "0.2.21"
+version = "0.2.23"
 description = "Python SDK for Fleet environments"
 authors = [
     {name = "Fleet AI", email = "nic@fleet.so"},

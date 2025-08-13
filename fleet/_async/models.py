@@ -10,19 +10,6 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field, conint
 
 
-class ToolLogEntry(BaseModel):
-    id: int
-    timestamp: str
-    tool_name: str
-    action: str
-    parameters: Dict[str, Any]
-    result: Optional[Dict[str, Any]] = None
-    success: bool = True
-    error: Optional[str] = None
-    duration_ms: Optional[int] = None
-    session_id: Optional[str] = None
-    user_agent: Optional[str] = None
-
 class CDPDescribeResponse(BaseModel):
     success: bool = Field(..., title='Success')
     url: str = Field(..., title='Url')
@@ -42,33 +29,6 @@ class ChromeStartResponse(BaseModel):
 class ChromeStatusResponse(BaseModel):
     running: bool = Field(..., title='Running')
     message: str = Field(..., title='Message')
-
-
-class ToolLogResponse(BaseModel):
-    success: bool
-    log_id: Optional[int] = None
-    message: str
-
-
-class ToolSessionStartRequest(BaseModel):
-    session_id: str
-    metadata: Optional[Dict[str, Any]] = None
-
-
-class ToolSessionStartResponse(BaseModel):
-    success: bool
-    session_id: str
-    message: str
-
-
-class ToolLogQueryRequest(BaseModel):
-    tool_name: Optional[str] = None
-    action: Optional[str] = None
-    session_id: Optional[str] = None
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
-    limit: Optional[int] = 10000
-    offset: int = 0
 
 
 class Environment(BaseModel):
@@ -359,44 +319,3 @@ class InstanceResponse(BaseModel):
     env_variables: Optional[Dict[str, Any]] = Field(None, title='Env Variables')
     urls: Optional[InstanceURLs] = Field(None, title='Urls')
     health: Optional[bool] = Field(None, title='Health')
-
-
-class InstanceRecord(BaseModel):
-    instance_id: str
-    env_key: str
-    version: str
-    status: str
-    subdomain: str
-    created_at: str
-    updated_at: str
-    terminated_at: Optional[str] = None
-    team_id: str
-    region: str
-
-
-class SnapshotResponse(BaseModel):
-    success: bool
-    backup_id: str
-    instance_id: str
-    s3_key: str
-    created_at: str
-
-
-class RestoreRequest(BaseModel):
-    backup_id: Optional[str] = None
-
-
-class RestoreResponse(BaseModel):
-    success: bool
-    backup_id: str
-    source_instance_id: str
-    target_instance_id: str
-    restored_at: str
-
-
-class RecreateResponse(BaseModel):
-    success: bool
-    instance_id: str
-    env_key: str
-    version: str
-    recreated_at: str

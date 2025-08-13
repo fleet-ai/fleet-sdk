@@ -24,16 +24,16 @@ from typing import List, Optional, Dict
 from .base import EnvironmentBase, AsyncWrapper
 from ..models import (
     InstanceRequest,
-    InstanceRecord,
+    InstanceResponse,
     Environment as EnvironmentModel,
     VerifiersCheckResponse,
-    VerificationResponse,
     VerifiersExecuteResponse,
     SnapshotResponse,
     RestoreRequest,
     RestoreResponse,
     RecreateResponse,
 )
+from .tasks import Task
 
 from .instance import (
     AsyncInstanceClient,
@@ -106,7 +106,7 @@ class AsyncEnvironment(EnvironmentBase):
     async def resources(self) -> List[Resource]:
         return await self.instance.resources()
 
-    async def close(self) -> InstanceRecord:
+    async def close(self) -> InstanceResponse:
         return await _delete_instance(self._load_client, self.instance_id)
 
     async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
@@ -211,7 +211,7 @@ class AsyncFleet:
             env_key_part = env_key
             version = None
 
-        request = InstanceRequest(env_key=env_key_part, version=version, region=region)
+        request = InstanceRequest(env_key=env_key_part, version=version, region=region, created_from="sdk")
         region_base_url = REGION_BASE_URL.get(region)
         response = await self.client.request(
             "POST",
@@ -254,7 +254,7 @@ class AsyncFleet:
             self.client, bundle_data, args, kwargs, timeout
         )
 
-    async def delete(self, instance_id: str) -> InstanceRecord:
+    async def delete(self, instance_id: str) -> InstanceResponse:
         return await _delete_instance(self.client, instance_id)
 
     async def snapshot(self, instance_id: str) -> SnapshotResponse:
@@ -270,11 +270,42 @@ class AsyncFleet:
     async def recreate(self, instance_id: str) -> RecreateResponse:
         return await _recreate_instance(self.client, instance_id)
 
+    async def load_tasks(self, env_key: Optional[str] = None) -> List[Task]:
+        """Load tasks for the authenticated team, optionally filtered by environment.
+        
+        Args:
+            env_key: Optional environment key to filter tasks by
+            
+        Returns:
+            List[Task] containing Task objects
+        """
+        params = {}
+        if env_key is not None:
+            params["env_key"] = env_key
+            
+        response = await self.client.request("GET", "/v1/tasks", params=params)
+        task_list_response = TaskListResponse(**response.json())
+        
+        # Transform TaskResponse objects to Task objects
+        tasks = []
+        for task_response in task_list_response.tasks:
+            task = Task(
+                key=task_response.key,
+                prompt=task_response.prompt,
+                env_id=task_response.environment_id,  # Map environment_id -> env_id
+                created_at=task_response.created_at,
+                verifier=None,  # Keep blank for now as requested
+                metadata={}  # Default empty metadata
+            )
+            tasks.append(task)
+        
+        return tasks
+
 
 # Shared
-async def _delete_instance(client: AsyncWrapper, instance_id: str) -> InstanceRecord:
+async def _delete_instance(client: AsyncWrapper, instance_id: str) -> InstanceResponse:
     response = await client.request("DELETE", f"/v1/env/instances/{instance_id}")
-    return InstanceRecord(**response.json())
+    return InstanceResponse(**response.json())
 
 
 async def _check_bundle_exists(
@@ -317,7 +348,7 @@ async def _execute_verifier_remote(
     kwargs: dict,
     timeout: Optional[int] = 30,
     needs_upload: bool = True,
-) -> VerificationResponse:
+) -> VerifiersExecuteResponse:
     # Pickle args and kwargs together
     # The first arg should be None as a placeholder for env
     args_with_none = (None,) + args

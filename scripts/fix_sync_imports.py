@@ -50,6 +50,12 @@ def fix_file(filepath: Path) -> bool:
         content = content.replace('from ..models import', 'from .models import')
         content = content.replace('from ..config import', 'from .config import')
     
+    # Fix __init__.py imports - the class is called SyncEnv, not Environment
+    if rel_path.parts[0] == '__init__.py' and len(rel_path.parts) == 1:
+        content = content.replace('from .client import Fleet, Environment', 'from .client import Fleet, SyncEnv')
+        content = content.replace('"Environment",', '"SyncEnv",')
+        content = content.replace("'Environment',", "'SyncEnv',")
+    
     # Fix playwright imports for sync version
     if 'playwright' in str(filepath):
         # Fix the import statement

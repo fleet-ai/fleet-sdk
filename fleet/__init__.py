@@ -58,7 +58,7 @@ __version__ = "0.1.0"
 __all__ = [
     # Core classes
     "Fleet",
-    "Environment",
+    "SyncEnv",
     "AsyncFleet",
     "AsyncEnvironment",
     # Models
