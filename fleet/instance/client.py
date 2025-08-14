@@ -130,27 +130,58 @@ class InstanceClient:
 
     def _load_resources(self) -> None:
         if self._resources is None:
-            response = self.client.request("GET", "/resources")
-            if response.status_code != 200:
-                self._resources = []
-                return
+            logger.debug(f"Loading resources from {self.base_url}/resources")
+            start_time = time.time()
+            
+            try:
+                response = self.client.request("GET", "/resources")
+                load_duration = time.time() - start_time
+                
+                if response.status_code != 200:
+                    logger.warning(f"Resource loading failed with status {response.status_code}, setting empty resources list")
+                    self._resources = []
+                    return
 
-            # Handle both old and new response formats
-            response_data = response.json()
-            if isinstance(response_data, dict) and "resources" in response_data:
-                # Old format: {"resources": [...]}
-                resources_list = response_data["resources"]
-            else:
-                # New format: [...]
-                resources_list = response_data
+                # Handle both old and new response formats
+                try:
+                    response_data = response.json()
+                    logger.debug(f"Resource loading response received in {load_duration:.2f}s")
+                    
+                    if isinstance(response_data, dict) and "resources" in response_data:
+                        # Old format: {"resources": [...]}
+                        resources_list = response_data["resources"]
+                        logger.debug(f"Using old response format, found {len(resources_list)} resources")
+                    else:
+                        # New format: [...]
+                        resources_list = response_data
+                        if isinstance(resources_list, list):
+                            logger.debug(f"Using new response format, found {len(resources_list)} resources")
+                        else:
+                            logger.warning(f"Unexpected response format: {type(resources_list)}")
+                            
+                except Exception as e:
+                    logger.error(f"Failed to parse resources response as JSON: {e}")
+                    logger.error(f"Raw response text: {response.text}")
+                    raise
 
-            self._resources = [ResourceModel(**resource) for resource in resources_list]
-            for resource in self._resources:
-                if resource.type.value not in self._resources_state:
-                    self._resources_state[resource.type.value] = {}
-                self._resources_state[resource.type.value][resource.name] = (
-                    RESOURCE_TYPES[resource.type](resource, self.client)
-                )
+                self._resources = [ResourceModel(**resource) for resource in resources_list]
+                logger.debug(f"Successfully parsed {len(self._resources)} resource models")
+                
+                for resource in self._resources:
+                    if resource.type.value not in self._resources_state:
+                        self._resources_state[resource.type.value] = {}
+                    self._resources_state[resource.type.value][resource.name] = (
+                        RESOURCE_TYPES[resource.type](resource, self.client)
+                    )
+                    logger.debug(f"Initialized resource: {resource.type.value}/{resource.name}")
+                    
+                total_duration = time.time() - start_time
+                logger.info(f"Resource loading completed in {total_duration:.2f}s, loaded {len(self._resources)} resources")
+                
+            except Exception as e:
+                duration = time.time() - start_time
+                logger.error(f"Resource loading failed after {duration:.2f}s: {type(e).__name__}: {e}")
+                raise
 
     def step(self, action: Dict[str, Any]) -> Tuple[Dict[str, Any], float, bool]:
         """Execute one step in the environment."""

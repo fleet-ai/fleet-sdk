@@ -19,6 +19,7 @@ import cloudpickle
 import httpx
 import logging
 import os
+import time
 from typing import List, Optional, Dict
 
 from .base import EnvironmentBase, SyncWrapper
@@ -183,25 +184,90 @@ class Fleet:
     def make(
         self, env_key: str, region: Optional[str] = None
     ) -> SyncEnv:
-        if ":" in env_key:
-            env_key_part, version = env_key.split(":", 1)
-            if not version.startswith("v") and len(version) != 0 and version[0].isdigit():
-                version = f"v{version}"
-        else:
-            env_key_part = env_key
-            version = None
+        print(f"🚀 MAKE() CALLED: env_key='{env_key}', region='{region}'")
+        logger.info(f"Starting make() for env_key='{env_key}', region='{region}'")
+        print(f"🚀 LOGGER.INFO COMPLETED")
+        start_time = time.time()
+        print(f"🚀 START_TIME SET")
+        
+        try:
+            print(f"🚀 ENTERING TRY BLOCK")
+            # Parse env_key and version
+            if ":" in env_key:
+                env_key_part, version = env_key.split(":", 1)
+                if not version.startswith("v") and len(version) != 0 and version[0].isdigit():
+                    version = f"v{version}"
+                logger.debug(f"Parsed env_key_part='{env_key_part}', version='{version}'")
+            else:
+                env_key_part = env_key
+                version = None
+                logger.debug(f"No version specified, using env_key_part='{env_key_part}'")
 
-        request = InstanceRequest(env_key=env_key_part, version=version, region=region, created_from="sdk")
-        region_base_url = REGION_BASE_URL.get(region)
-        response = self.client.request(
-            "POST",
-            "/v1/env/instances",
-            json=request.model_dump(),
-            base_url=region_base_url,
-        )
-        instance = SyncEnv(client=self.client, **response.json())
-        instance.instance.load()
-        return instance
+            # Create instance request
+            request = InstanceRequest(env_key=env_key_part, version=version, region=region, created_from="sdk")
+            region_base_url = REGION_BASE_URL.get(region)
+            
+            logger.debug(f"Instance request: {request.model_dump()}")
+            logger.debug(f"Target base URL: {region_base_url or self.client.base_url}")
+            
+            # Make the instance creation request
+            print(f"🚀 ABOUT TO LOG INSTANCE CREATION")
+            logger.info(f"Creating instance for env_key='{env_key_part}', version='{version}', region='{region}'")
+            print(f"🚀 LOGGED INSTANCE CREATION")
+            request_start = time.time()
+            print(f"🚀 ABOUT TO CALL CLIENT.REQUEST")
+            
+            response = self.client.request(
+                "POST",
+                "/v1/env/instances",
+                json=request.model_dump(),
+                base_url=region_base_url,
+            )
+            print(f"🚀 CLIENT.REQUEST COMPLETED")
+            request_duration = time.time() - request_start
+            logger.info(f"Instance creation request completed in {request_duration:.2f}s, status={response.status_code}")
+            
+            # Parse response
+            try:
+                response_data = response.json()
+                logger.debug(f"Instance creation response keys: {list(response_data.keys()) if isinstance(response_data, dict) else 'non-dict response'}")
+                
+                # Log important response fields if available
+                if isinstance(response_data, dict):
+                    if 'instance_id' in response_data:
+                        logger.info(f"Created instance with ID: {response_data['instance_id']}")
+                    if 'status' in response_data:
+                        logger.debug(f"Instance status: {response_data['status']}")
+                    if 'urls' in response_data and isinstance(response_data['urls'], dict):
+                        manager_url = response_data['urls'].get('manager', {}).get('api', 'unknown')
+                        logger.debug(f"Instance manager URL: {manager_url}")
+                        
+            except Exception as e:
+                logger.error(f"Failed to parse instance creation response as JSON: {e}")
+                logger.error(f"Raw response text: {response.text}")
+                raise
+
+            # Create SyncEnv instance
+            logger.debug("Creating SyncEnv instance from response")
+            instance = SyncEnv(client=self.client, **response_data)
+            
+            # Load instance resources
+            logger.info(f"Loading resources for instance {getattr(instance, 'instance_id', 'unknown')}")
+            load_start = time.time()
+            
+            instance.instance.load()
+            load_duration = time.time() - load_start
+            logger.info(f"Instance resource loading completed in {load_duration:.2f}s")
+            
+            total_duration = time.time() - start_time
+            logger.info(f"make() completed successfully in {total_duration:.2f}s for env_key='{env_key}'")
+            
+            return instance
+            
+        except Exception as e:
+            total_duration = time.time() - start_time
+            logger.error(f"make() failed after {total_duration:.2f}s for env_key='{env_key}': {type(e).__name__}: {e}")
+            raise
 
     def instances(
         self, status: Optional[str] = None, region: Optional[str] = None

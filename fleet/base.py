@@ -48,6 +48,13 @@ class BaseWrapper:
         import logging
         logger = logging.getLogger(__name__)
         logger.debug(f"Headers being sent: {headers}")
+        
+        # Debug: Check which request method will be called
+        print(f"🔍 SyncWrapper class: {self.__class__}")
+        print(f"🔍 Request method: {self.request}")
+        import inspect
+        print(f"🔍 Request method source: {inspect.getsourcefile(self.request)}")
+        
         return headers
 
 
@@ -65,26 +72,236 @@ class SyncWrapper(BaseWrapper):
         base_url: Optional[str] = None,
         **kwargs,
     ) -> httpx.Response:
+        # Force print to verify this method is being called
+        print(f"🔥 ENHANCED REQUEST METHOD CALLED: {method} {url}")
+        
+        import time
+        import socket
+        from urllib.parse import urlparse
+        
         base_url = base_url or self.base_url
+        full_url = f"{base_url}{url}"
+        
+        # Parse URL for detailed logging
+        parsed_url = urlparse(full_url)
+        
+        # Log comprehensive request details
+        logger.error(f"🚀 ENHANCED LOGGING ACTIVE - Starting {method} request")  # Use ERROR to ensure it shows
+        logger.debug(f"=== Starting {method} request ===")
+        logger.debug(f"Full URL: {full_url}")
+        logger.debug(f"Host: {parsed_url.hostname}, Port: {parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)}")
+        logger.debug(f"Path: {parsed_url.path}")
+        logger.debug(f"Query: {parsed_url.query}")
+        
+        if params:
+            logger.debug(f"URL params: {params}")
+        if json:
+            # Log a truncated version of the JSON for security
+            json_summary = {k: f"<{type(v).__name__}>" if k in ['bundle', 'bundle_data'] 
+                          else (v if len(str(v)) < 100 else f"{str(v)[:100]}...") 
+                          for k, v in (json.items() if isinstance(json, dict) else {"payload": json})}
+            logger.debug(f"Request JSON summary: {json_summary}")
+            
+        # Log additional request kwargs
+        if kwargs:
+            safe_kwargs = {k: v for k, v in kwargs.items() if k not in ['headers']}  # Headers logged separately
+            logger.debug(f"Additional request kwargs: {safe_kwargs}")
+            
+        # Log httpx client configuration
+        client_info = {
+            'timeout': str(self.httpx_client.timeout),
+            'limits': str(self.httpx_client.limits),
+            'proxies': bool(self.httpx_client._mounts),  # Check if proxies configured
+            'verify_ssl': getattr(self.httpx_client, '_verify', True),
+        }
+        logger.debug(f"HTTP client config: {client_info}")
+        
+        # Pre-request timing and network checks
+        start_time = time.time()
+        dns_start = time.time()
+        
         try:
-            response = self.httpx_client.request(
-                method,
-                f"{base_url}{url}",
-                headers=self.get_headers(),
-                params=params,
-                json=json,
-                **kwargs,
-            )
+            # DNS resolution timing (if not cached)
+            try:
+                host_ip = socket.gethostbyname(parsed_url.hostname)
+                dns_duration = time.time() - dns_start
+                logger.debug(f"DNS resolution: {parsed_url.hostname} -> {host_ip} ({dns_duration:.3f}s)")
+                
+                # Test basic connectivity
+                import socket as socket_module
+                test_socket = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_STREAM)
+                test_socket.settimeout(5)  # 5 second timeout for connectivity test
+                try:
+                    port = parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)
+                    logger.debug(f"Testing connectivity to {host_ip}:{port}...")
+                    connect_start = time.time()
+                    test_socket.connect((host_ip, port))
+                    connect_duration = time.time() - connect_start
+                    logger.debug(f"Socket connection successful in {connect_duration:.3f}s")
+                    test_socket.close()
+                except Exception as connect_error:
+                    connect_duration = time.time() - connect_start
+                    logger.error(f"Socket connection failed after {connect_duration:.3f}s: {connect_error}")
+                    logger.error(f"This suggests a network/firewall issue preventing connection to {host_ip}:{port}")
+                    
+            except Exception as dns_error:
+                dns_duration = time.time() - dns_start
+                logger.warning(f"DNS resolution failed after {dns_duration:.3f}s: {dns_error}")
+            
+            # Log headers being sent
+            headers = self.get_headers()
+            safe_headers = {k: v if k.lower() != 'authorization' else f"Bearer {v[-8:]}" 
+                          for k, v in headers.items()}
+            logger.debug(f"Request headers: {safe_headers}")
+            
+            # Additional pre-request debugging
+            logger.debug("Checking httpx client status...")
+            logger.debug(f"Client is closed: {self.httpx_client.is_closed}")
+            logger.debug(f"Active connections: {len(getattr(self.httpx_client, '_pool', []))}")
+            
+            # Test connectivity with a simple check
+            logger.debug("About to initiate HTTP request...")
+            logger.debug(f"Request method: {method}")
+            logger.debug(f"Request URL: {full_url}")
+            logger.debug(f"Request params: {params}")
+            if json:
+                logger.debug(f"Request JSON size: {len(str(json))} chars")
+            
+            # Make the actual request with detailed timing
+            logger.debug("=== STARTING HTTP REQUEST EXECUTION ===")
+            request_start = time.time()
+            
+            # Log every 5 seconds if request is taking too long
+            import threading
+            import time as time_module
+            
+            def log_progress():
+                elapsed = 0
+                while True:
+                    time_module.sleep(5)
+                    elapsed += 5
+                    if hasattr(log_progress, 'stop'):
+                        break
+                    logger.warning(f"HTTP request still in progress after {elapsed}s...")
+            
+            progress_thread = threading.Thread(target=log_progress, daemon=True)
+            progress_thread.start()
+            
+            try:
+                logger.debug(f"Calling httpx_client.request() with timeout: {self.httpx_client.timeout}")
+                response = self.httpx_client.request(
+                    method,
+                    full_url,
+                    headers=headers,
+                    params=params,
+                    json=json,
+                    **kwargs,
+                )
+                log_progress.stop = True  # Stop the progress logging
+            except Exception as e:
+                log_progress.stop = True  # Stop the progress logging
+                raise
+            
+            request_duration = time.time() - request_start
+            total_duration = time.time() - start_time
+            
+            logger.debug(f"HTTP request completed in {request_duration:.3f}s (total: {total_duration:.3f}s)")
+            logger.debug(f"Response status: {response.status_code} {response.reason_phrase}")
+            
+            # Log response headers and metadata
+            response_headers = dict(response.headers)
+            important_headers = {
+                'content-type': response_headers.get('content-type', 'unknown'),
+                'content-length': response_headers.get('content-length', 'unknown'),
+                'server': response_headers.get('server', 'unknown'),
+                'x-request-id': response_headers.get('x-request-id', 'none'),
+                'cache-control': response_headers.get('cache-control', 'none'),
+                'connection': response_headers.get('connection', 'unknown'),
+            }
+            logger.debug(f"Response headers: {important_headers}")
+            
+            # Log HTTP version and connection info
+            logger.debug(f"HTTP version: {response.http_version}")
+            logger.debug(f"Response encoding: {response.encoding}")
+            
+            # Network timing breakdown (if available)
+            if hasattr(response, 'elapsed'):
+                logger.debug(f"Response elapsed time: {response.elapsed}")
+            
+            # Log response size and content info
+            try:
+                content_peek = response.content[:200] if len(response.content) <= 200 else response.content[:200] + b'...'
+                logger.debug(f"Response content preview ({len(response.content)} bytes): {content_peek}")
+            except Exception as content_error:
+                logger.debug(f"Could not preview response content: {content_error}")
+            
+            # Log response text for errors or debug mode (with size limits)
+            if response.status_code >= 400 or logger.isEnabledFor(10):  # 10 = DEBUG level
+                try:
+                    response_text = response.text
+                    if len(response_text) > 2000:
+                        logger.debug(f"Response text (first 1000 chars): {response_text[:1000]}")
+                        logger.debug(f"Response text (last 1000 chars): {response_text[-1000:]}")
+                        logger.debug(f"... ({len(response_text) - 2000} chars omitted) ...")
+                    else:
+                        logger.debug(f"Full response text: {response_text}")
+                except Exception as text_error:
+                    logger.debug(f"Could not read response text: {text_error}")
 
             # Check for HTTP errors
             if response.status_code >= 400:
+                logger.warning(f"HTTP {response.status_code} error from {method} {full_url}")
                 self._handle_error_response(response)
+            else:
+                logger.debug(f"=== {method} request successful ===")
 
             return response
+            
         except httpx.TimeoutException as e:
-            raise FleetTimeoutError(f"Request timed out: {str(e)}")
+            duration = time.time() - start_time
+            logger.error(f"=== REQUEST TIMEOUT ===")
+            logger.error(f"Request to {full_url} timed out after {duration:.3f}s")
+            logger.error(f"Timeout type: {type(e).__name__}")
+            logger.error(f"Timeout details: {str(e)}")
+            logger.error(f"Client timeout config: {self.httpx_client.timeout}")
+            raise FleetTimeoutError(f"Request timed out after {duration:.3f}s: {str(e)}")
+            
+        except httpx.ConnectError as e:
+            duration = time.time() - start_time
+            logger.error(f"=== CONNECTION ERROR ===")
+            logger.error(f"Failed to connect to {full_url} after {duration:.3f}s")
+            logger.error(f"Connection error: {str(e)}")
+            logger.error(f"Host: {parsed_url.hostname}:{parsed_url.port or (443 if parsed_url.scheme == 'https' else 80)}")
+            raise FleetAPIError(f"Connection failed: {str(e)}")
+            
+        except httpx.HTTPStatusError as e:
+            duration = time.time() - start_time
+            logger.error(f"=== HTTP STATUS ERROR ===")
+            logger.error(f"HTTP error {e.response.status_code} from {full_url} after {duration:.3f}s")
+            logger.error(f"Error details: {str(e)}")
+            raise FleetAPIError(f"HTTP error {e.response.status_code}: {str(e)}")
+            
         except httpx.RequestError as e:
+            duration = time.time() - start_time
+            logger.error(f"=== GENERAL REQUEST ERROR ===")
+            logger.error(f"Request to {full_url} failed after {duration:.3f}s")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error details: {str(e)}")
+            
+            # Try to extract more details from the error
+            if hasattr(e, '__cause__') and e.__cause__:
+                logger.error(f"Underlying cause: {type(e.__cause__).__name__}: {e.__cause__}")
+                
             raise FleetAPIError(f"Request failed: {str(e)}")
+            
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.error(f"=== UNEXPECTED ERROR ===")
+            logger.error(f"Unexpected error during request to {full_url} after {duration:.3f}s")
+            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"Error details: {str(e)}")
+            logger.error(f"Full traceback:", exc_info=True)
+            raise FleetAPIError(f"Unexpected error: {str(e)}")
 
     def _handle_error_response(self, response: httpx.Response) -> None:
         """Handle HTTP error responses and convert to appropriate Fleet exceptions."""
@@ -116,7 +333,58 @@ class SyncWrapper(BaseWrapper):
             else:
                 error_message = detail
 
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError) as json_error:
+            logger.error(f"Failed to parse error response as JSON: {json_error}")
+            logger.error(f"Response status: {status_code}")
+            logger.error(f"Response headers: {dict(response.headers)}")
+            logger.error(f"Raw response text length: {len(response.text)}")
+            
+            # Log first and last parts of response to help debug malformed JSON
+            response_text = response.text
+            if len(response_text) > 500:
+                logger.error(f"Response text start (first 250 chars): {response_text[:250]}")
+                logger.error(f"Response text end (last 250 chars): {response_text[-250:]}")
+            else:
+                logger.error(f"Full response text: {response_text}")
+                
+            # Try to find where JSON parsing fails
+            try:
+                # Attempt to identify the problematic part
+                import re
+                # Look for common JSON issues
+                if response_text.strip().endswith(','):
+                    logger.error("Response appears to end with trailing comma")
+                if response_text.count('{') != response_text.count('}'):
+                    logger.error(f"Unmatched braces: {response_text.count('{')} open, {response_text.count('}')} close")
+                if response_text.count('[') != response_text.count(']'):
+                    logger.error(f"Unmatched brackets: {response_text.count('[')} open, {response_text.count(']')} close")
+                    
+                # Check for multiple JSON objects (which would cause "Extra data" error)
+                try:
+                    import json
+                    decoder = json.JSONDecoder()
+                    idx = 0
+                    objs = []
+                    while idx < len(response_text):
+                        response_text_remaining = response_text[idx:].lstrip()
+                        if not response_text_remaining:
+                            break
+                        try:
+                            obj, end_idx = decoder.raw_decode(response_text_remaining)
+                            objs.append(obj)
+                            idx += len(response_text[idx:]) - len(response_text_remaining) + end_idx
+                        except json.JSONDecodeError:
+                            break
+                    if len(objs) > 1:
+                        logger.error(f"Found {len(objs)} JSON objects in response - this causes 'Extra data' error")
+                        logger.error(f"First object: {objs[0]}")
+                        logger.error(f"Second object start: {str(objs[1])[:100]}...")
+                except Exception as parse_debug_error:
+                    logger.debug(f"Error during JSON parse debugging: {parse_debug_error}")
+                    
+            except Exception as debug_error:
+                logger.debug(f"Error during response debugging: {debug_error}")
+            
             error_message = response.text
             error_data = None
 

@@ -41,7 +41,7 @@ async def main():
     # 2. Create a new environment instance
     print("\n🚀 Creating new environment...")
     try:
-        env = await fleet_client.make("fira:v1.3.1")
+        env = await fleet_client.make("outlook-calendar:Forge1.0.3")
         print(f"✅ Environment created with instance ID: {env.instance_id}")
 
         # TODO: Execute a simple action
