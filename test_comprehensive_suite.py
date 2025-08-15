@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from contextlib import contextmanager
 
 import fleet as flt
+from fleet.verifiers.verifier import verifier
 from fleet.verifiers.db import IgnoreConfig
 from dotenv import load_dotenv
 
@@ -181,14 +182,16 @@ class FleetSDKTestSuite:
         with self.timed_test("Access Database Resource", "Resources") as result:
             db = self.test_env.db("current")
             db_info = db.describe()
-            result.details = f"Database: {db_info.name}, Tables: {len(db_info.tables)}"
-            assert len(db_info.tables) > 0, "No tables found in database"
+            tables = db_info.tables or []
+            result.details = f"Database: {db_info.resource_name}, Tables: {len(tables)}"
+            assert len(tables) > 0, "No tables found in database"
         
         # Test database queries
         with self.timed_test("Execute Database Query", "Resources") as result:
             db = self.test_env.db("current")
             # Try to query a common table that should exist
-            tables = db.describe().tables
+            db_info = db.describe()
+            tables = db_info.tables or []
             if tables:
                 table_name = tables[0].name
                 query_result = db.query(f"SELECT COUNT(*) as count FROM {table_name}")
@@ -219,8 +222,10 @@ class FleetSDKTestSuite:
             after_db = self.test_env.db("current")
             
             # Verify both snapshots work
-            before_tables = before_db.describe().tables
-            after_tables = after_db.describe().tables
+            before_info = before_db.describe()
+            after_info = after_db.describe()
+            before_tables = before_info.tables or []
+            after_tables = after_info.tables or []
             
             result.details = f"Seed DB: {len(before_tables)} tables, Current DB: {len(after_tables)} tables"
             assert len(before_tables) > 0, "Seed database has no tables"
@@ -229,7 +234,8 @@ class FleetSDKTestSuite:
         # Test query builder DSL
         with self.timed_test("Test Database Query Builder", "Database") as result:
             db = self.test_env.db("current")
-            tables = db.describe().tables
+            db_info = db.describe()
+            tables = db_info.tables or []
             
             if tables:
                 table_name = tables[0].name
@@ -476,10 +482,8 @@ class FleetSDKTestSuite:
 # Test Verifier Functions
 # These are the verifiers used as test beds for functionality
 
-@flt.verifier_sync(key="validate_finish_blue_green_deployment")  
-def validate_finish_blue_green_deployment(
-    env: flt.SyncEnv, final_answer: str | None = None
-) -> float:
+@verifier(key="validate_finish_blue_green_deployment")  
+def validate_finish_blue_green_deployment(env, final_answer: str | None = None) -> float:
     """Validate that DEBT-722 and DEBT-720 are marked as Done"""
     before = env.db("seed")
     after = env.db("current")
@@ -530,13 +534,14 @@ def validate_finish_blue_green_deployment(
     return 1.0
 
 
-@flt.verifier_sync(key="template_verifier_key")
-def template_verifier_function(env: flt.SyncEnv, *args, **kwargs) -> float:
+@verifier(key="template_verifier_key")
+def template_verifier_function(env, *args, **kwargs) -> float:
     """Template verifier function that validates basic environment functionality"""
     try:
         # Test basic database access
         db = env.db("current")
-        tables = db.describe().tables
+        db_info = db.describe()
+        tables = db_info.tables or []
         
         if not tables:
             return 0.0
@@ -553,12 +558,13 @@ def template_verifier_function(env: flt.SyncEnv, *args, **kwargs) -> float:
         return 0.0
 
 
-@flt.verifier_sync(key="test_database_count_verifier")
-def test_database_count_verifier(env: flt.SyncEnv) -> float:
+@verifier(key="test_database_count_verifier")
+def test_database_count_verifier(env) -> float:
     """Test verifier that checks database table counts"""
     try:
         db = env.db("current")
-        tables = db.describe().tables
+        db_info = db.describe()
+        tables = db_info.tables or []
         
         # Check that we have at least one table with data
         total_rows = 0
@@ -576,13 +582,13 @@ def test_database_count_verifier(env: flt.SyncEnv) -> float:
         return 0.0
 
 
-@flt.verifier_sync(key="error_prone_verifier")
-def error_prone_verifier(env: flt.SyncEnv) -> float:
+@verifier(key="error_prone_verifier")
+def error_prone_verifier(env) -> float:
     """Verifier that intentionally causes errors to test error handling"""
     try:
         # This should cause an error
-        db = env.db("current")
-        db.query("SELECT * FROM definitely_nonexistent_table_12345")
+        test_array = [1, 2, 3]
+        variable = test_array[4]
         return 1.0  # Should not reach here
     except Exception:
         # This is expected - verifiers should gracefully handle errors
