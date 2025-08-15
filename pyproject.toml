@@ -99,6 +99,7 @@ testpaths = ["tests"]
 "list_regions_async" = "list_regions"
 "list_instances_async" = "list_instances"
 "get_async" = "get"
+"account_async" = "account"
 "async def" = "def"
 "from fleet.verifiers" = "from ..verifiers"
 "await asyncio.sleep" = "time.sleep"

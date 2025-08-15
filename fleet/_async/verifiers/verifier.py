@@ -12,6 +12,7 @@ import uuid
 import logging
 import hashlib
 import asyncio
+import inspect
 from typing import Any, Callable, Dict, Optional, List, TypeVar, Set
 
 from .bundler import FunctionBundler
@@ -48,7 +49,7 @@ class AsyncVerifierFunction:
         self._bundler = FunctionBundler()
         self._bundle_sha: Optional[str] = None  # Cached bundle SHA
         self._bundle_data: Optional[bytes] = None  # Cached bundle data
-        self._is_async = asyncio.iscoroutinefunction(func)
+        self._is_async = inspect.iscoroutinefunction(func)
         
         # Copy function metadata
         functools.update_wrapper(self, func)
@@ -129,6 +130,10 @@ class AsyncVerifierFunction:
                 "Please provide a synchronous version of your verifier."
             )
         
+        args_array = list(args)
+        args_array.append({"env": env.instance_id})
+        args = tuple(args_array)
+        
         try:
             # Check if bundle needs to be uploaded
             bundle_sha, needs_upload = await self._check_bundle_status(env)
@@ -144,6 +149,7 @@ class AsyncVerifierFunction:
                     key=self.key,
                     function_name=self.func.__name__,
                     args=args,
+                    args_array=args_array,
                     kwargs=kwargs,
                     needs_upload=True
                 )
