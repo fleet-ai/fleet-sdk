@@ -305,14 +305,6 @@ class TaskListResponse(BaseModel):
     total: int = Field(..., title='Total')
 
 
-class AccountResponse(BaseModel):
-    """Response model for account information."""
-    team_id: str = Field(..., title='Team Id')
-    team_name: str = Field(..., title='Team Name')
-    instance_limit: int = Field(..., title='Instance Limit')
-    instance_count: int = Field(..., title='Instance Count')
-
-
 class InstanceResponse(BaseModel):
     instance_id: str = Field(..., title='Instance Id')
     env_key: str = Field(..., title='Env Key')
@@ -327,3 +319,9 @@ class InstanceResponse(BaseModel):
     env_variables: Optional[Dict[str, Any]] = Field(None, title='Env Variables')
     urls: Optional[InstanceURLs] = Field(None, title='Urls')
     health: Optional[bool] = Field(None, title='Health')
+
+class AccountResponse(BaseModel):
+    team_id: str = Field(..., title='Team Id')
+    team_name: str = Field(..., title='Team Name')
+    instance_limit: int = Field(..., title='Instance Limit')
+    instance_count: int = Field(..., title='Instance Count')

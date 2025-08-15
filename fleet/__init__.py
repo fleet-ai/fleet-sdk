@@ -24,7 +24,7 @@ from .exceptions import (
 )
 from .client import Fleet, SyncEnv
 from ._async.client import AsyncFleet, AsyncEnv
-from .models import InstanceResponse
+from .models import InstanceResponse, Environment
 from .instance.models import Resource, ResetResponse
 
 # Import sync verifiers with explicit naming
@@ -62,7 +62,8 @@ __all__ = [
     "AsyncFleet",
     "AsyncEnv",
     # Models
-    "InstanceRecord", 
+    "InstanceResponse",
+    "SyncEnv", 
     "Resource",
     "ResetResponse",
     # Task models

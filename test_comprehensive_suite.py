@@ -165,7 +165,7 @@ class FleetSDKTestSuite:
         # Test environment reset
         with self.timed_test("Reset Environment", "Environment") as result:
             reset_response = self.test_env.reset(seed=42)
-            result.details = f"Reset response: {reset_response.success}"
+            result.details = f"Reset response: {reset_response.success} - {reset_response.message}"
             assert reset_response.success, "Environment reset failed"
     
     def test_resource_management(self):
@@ -334,7 +334,7 @@ class FleetSDKTestSuite:
         if self.test_env:
             with self.timed_test("Cleanup Environment", "Cleanup") as result:
                 close_response = self.test_env.close()
-                result.details = f"Environment closed: {close_response.success}"
+                result.details = f"Environment closed: {close_response.status} (terminated: {close_response.terminated_at})"
     
     def run_all_tests(self) -> TestReport:
         """Run all tests and return the comprehensive report."""
@@ -596,9 +596,12 @@ def main():
     else:
         env_key = "fira:v1.4.0"  # Default test environment
 
-    from importlib.metadata import version
-    fleet_version = version('fleet-python')
-    print(f"Fleet SDK version: {fleet_version}")
+    try:
+        from importlib.metadata import version
+        fleet_version = version('fleet-python')
+        print(f"Fleet SDK version: {fleet_version}")
+    except Exception:
+        print("Fleet SDK version: Unable to determine")
     
     # Initialize and run test suite
     test_suite = FleetSDKTestSuite(env_key=env_key)
