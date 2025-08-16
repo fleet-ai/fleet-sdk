@@ -11,7 +11,6 @@ import functools
 import uuid
 import logging
 import hashlib
-import inspect
 from typing import Any, Callable, Dict, Optional, List, TypeVar, Set
 
 from .bundler import FunctionBundler
@@ -48,7 +47,7 @@ class SyncVerifierFunction:
         self._bundler = FunctionBundler()
         self._bundle_sha: Optional[str] = None  # Cached bundle SHA
         self._bundle_data: Optional[bytes] = None  # Cached bundle data
-        self._is_async = inspect.iscoroutinefunction(func)
+        self._is_async = asyncio.iscoroutinefunction(func)
         
         # Copy function metadata
         functools.update_wrapper(self, func)
