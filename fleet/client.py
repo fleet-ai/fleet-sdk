@@ -125,6 +125,7 @@ class SyncEnv(EnvironmentBase):
         key: str,
         function_name: str,
         args: tuple, 
+        args_array: list,
         kwargs: dict, 
         timeout: Optional[int] = 30,
         needs_upload: bool = True,
@@ -136,6 +137,7 @@ class SyncEnv(EnvironmentBase):
             key,
             function_name,
             args, 
+            args_array,
             kwargs, 
             timeout,
             needs_upload
@@ -200,6 +202,7 @@ class Fleet:
             json=request.model_dump(),
             base_url=region_base_url,
         )
+
         instance = SyncEnv(client=self.client, **response.json())
         instance.instance.load()
         return instance
@@ -271,7 +274,7 @@ class Fleet:
 
     def account(self) -> AccountResponse:
         """Get account information including instance limits and usage.
-        
+
         Returns:
             AccountResponse containing team_id, team_name, instance_limit, and instance_count
         """
@@ -299,6 +302,7 @@ def _execute_verifier_remote(
     key: str,
     function_name: str,
     args: tuple,
+    args_array: list,
     kwargs: dict,
     timeout: Optional[int] = 30,
     needs_upload: bool = True,
@@ -314,6 +318,7 @@ def _execute_verifier_remote(
         "key": key,
         "sha256": bundle_sha,
         "args": args_kwargs_b64,
+        "args_array": args_array,
         "function_name": function_name,
         "timeout": timeout,
         "region": "us-west-1",  # TODO: make configurable

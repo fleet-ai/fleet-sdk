@@ -1,5 +1,5 @@
 DEFAULT_MAX_RETRIES = 5
-DEFAULT_TIMEOUT = 300.0
+DEFAULT_TIMEOUT = 60.0
 
 GLOBAL_BASE_URL = "https://orchestrator.fleetai.com"
 REGION_BASE_URL = {

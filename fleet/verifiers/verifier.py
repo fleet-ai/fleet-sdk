@@ -128,6 +128,10 @@ class SyncVerifierFunction:
                 "Please provide a synchronous version of your verifier."
             )
         
+        args_array = list(args)
+        args_array.append({"env": env.instance_id})
+        args = tuple(args_array)
+        
         try:
             # Check if bundle needs to be uploaded
             bundle_sha, needs_upload = self._check_bundle_status(env)
@@ -143,6 +147,7 @@ class SyncVerifierFunction:
                     key=self.key,
                     function_name=self.func.__name__,
                     args=args,
+                    args_array=args_array,
                     kwargs=kwargs,
                     needs_upload=True
                 )
