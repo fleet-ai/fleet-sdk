@@ -11,6 +11,7 @@ import functools
 import uuid
 import logging
 import hashlib
+import asyncio
 from typing import Any, Callable, Dict, Optional, List, TypeVar, Set
 
 from .bundler import FunctionBundler
