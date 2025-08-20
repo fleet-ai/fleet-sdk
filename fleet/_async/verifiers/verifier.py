@@ -203,6 +203,7 @@ class AsyncVerifierFunction:
                     key=self.key,
                     function_name=self.func.__name__,
                     args=args,
+                    args_array=args_array,
                     kwargs=kwargs,
                     needs_upload=False  # Don't upload, just execute
                 )
