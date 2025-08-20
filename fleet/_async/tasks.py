@@ -37,6 +37,13 @@ class Task(BaseModel):
     def set_created_at(cls, v):
         """Set created_at to current time if not provided."""
         return v or datetime.now()
+    
+    @property
+    def env_key(self) -> str:
+        """Get the environment key combining env_id and version."""
+        if self.version:
+            return f"{self.env_id}:{self.version}"
+        return self.env_id
 
     class Config:
         """Pydantic model configuration."""
@@ -45,3 +52,10 @@ class Task(BaseModel):
         }
         # Allow arbitrary types for the verifier field
         arbitrary_types_allowed = True 
+
+    def verify(self, *args, **kwargs) -> float:
+        """Verify the task using the verifier function."""
+        if self.verifier:
+            return self.verifier(*args, **kwargs)
+        else:
+            raise ValueError("No verifier function found for this task")
