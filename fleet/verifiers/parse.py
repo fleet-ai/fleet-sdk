@@ -184,7 +184,7 @@ def convert_new_to_old_verifier(verifier_str: str) -> str:
     wrapper_func = f'''def {func_name}_wrapper(env, *args, **kwargs) -> float:
     """Wrapper to adapt new format verifier to old format."""
     # Import required modules
-    from fleet.verifiers.db import DatabaseSnapshot, IgnoreConfig
+    from .verifiers.db import DatabaseSnapshot, IgnoreConfig
     
     # Constants
     TASK_SUCCESSFUL_SCORE = 1

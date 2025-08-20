@@ -11,7 +11,7 @@ from ..resources.sqlite import SQLiteResource
 from ..resources.browser import BrowserResource
 from ..resources.base import Resource
 
-from ..verifiers import DatabaseSnapshot
+from fleet.verifiers import DatabaseSnapshot
 from fleet.verifiers.parse import convert_verifier_string, extract_function_name
 
 from ..exceptions import FleetEnvironmentError

@@ -29,7 +29,18 @@ def fix_file(filepath: Path) -> bool:
     rel_path = filepath.relative_to(Path(__file__).parent.parent / "fleet")
     depth = len(rel_path.parts) - 1  # -1 because the file itself doesn't count
 
-    content = content.replace('..verifiers', '.verifiers')
+    # Fix verifier imports specifically - only in non-verifiers directories
+    if 'verifiers' not in str(rel_path):
+        content = content.replace('from ..verifiers', 'from .verifiers')
+    
+    # Fix specific cases for verifiers/__init__.py
+    if rel_path == Path('verifiers/__init__.py'):
+        # These should be relative imports within the verifiers package
+        content = content.replace('from ...verifiers.db import', 'from .db import')
+        content = content.replace('from ...verifiers.code import', 'from .code import')
+        # Also handle the case where unasync transformed fleet.verifiers to ..verifiers
+        content = content.replace('from ..verifiers.db import', 'from .db import')
+        content = content.replace('from ..verifiers.code import', 'from .code import')
     
     # Fix any remaining AsyncFleetPlaywrightWrapper references in docstrings
     content = content.replace('AsyncFleetPlaywrightWrapper', 'FleetPlaywrightWrapper')

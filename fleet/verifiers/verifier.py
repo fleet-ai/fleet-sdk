@@ -11,7 +11,7 @@ import functools
 import uuid
 import logging
 import hashlib
-import asyncio
+import inspect
 from typing import Any, Callable, Dict, Optional, List, TypeVar, Set
 
 from .bundler import FunctionBundler
@@ -51,7 +51,7 @@ class SyncVerifierFunction:
         self._bundle_sha: Optional[str] = sha256  # Use provided SHA if available
         self._bundle_data: Optional[bytes] = None  # Cached bundle data
         self._raw_code: Optional[str] = raw_code  # Store raw code if provided
-        self._is_async = asyncio.iscoroutinefunction(func)
+        self._is_async = inspect.iscoroutinefunction(func)
         
         # Copy function metadata
         functools.update_wrapper(self, func)
@@ -156,12 +156,13 @@ class SyncVerifierFunction:
     
     def remote(self, env: SyncEnv, *args, **kwargs) -> float:
         """Remote execution of the verifier function with SHA-based bundle caching."""
-        if self._is_async:
-            raise NotImplementedError(
-                f"Async verifier '{self.key}' cannot be executed remotely. "
-                "The remote execution environment only supports synchronous functions. "
-                "Please provide a synchronous version of your verifier."
-            )
+        # Async verifiers are now supported by the backend
+        # if self._is_async:
+        #     raise NotImplementedError(
+        #         f"Async verifier '{self.key}' cannot be executed remotely. "
+        #         "The remote execution environment only supports synchronous functions. "
+        #         "Please provide a synchronous version of your verifier."
+        #     )
         
         args_array = list(args)
         args_array.append({"env": env.instance_id})

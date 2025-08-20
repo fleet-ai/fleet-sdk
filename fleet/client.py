@@ -17,6 +17,7 @@
 import base64
 import cloudpickle
 import httpx
+import json
 import logging
 import os
 from typing import List, Optional, Dict, TYPE_CHECKING
@@ -30,8 +31,9 @@ from .models import (
     VerifiersExecuteResponse,
     TaskListResponse,
     AccountResponse,
+    TaskRequest,
 )
-from ._async.tasks import Task
+from .tasks import Task
 from .verifiers.parse import extract_function_name, convert_new_to_old_verifier
 
 if TYPE_CHECKING:
@@ -298,6 +300,78 @@ class Fleet:
         
         return tasks
 
+    def export_tasks(self, env_key: Optional[str] = None, filename: Optional[str] = None):
+        """Export tasks for the authenticated team, optionally filtered by environment.
+        
+        Args:
+            env_key: Optional environment key to filter tasks by
+            filename: Optional filename to write tasks to. If not provided, defaults to 'tasks.json' or 'tasks_{env_key}.json'
+            
+        Returns:
+            str: Path to the exported file if tasks were written, None if no tasks found
+        """
+        tasks = self.load_tasks(env_key)
+        if tasks:
+            # Generate filename if not provided
+            if filename is None:
+                if env_key:
+                    filename = f"tasks_{env_key}.json"
+                else:
+                    filename = "tasks.json"
+            
+            # Convert tasks to serializable format
+            tasks_data = []
+            for task in tasks:
+                task_dict = task.model_dump()
+                # Remove non-serializable verifier object, keep verifier_func (code string)
+                if 'verifier' in task_dict:
+                    task_dict.pop('verifier')
+                tasks_data.append(task_dict)
+            
+            # Write to JSON file
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(tasks_data, f, indent=2, default=str)
+            
+            logger.info(f"Exported {len(tasks)} tasks to {filename}")
+            return filename
+        else:
+            logger.info("No tasks found to export")
+            return None
+            
+    def import_tasks(self, filename: str):
+        """Import tasks from a JSON file.
+        
+        Args:
+            filename: Path to the JSON file of Task objects to import
+            
+        Returns:
+            List[Task] containing imported Task objects
+        """
+        with open(filename, 'r', encoding='utf-8') as f:
+            tasks_data = json.load(f)
+            
+        # Create tasks from the loaded data
+        tasks = []
+        for task_data in tasks_data:
+            task = Task(**task_data)
+            tasks.append(task)
+
+        for task in tasks:
+            payload = TaskRequest(
+                key=task.key,
+                prompt=task.prompt,
+                environment_id=task.env_id,
+                verifier_func=task.verifier_func,
+                version=task.version or None,
+                env_variables=task.env_variables or {},
+            )
+            try:
+                response = self.client.request("POST", "/v1/tasks", json=payload.model_dump())
+            except Exception as e:
+                logger.error(f"Failed to import task {task.key}: {e}")
+                continue
+
+
     def account(self) -> AccountResponse:
         """Get account information including instance limits and usage.
 
@@ -314,7 +388,7 @@ class Fleet:
         verifier_code: str,
         verifier_sha: str
     ) -> "SyncVerifierFunction":
-        """Create a SyncVerifierFunction from verifier data.
+        """Create an AsyncVerifierFunction from verifier data.
         
         Args:
             verifier_id: The verifier ID
@@ -323,9 +397,15 @@ class Fleet:
             verifier_sha: The verifier SHA256
             
         Returns:
-            SyncVerifierFunction created from the verifier code
+            AsyncVerifierFunction created from the verifier code
         """
         from .verifiers.verifier import SyncVerifierFunction
+
+        # Convert async verifier code to sync
+        if 'async def' in verifier_code:
+            verifier_code = verifier_code.replace('async def', 'def')
+        if 'await ' in verifier_code:
+            verifier_code = verifier_code.replace('await ', '')
         
         # Check if this is a new format verifier (has before/after parameters)
         if 'before: DatabaseSnapshot' in verifier_code and 'after: DatabaseSnapshot' in verifier_code:
@@ -367,7 +447,7 @@ class Fleet:
         
         func = namespace[function_name]
         
-        # Create and return SyncVerifierFunction with SHA if available
+        # Create and return AsyncVerifierFunction with SHA if available
         # Since the function was created via exec, we need to provide the raw code
         verifier_func = SyncVerifierFunction(
             func=func,
@@ -384,13 +464,13 @@ class Fleet:
         return verifier_func
     
     def _load_verifier(self, verifier_id: str) -> "SyncVerifierFunction":
-        """Load a verifier by ID and create a SyncVerifierFunction.
+        """Load a verifier by ID and create an AsyncVerifierFunction.
         
         Args:
             verifier_id: The verifier ID to fetch
             
         Returns:
-            SyncVerifierFunction created from the verifier code
+            AsyncVerifierFunction created from the verifier code
         """
         # Fetch verifier from API
         response = self.client.request("GET", f"/v1/verifier/{verifier_id}")
