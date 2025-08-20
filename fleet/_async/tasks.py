@@ -57,12 +57,29 @@ class Task(BaseModel):
         """Verify the task using the verifier function (sync version).
         
         For sync environments, calls the sync verifier directly.
-        For async verifiers with sync environments, this will fail.
-        Use verify_async() for async contexts.
+        For async verifiers, automatically runs them with asyncio.run().
         """
         if self.verifier:
-            # This assumes a sync verifier with sync environment
-            return self.verifier.remote(*args, **kwargs)
+            import asyncio
+            import inspect
+            
+            result = self.verifier.remote(*args, **kwargs)
+            
+            # If the result is a coroutine, we need to run it
+            if inspect.iscoroutine(result):
+                # Check if we're already in an event loop
+                try:
+                    loop = asyncio.get_running_loop()
+                    # We're in an async context, can't use asyncio.run()
+                    raise RuntimeError(
+                        "Cannot run async verifier in sync mode while event loop is running. "
+                        "Use await task.verify_async() instead."
+                    )
+                except RuntimeError:
+                    # No event loop running, safe to use asyncio.run()
+                    return asyncio.run(result)
+            else:
+                return result
         else:
             raise ValueError("No verifier function found for this task")
     
