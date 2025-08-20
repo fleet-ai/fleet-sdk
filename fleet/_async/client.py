@@ -367,17 +367,16 @@ class AsyncFleet:
         
         func = namespace[function_name]
         
-        # Create and return AsyncVerifierFunction
+        # Create and return AsyncVerifierFunction with SHA if available
+        # Since the function was created via exec, we need to provide the raw code
         verifier_func = AsyncVerifierFunction(
             func=func,
             key=verifier_key,
             extra_requirements=[],
-            verifier_id=verifier_id
+            verifier_id=verifier_id,
+            sha256=verifier_sha,  # Pass SHA directly to constructor
+            raw_code=verifier_code  # Provide raw code since func won't have extractable source
         )
-        
-        # Store the SHA if available
-        if verifier_sha:
-            verifier_func._bundle_sha = verifier_sha
         
         # Store the original verifier code for reference
         verifier_func._verifier_code = verifier_code

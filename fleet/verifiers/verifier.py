@@ -39,15 +39,18 @@ class SyncVerifierFunction:
         func: F,
         key: str,
         extra_requirements: Optional[List[str]] = None,
-        verifier_id: Optional[str] = None
+        verifier_id: Optional[str] = None,
+        sha256: Optional[str] = None,
+        raw_code: Optional[str] = None
     ):
         self.func = func
         self.key = key
         self.verifier_id = verifier_id or str(uuid.uuid4())
         self.extra_requirements = extra_requirements or []
         self._bundler = FunctionBundler()
-        self._bundle_sha: Optional[str] = None  # Cached bundle SHA
+        self._bundle_sha: Optional[str] = sha256  # Use provided SHA if available
         self._bundle_data: Optional[bytes] = None  # Cached bundle data
+        self._raw_code: Optional[str] = raw_code  # Store raw code if provided
         self._is_async = asyncio.iscoroutinefunction(func)
         
         # Copy function metadata
@@ -56,20 +59,51 @@ class SyncVerifierFunction:
     def _get_or_create_bundle(self) -> tuple[bytes, str]:
         """Get or create bundle data and return (bundle_data, sha)."""
         if self._bundle_data is None or self._bundle_sha is None:
-            # Create bundle and cache it
-            self._bundle_data = self._bundler.create_bundle(
-                self.func, 
-                self.extra_requirements,
-                self.verifier_id
-            )
-            self._bundle_sha = _get_bundle_sha(self._bundle_data)
-            logger.debug(f"Created bundle for {self.key} with SHA: {self._bundle_sha}")
+            # If we have raw code, create a bundle from it
+            if self._raw_code:
+                import io
+                import zipfile
+                
+                # Create zip bundle directly (matching bundler format)
+                zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    # Add requirements.txt
+                    requirements = self.extra_requirements or []
+                    if "fleet-python" not in requirements:
+                        requirements.append("fleet-python")
+                    req_content = "\n".join(requirements)
+                    zf.writestr("requirements.txt", req_content)
+                    
+                    # Add verifier.py with the raw code
+                    zf.writestr("verifier.py", self._raw_code)
+                
+                self._bundle_data = zip_buffer.getvalue()
+                self._bundle_sha = _get_bundle_sha(self._bundle_data)
+                logger.debug(f"Created bundle from raw code for {self.key} with SHA: {self._bundle_sha}")
+            else:
+                # Try to create bundle from function source
+                try:
+                    self._bundle_data = self._bundler.create_bundle(
+                        self.func, 
+                        self.extra_requirements,
+                        self.verifier_id
+                    )
+                    self._bundle_sha = _get_bundle_sha(self._bundle_data)
+                    logger.debug(f"Created bundle for {self.key} with SHA: {self._bundle_sha}")
+                except OSError as e:
+                    # Can't create bundle - no source and no raw code
+                    raise OSError(f"Cannot create bundle for {self.key}: {e}")
         
         return self._bundle_data, self._bundle_sha
     
     def _check_bundle_status(self, env: SyncEnv) -> tuple[str, bool]:
         """Check if bundle needs to be uploaded and return (sha, needs_upload)."""
         bundle_data, bundle_sha = self._get_or_create_bundle()
+        
+        # If bundle_data is empty, we're using server-side bundle
+        if not bundle_data:
+            logger.debug(f"Using server-side bundle {bundle_sha[:8]}...")
+            return bundle_sha, False  # No upload needed, server has it
         
         # 1. Check local process cache first
         if bundle_sha in _uploaded_bundle_shas:
@@ -163,7 +197,7 @@ class SyncVerifierFunction:
                 bundle_data, _ = self._get_or_create_bundle()
                 
                 response = env.execute_verifier_remote(
-                    bundle_data=bundle_data,  # Still need bundle_data for local caching
+                    bundle_data=bundle_data or b'',  # Empty if using server-side bundle
                     bundle_sha=bundle_sha,
                     key=self.key,
                     function_name=self.func.__name__,
@@ -249,7 +283,9 @@ Remote traceback:
 
 def verifier(
     key: Optional[str] = None,
-    extra_requirements: Optional[List[str]] = None
+    extra_requirements: Optional[List[str]] = None,
+    sha256: Optional[str] = None,
+    raw_code: Optional[str] = None
 ) -> Callable[[F], SyncVerifierFunction]:
     """
     Decorator to create a verifier function with env-first pattern.
@@ -261,6 +297,8 @@ def verifier(
     Args:
         key: Optional key for the verifier. Defaults to function name.
         extra_requirements: Additional PyPI packages needed by the verifier.
+        sha256: Optional SHA256 hash of existing server-side bundle to use.
+        raw_code: Optional raw code to use as bundle (bypasses source extraction).
     
     Example:
         # Synchronous verifier (works locally and remotely)
@@ -298,7 +336,9 @@ def verifier(
             func,
             verifier_key,
             extra_requirements,
-            verifier_uuid
+            verifier_uuid,
+            sha256,
+            raw_code
         )
     
     return decorator

@@ -56,6 +56,6 @@ class Task(BaseModel):
     def verify(self, *args, **kwargs) -> float:
         """Verify the task using the verifier function."""
         if self.verifier:
-            return self.verifier(*args, **kwargs)
+            return self.verifier.remote(*args, **kwargs)
         else:
             raise ValueError("No verifier function found for this task")
