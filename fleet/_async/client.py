@@ -19,7 +19,7 @@ import cloudpickle
 import httpx
 import logging
 import os
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, TYPE_CHECKING
 
 from .base import EnvironmentBase, AsyncWrapper
 from ..models import (
@@ -32,6 +32,10 @@ from ..models import (
     AccountResponse,
 )
 from .tasks import Task
+from ..verifiers.parse import extract_function_name
+
+if TYPE_CHECKING:
+    from .verifiers import AsyncVerifierFunction
 
 from .instance import (
     AsyncInstanceClient,
@@ -257,15 +261,47 @@ class AsyncFleet:
         response = await self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
         
+        # Prepare to load verifiers in parallel
+        import asyncio
+        
+        # Create list to track verifier loading tasks
+        verifier_tasks = []
+        task_responses_with_indices = []
+        
+        # First pass: collect all verifier IDs that need loading
+        for i, task_response in enumerate(task_list_response.tasks):
+            if task_response.verifier_id:
+                verifier_task = self._load_verifier(task_response.verifier_id)
+                verifier_tasks.append(verifier_task)
+                task_responses_with_indices.append((i, task_response))
+        
+        # Load all verifiers in parallel
+        verifiers = []
+        if verifier_tasks:
+            try:
+                verifiers = await asyncio.gather(*verifier_tasks, return_exceptions=True)
+            except Exception as e:
+                logger.error(f"Error during parallel verifier loading: {e}")
+                verifiers = [None] * len(verifier_tasks)
+        
+        # Create a mapping of task index to verifier (or exception)
+        verifier_by_index = {}
+        for (idx, _), verifier_result in zip(task_responses_with_indices, verifiers):
+            if isinstance(verifier_result, Exception):
+                logger.warning(f"Failed to load verifier: {verifier_result}")
+                verifier_by_index[idx] = None
+            else:
+                verifier_by_index[idx] = verifier_result
+        
         # Transform TaskResponse objects to Task objects
         tasks = []
-        for task_response in task_list_response.tasks:
+        for i, task_response in enumerate(task_list_response.tasks):
             task = Task(
                 key=task_response.key,
                 prompt=task_response.prompt,
                 env_id=task_response.environment_id,  # Map environment_id -> env_id
                 created_at=task_response.created_at,
-                verifier=None,  # Keep blank for now as requested
+                verifier=verifier_by_index.get(i),  # Use loaded verifier or None
                 metadata={}  # Default empty metadata
             )
             tasks.append(task)
@@ -280,6 +316,68 @@ class AsyncFleet:
         """
         response = await self.client.request("GET", "/v1/account")
         return AccountResponse(**response.json())
+    
+    async def _load_verifier(self, verifier_id: str) -> "AsyncVerifierFunction":
+        """Load a verifier by ID and create an AsyncVerifierFunction.
+        
+        Args:
+            verifier_id: The verifier ID to fetch
+            
+        Returns:
+            AsyncVerifierFunction created from the verifier code
+        """
+        from .verifiers.verifier import AsyncVerifierFunction
+        
+        # Fetch verifier from API
+        response = await self.client.request("GET", f"/v1/verifier/{verifier_id}")
+        verifier_data = response.json()
+        
+        # Extract verifier metadata
+        verifier_code = verifier_data["code"]
+        verifier_key = verifier_data["key"]
+        verifier_sha = verifier_data.get("sha256", "")
+        
+        # Extract function name from code
+        function_name = extract_function_name(verifier_code)
+        if not function_name:
+            raise ValueError(f"Could not extract function name from verifier {verifier_id}")
+        
+        # Create a function object from the code
+        # Import necessary classes for the namespace
+        from ..verifiers.db import IgnoreConfig, DatabaseSnapshot
+        
+        # Create a namespace for the function
+        namespace = {
+            '__builtins__': __builtins__,
+            'Environment': object,  # Placeholder, will be provided at runtime
+            'IgnoreConfig': IgnoreConfig,
+            'DatabaseSnapshot': DatabaseSnapshot,
+            'TASK_FAILED_SCORE': 0,
+            'TASK_SUCCESSFUL_SCORE': 1,
+        }
+        
+        # Execute the code to define the function
+        exec(verifier_code, namespace)
+        
+        # Get the function object
+        if function_name not in namespace:
+            raise ValueError(f"Function {function_name} not found in verifier code")
+        
+        func = namespace[function_name]
+        
+        # Create and return AsyncVerifierFunction
+        verifier_func = AsyncVerifierFunction(
+            func=func,
+            key=verifier_key,
+            extra_requirements=[],
+            verifier_id=verifier_id
+        )
+        
+        # Store the SHA if available
+        if verifier_sha:
+            verifier_func._bundle_sha = verifier_sha
+        
+        return verifier_func
 
 
 # Shared

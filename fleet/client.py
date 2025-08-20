@@ -19,7 +19,7 @@ import cloudpickle
 import httpx
 import logging
 import os
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, TYPE_CHECKING
 
 from .base import EnvironmentBase, SyncWrapper
 from .models import (
@@ -31,7 +31,11 @@ from .models import (
     TaskListResponse,
     AccountResponse,
 )
-from .tasks import Task
+from ._async.tasks import Task
+from .verifiers.parse import extract_function_name
+
+if TYPE_CHECKING:
+    from .verifiers import SyncVerifierFunction
 
 from .instance import (
     InstanceClient,
@@ -257,15 +261,50 @@ class Fleet:
         response = self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
         
+        # Prepare to load verifiers in parallel using threads
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        # Create mapping of verifier_id to task indices
+        verifier_to_indices = {}
+        for i, task_response in enumerate(task_list_response.tasks):
+            if task_response.verifier_id:
+                if task_response.verifier_id not in verifier_to_indices:
+                    verifier_to_indices[task_response.verifier_id] = []
+                verifier_to_indices[task_response.verifier_id].append(i)
+        
+        # Load all unique verifiers in parallel
+        verifier_by_id = {}
+        if verifier_to_indices:
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                # Submit all verifier loading tasks
+                future_to_verifier_id = {
+                    executor.submit(self._load_verifier, verifier_id): verifier_id
+                    for verifier_id in verifier_to_indices.keys()
+                }
+                
+                # Collect results as they complete
+                for future in as_completed(future_to_verifier_id):
+                    verifier_id = future_to_verifier_id[future]
+                    try:
+                        verifier = future.result()
+                        verifier_by_id[verifier_id] = verifier
+                    except Exception as e:
+                        logger.warning(f"Failed to load verifier {verifier_id}: {e}")
+                        verifier_by_id[verifier_id] = None
+        
         # Transform TaskResponse objects to Task objects
         tasks = []
         for task_response in task_list_response.tasks:
+            verifier = None
+            if task_response.verifier_id and task_response.verifier_id in verifier_by_id:
+                verifier = verifier_by_id[task_response.verifier_id]
+            
             task = Task(
                 key=task_response.key,
                 prompt=task_response.prompt,
                 env_id=task_response.environment_id,  # Map environment_id -> env_id
                 created_at=task_response.created_at,
-                verifier=None,  # Keep blank for now as requested
+                verifier=verifier,
                 metadata={}  # Default empty metadata
             )
             tasks.append(task)
@@ -280,6 +319,68 @@ class Fleet:
         """
         response = self.client.request("GET", "/v1/account")
         return AccountResponse(**response.json())
+    
+    def _load_verifier(self, verifier_id: str) -> "SyncVerifierFunction":
+        """Load a verifier by ID and create a SyncVerifierFunction.
+        
+        Args:
+            verifier_id: The verifier ID to fetch
+            
+        Returns:
+            SyncVerifierFunction created from the verifier code
+        """
+        from .verifiers.verifier import SyncVerifierFunction
+        
+        # Fetch verifier from API
+        response = self.client.request("GET", f"/v1/verifier/{verifier_id}")
+        verifier_data = response.json()
+        
+        # Extract verifier metadata
+        verifier_code = verifier_data["code"]
+        verifier_key = verifier_data["key"]
+        verifier_sha = verifier_data.get("sha256", "")
+        
+        # Extract function name from code
+        function_name = extract_function_name(verifier_code)
+        if not function_name:
+            raise ValueError(f"Could not extract function name from verifier {verifier_id}")
+        
+        # Create a function object from the code
+        # Import necessary classes for the namespace
+        from .verifiers.db import IgnoreConfig, DatabaseSnapshot
+        
+        # Create a namespace for the function
+        namespace = {
+            '__builtins__': __builtins__,
+            'Environment': object,  # Placeholder, will be provided at runtime
+            'IgnoreConfig': IgnoreConfig,
+            'DatabaseSnapshot': DatabaseSnapshot,
+            'TASK_FAILED_SCORE': 0,
+            'TASK_SUCCESSFUL_SCORE': 1,
+        }
+        
+        # Execute the code to define the function
+        exec(verifier_code, namespace)
+        
+        # Get the function object
+        if function_name not in namespace:
+            raise ValueError(f"Function {function_name} not found in verifier code")
+        
+        func = namespace[function_name]
+        
+        # Create and return SyncVerifierFunction
+        verifier_func = SyncVerifierFunction(
+            func=func,
+            key=verifier_key,
+            extra_requirements=[],
+            verifier_id=verifier_id
+        )
+        
+        # Store the SHA if available
+        if verifier_sha:
+            verifier_func._bundle_sha = verifier_sha
+        
+        return verifier_func
 
 
 # Shared
