@@ -9,18 +9,27 @@ def fix_file(filepath: Path) -> bool:
     content = filepath.read_text()
     original = content
     
-    # Remove asyncio import if it exists
-    content = re.sub(r'^import asyncio.*\n', '', content, flags=re.MULTILINE)
-    content = re.sub(r'^import asyncio as async_time.*\n', '', content, flags=re.MULTILINE)
-    # Also remove indented asyncio imports (like in functions)
-    content = re.sub(r'^\s+import asyncio.*\n', '', content, flags=re.MULTILINE)
+    # Handle asyncio imports - replace with inspect in verifier files, remove elsewhere
+    if 'verifier' in str(filepath).lower() and 'iscoroutinefunction' in content:
+        # In verifier files, replace asyncio with inspect
+        content = re.sub(r'^import asyncio\b', 'import inspect', content, flags=re.MULTILINE)
+        content = content.replace('asyncio.iscoroutinefunction', 'inspect.iscoroutinefunction')
+    else:
+        # In other files, remove asyncio imports
+        content = re.sub(r'^import asyncio.*\n', '', content, flags=re.MULTILINE)
+        content = re.sub(r'^import asyncio as async_time.*\n', '', content, flags=re.MULTILINE)
+        # Also remove indented asyncio imports (like in functions)
+        content = re.sub(r'^\s+import asyncio.*\n', '', content, flags=re.MULTILINE)
     
     # Fix any remaining asyncio.sleep or async_time.sleep calls
     content = content.replace('asyncio.sleep(', 'time.sleep(')
     content = content.replace('async_time.sleep(', 'time.sleep(')
     
-    # Fix absolute imports to relative imports for verifiers
-    content = content.replace('from fleet.verifiers import', 'from ..verifiers import')
+    # Fix absolute imports to relative imports for verifiers based on file location
+    rel_path = filepath.relative_to(Path(__file__).parent.parent / "fleet")
+    depth = len(rel_path.parts) - 1  # -1 because the file itself doesn't count
+
+    content = content.replace('..verifiers', '.verifiers')
     
     # Fix any remaining AsyncFleetPlaywrightWrapper references in docstrings
     content = content.replace('AsyncFleetPlaywrightWrapper', 'FleetPlaywrightWrapper')
@@ -55,6 +64,23 @@ def fix_file(filepath: Path) -> bool:
         content = content.replace('from .client import Fleet, Environment', 'from .client import Fleet, SyncEnv')
         content = content.replace('"Environment",', '"SyncEnv",')
         content = content.replace("'Environment',", "'SyncEnv',")
+    
+    # Add async-to-sync conversion to client.py _create_verifier_from_data method
+    if rel_path.parts[0] == 'client.py' and len(rel_path.parts) == 1:
+        # Find the _create_verifier_from_data method and add async-to-sync conversion
+        if '_create_verifier_from_data' in content and 'from .verifiers.verifier import SyncVerifierFunction' in content:
+            # Look for the line where we have the verifier_code and add conversion before any other processing
+            insertion_point = 'from .verifiers.verifier import SyncVerifierFunction'
+            if insertion_point in content:
+                replacement = insertion_point + '''
+
+        # Convert async verifier code to sync
+        if 'async def' in verifier_code:
+            verifier_code = verifier_code.replace('async def', 'def')
+        if 'await ' in verifier_code:
+            verifier_code = verifier_code.replace('await ', '')'''
+                
+                content = content.replace(insertion_point, replacement)
     
     # Fix playwright imports for sync version
     if 'playwright' in str(filepath):
