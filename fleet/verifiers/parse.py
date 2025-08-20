@@ -155,10 +155,7 @@ def convert_new_to_old_verifier(verifier_str: str) -> str:
         
     Returns:
         The converted verifier function string that accepts env
-    """
-    # First, handle escaped newlines in the input
-    verifier_str = verifier_str.replace('\\n', '\n')
-    
+    """   
     # Extract function name, parameters, docstring, and body
     # Pattern for new format with flexible whitespace and multiline support
     func_pattern = r'def\s+(\w+)\s*\(\s*before\s*:\s*DatabaseSnapshot\s*,?\s*after\s*:\s*DatabaseSnapshot\s*,?\s*transcript\s*:\s*str\s*\|\s*None\s*=\s*None\s*,?\s*\)\s*->\s*int:\s*((?:\s*""".*?"""\s*)?)(.*)'
