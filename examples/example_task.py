@@ -4,8 +4,7 @@
 This example shows how to create a simple task with the @verifier decorator
 that can be verified in a Jira environment.
 
-Note: The remote execution environment only supports synchronous verifiers.
-For async environments, we need separate sync and async verifiers.
+Both sync and async verifiers are now supported for remote execution.
 """
 
 import os
@@ -97,7 +96,7 @@ async def create_bug_issue_async(
 async def main():
     """Run the task example."""
     print("=== Fleet Task Example with Jira ===\n")
-    print("Note: Remote execution only supports synchronous verifiers.\n")
+    print("Note: Both sync and async verifiers are now supported for remote execution.\n")
 
     # Create task using the async verifier for local execution
     task = Task(
@@ -151,12 +150,17 @@ async def main():
             print(f"  ✗ Remote execution failed: {e}")
         print()
 
-        # Demonstrate that async verifiers can't run remotely
-        print("Attempting remote execution with async verifier...")
+        # Test async verifier remote execution
+        print("Testing remote execution with async verifier...")
         try:
-            await create_bug_issue_async.remote(env)
+            result = await create_bug_issue_async.remote(env, project_key="SCRUM", issue_title="Login button not working")
+            print(f"  ✓ Async remote check result: {result}")
         except NotImplementedError as e:
             print(f"  ✓ Expected error: {e}")
+        except Exception as e:
+            print(f"  ✗ Unexpected error: {e}")
+            import traceback
+            traceback.print_exc()
         print()
 
         # Create the issue
