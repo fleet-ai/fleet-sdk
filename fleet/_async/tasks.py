@@ -53,7 +53,7 @@ class Task(BaseModel):
         # Allow arbitrary types for the verifier field
         arbitrary_types_allowed = True 
 
-    def verify(self, *args, **kwargs) -> float:
+    def verify(self, env, *args, **kwargs) -> float:
         """Verify the task using the verifier function (sync version).
         
         For sync environments, calls the sync verifier directly.
@@ -63,7 +63,7 @@ class Task(BaseModel):
             import asyncio
             import inspect
             
-            result = self.verifier.remote(*args, **kwargs)
+            result = self.verifier.remote(env, *args, **kwargs)
             
             # If the result is a coroutine, we need to run it
             if inspect.iscoroutine(result):
