@@ -54,8 +54,31 @@ class Task(BaseModel):
         arbitrary_types_allowed = True 
 
     def verify(self, *args, **kwargs) -> float:
-        """Verify the task using the verifier function."""
+        """Verify the task using the verifier function (sync version).
+        
+        For sync environments, calls the sync verifier directly.
+        For async verifiers with sync environments, this will fail.
+        Use verify_async() for async contexts.
+        """
         if self.verifier:
+            # This assumes a sync verifier with sync environment
             return self.verifier.remote(*args, **kwargs)
+        else:
+            raise ValueError("No verifier function found for this task")
+    
+    async def verify_async(self, *args, **kwargs) -> float:
+        """Verify the task using the verifier function (async version).
+        
+        For async environments, awaits the async verifier.
+        Works with both sync and async verifiers in async contexts.
+        """
+        if self.verifier:
+            result = self.verifier.remote(*args, **kwargs)
+            # If it's a coroutine, await it
+            import inspect
+            if inspect.iscoroutine(result):
+                return await result
+            else:
+                return result
         else:
             raise ValueError("No verifier function found for this task")
