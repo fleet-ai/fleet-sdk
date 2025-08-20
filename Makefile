@@ -49,7 +49,6 @@ unasync:
 		'get_async': 'get', \
 		'account_async': 'account', \
 		'async def': 'def', \
-		'from fleet.verifiers': 'from ..verifiers', \
 		'await asyncio.sleep': 'time.sleep', \
 		'await ': '', \
 		'async with': 'with', \
@@ -59,6 +58,7 @@ unasync:
 		'playwright.async_api': 'playwright.sync_api', \
 		'async_playwright': 'sync_playwright', \
 		'asyncio.sleep': 'time.sleep', \
+		'asyncio.iscoroutinefunction': 'inspect.iscoroutinefunction', \
 		'httpx.AsyncClient': 'httpx.Client', \
 		'httpx.AsyncHTTPTransport': 'httpx.HTTPTransport', \
 		'httpx.SyncHTTPTransport': 'httpx.HTTPTransport', \

@@ -32,7 +32,7 @@ from ..models import (
     AccountResponse,
 )
 from .tasks import Task
-from ..verifiers.parse import extract_function_name, convert_new_to_old_verifier
+from fleet.verifiers.parse import extract_function_name, convert_old_to_new_verifier
 
 if TYPE_CHECKING:
     from .verifiers import AsyncVerifierFunction
@@ -327,10 +327,10 @@ class AsyncFleet:
         """
         from .verifiers.verifier import AsyncVerifierFunction
         
-        # Check if this is a new format verifier (has before/after parameters)
+        # Check if this is a old format verifier (has before/after parameters)
         if 'before: DatabaseSnapshot' in verifier_code and 'after: DatabaseSnapshot' in verifier_code:
-            # Convert new format to old format
-            verifier_code = convert_new_to_old_verifier(verifier_code)
+            # Provide a wrapper for the verifier to be compatible with the 'new' format
+            verifier_code = convert_old_to_new_verifier(verifier_code)
             # Update function name since wrapper adds _wrapper suffix
             original_name = extract_function_name(verifier_code.split('\n')[0])
             if original_name and original_name.endswith('_wrapper'):
@@ -346,7 +346,7 @@ class AsyncFleet:
         
         # Create a function object from the code
         # Import necessary classes for the namespace
-        from ..verifiers.db import IgnoreConfig, DatabaseSnapshot
+        from fleet.verifiers.db import IgnoreConfig, DatabaseSnapshot
         
         # Create a namespace for the function
         namespace = {

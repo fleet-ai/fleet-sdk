@@ -26,8 +26,8 @@ def extract_function_name(function_code: str) -> str | None:
 
 def convert_verifier_string(verifier_str: str) -> str:
     """
-    Convert a verifier function string from the old format (env: Environment) 
-    to the new format (before: DatabaseSnapshot, after: DatabaseSnapshot).
+    Convert a verifier function string from the new format (env: Environment) 
+    to the old format (before: DatabaseSnapshot, after: DatabaseSnapshot).
     
     Args:
         verifier_str: The original verifier function as a string
@@ -143,10 +143,10 @@ def convert_verifier_string(verifier_str: str) -> str:
     return new_func
 
 
-def convert_new_to_old_verifier(verifier_str: str) -> str:
+def convert_old_to_new_verifier(verifier_str: str) -> str:
     """
-    Convert a verifier function from the new format (before/after: DatabaseSnapshot)
-    to the old format (env: Environment).
+    Convert a verifier function from the old format (before/after: DatabaseSnapshot)
+    to support thew new format (env: Environment, **args).
     
     This is the inverse of convert_verifier_string.
     
@@ -156,8 +156,8 @@ def convert_new_to_old_verifier(verifier_str: str) -> str:
     Returns:
         The converted verifier function string that accepts env
     """
-    # First, handle escaped newlines in the input
-    verifier_str = verifier_str.replace('\\n', '\n')
+    # Don't automatically convert \\n to actual newlines - this breaks f-strings
+    # The verifier_str should be used as-is
     
     # Extract function name, parameters, docstring, and body
     # Pattern for new format with flexible whitespace and multiline support
@@ -180,14 +180,24 @@ def convert_new_to_old_verifier(verifier_str: str) -> str:
     docstring = match.group(2).strip()
     body = match.group(3)
     
-    # Indent the original function body
-    indented_verifier = '\n'.join('    ' + line if line.strip() else line for line in verifier_str.splitlines())
+    # Indent the original function body more carefully to preserve f-string structure
+    lines = verifier_str.splitlines()
+    indented_lines = []
     
-    # Build the wrapper function
+    for line in lines:
+        if line.strip():  # Non-empty line
+            indented_lines.append('    ' + line)
+        else:  # Empty line - preserve as-is
+            indented_lines.append(line)
+    
+    indented_verifier = '\n'.join(indented_lines)
+    
+    # Build the wrapper function using string concatenation to avoid f-string conflicts
+     # Build the wrapper function
     wrapper_func = f'''def {func_name}_wrapper(env, *args, **kwargs) -> float:
     """Wrapper to adapt new format verifier to old format."""
     # Import required modules
-    from fleet.verifiers.db import DatabaseSnapshot, IgnoreConfig
+    from ..verifiers.db import DatabaseSnapshot, IgnoreConfig
     
     # Constants
     TASK_SUCCESSFUL_SCORE = 1
@@ -206,5 +216,18 @@ def convert_new_to_old_verifier(verifier_str: str) -> str:
     # Call the inner function and convert result
     result = {func_name}(before, after, transcript)
     return float(result)'''
+
+    print(wrapper_func)
+    
+    # Try to compile the function to catch syntax errors early
+    try:
+        compile(wrapper_func, '<string>', 'exec')
+    except SyntaxError as e:
+        # If there's a syntax error, try a fallback approach
+        print(f"Syntax error in generated wrapper: {e}")
+        print("Original verifier string (repr):")
+        print(repr(verifier_str))
+        print("\nGenerated function:")
+        print(wrapper_func)
     
     return wrapper_func
