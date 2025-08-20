@@ -32,7 +32,7 @@ from .models import (
     AccountResponse,
 )
 from ._async.tasks import Task
-from .verifiers.parse import extract_function_name
+from .verifiers.parse import extract_function_name, convert_new_to_old_verifier
 
 if TYPE_CHECKING:
     from .verifiers import SyncVerifierFunction
@@ -327,8 +327,20 @@ class Fleet:
         """
         from .verifiers.verifier import SyncVerifierFunction
         
-        # Extract function name from code
-        function_name = extract_function_name(verifier_code)
+        # Check if this is a new format verifier (has before/after parameters)
+        if 'before: DatabaseSnapshot' in verifier_code and 'after: DatabaseSnapshot' in verifier_code:
+            # Convert new format to old format
+            verifier_code = convert_new_to_old_verifier(verifier_code)
+            # Update function name since wrapper adds _wrapper suffix
+            original_name = extract_function_name(verifier_code.split('\n')[0])
+            if original_name and original_name.endswith('_wrapper'):
+                function_name = original_name
+            else:
+                function_name = extract_function_name(verifier_code)
+        else:
+            # Extract function name from code
+            function_name = extract_function_name(verifier_code)
+        
         if not function_name:
             raise ValueError(f"Could not extract function name from verifier {verifier_id}")
         

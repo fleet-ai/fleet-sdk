@@ -141,3 +141,70 @@ def convert_verifier_string(verifier_str: str) -> str:
     new_func = new_func.replace('TASK_FAILED_SCORE', '0')
 
     return new_func
+
+
+def convert_new_to_old_verifier(verifier_str: str) -> str:
+    """
+    Convert a verifier function from the new format (before/after: DatabaseSnapshot)
+    to the old format (env: Environment).
+    
+    This is the inverse of convert_verifier_string.
+    
+    Args:
+        verifier_str: The new format verifier function as a string
+        
+    Returns:
+        The converted verifier function string that accepts env
+    """
+    # First, handle escaped newlines in the input
+    verifier_str = verifier_str.replace('\\n', '\n')
+    
+    # Extract function name, parameters, docstring, and body
+    # Pattern for new format with flexible whitespace and multiline support
+    func_pattern = r'def\s+(\w+)\s*\(\s*before\s*:\s*DatabaseSnapshot\s*,?\s*after\s*:\s*DatabaseSnapshot\s*,?\s*transcript\s*:\s*str\s*\|\s*None\s*=\s*None\s*,?\s*\)\s*->\s*int:\s*((?:\s*""".*?"""\s*)?)(.*)'
+    
+    # Try multiline pattern that's more flexible
+    func_pattern_multiline = r'def\s+(\w+)\s*\(\s*\n?\s*before\s*:\s*DatabaseSnapshot\s*,?\s*\n?\s*after\s*:\s*DatabaseSnapshot\s*,?\s*\n?\s*transcript\s*:\s*str\s*\|\s*None\s*=\s*None\s*,?\s*\n?\s*\)\s*->\s*int:\s*\n?((?:\s*""".*?"""\s*)?)(.*)'
+    
+    match = re.match(func_pattern_multiline, verifier_str.strip(), re.DOTALL | re.MULTILINE)
+    
+    if not match:
+        # Even more flexible pattern
+        func_pattern_flexible = r'def\s+(\w+)\s*\([^)]*\)\s*->\s*int:\s*\n?((?:\s*""".*?"""\s*)?)(.*)'
+        match = re.match(func_pattern_flexible, verifier_str.strip(), re.DOTALL)
+        
+        if not match:
+            raise ValueError("Could not parse new format verifier function")
+    
+    func_name = match.group(1)
+    docstring = match.group(2).strip()
+    body = match.group(3)
+    
+    # Indent the original function body
+    indented_verifier = '\n'.join('    ' + line if line.strip() else line for line in verifier_str.splitlines())
+    
+    # Build the wrapper function
+    wrapper_func = f'''def {func_name}_wrapper(env, *args, **kwargs) -> float:
+    """Wrapper to adapt new format verifier to old format."""
+    # Import required modules
+    from fleet.verifiers.db import DatabaseSnapshot, IgnoreConfig
+    
+    # Constants
+    TASK_SUCCESSFUL_SCORE = 1
+    TASK_FAILED_SCORE = 0
+    
+    # Extract before and after from env
+    before = env.db("seed")
+    after = env.db("current")
+    
+    # Get transcript from kwargs if provided
+    transcript = kwargs.get('transcript', kwargs.get('final_answer', None))
+    
+    # Define the inner function
+{indented_verifier}
+    
+    # Call the inner function and convert result
+    result = {func_name}(before, after, transcript)
+    return float(result)'''
+    
+    return wrapper_func
