@@ -19,7 +19,10 @@ class Task(BaseModel):
     key: str = Field(..., description="Unique task key identifier")
     prompt: str = Field(..., description="Task prompt or instruction")
     env_id: str = Field(..., description="Environment identifier")
+    env_variables: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Environment variables")
     created_at: Optional[datetime] = Field(None, description="Task creation timestamp")
+    version: Optional[str] = Field(None, description="Task version")
+    verifier_func: Optional[str] = Field(None, description="Verifier function code")
     verifier: Optional[Any] = Field(None, description="Verifier function with decorator (async or sync)")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional task metadata")
 

@@ -154,6 +154,16 @@ class TaskRequest(BaseModel):
     verifier_id: Optional[str] = Field(None, title='Verifier Id')
 
 
+class VerifierData(BaseModel):
+    verifier_id: str = Field(..., title='Verifier Id')
+    key: str = Field(..., title='Key')
+    version: int = Field(..., title='Version')
+    sha256: str = Field(..., title='Sha256')
+    code: str = Field(..., title='Code')
+    comment: Optional[str] = Field(None, title='Comment')
+    created_at: str = Field(..., title='Created At')
+
+
 class TaskResponse(BaseModel):
     key: str = Field(..., title='Key')
     prompt: str = Field(..., title='Prompt')
@@ -161,6 +171,10 @@ class TaskResponse(BaseModel):
     environment_id: str = Field(..., title='Environment Id')
     created_at: str = Field(..., title='Created At')
     verifier_id: Optional[str] = Field(None, title='Verifier Id')
+    verifier_func: Optional[str] = Field(None, title='Verifier Func')
+    version: Optional[str] = Field(None, title='Version')
+    env_variables: Optional[Dict[str, Any]] = Field(None, title='Env Variables')
+    verifier: Optional[VerifierData] = Field(None, title='Verifier')
 
 
 class ValidationError(BaseModel):

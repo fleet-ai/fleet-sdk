@@ -261,50 +261,37 @@ class Fleet:
         response = self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
         
-        # Prepare to load verifiers in parallel using threads
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        
-        # Create mapping of verifier_id to task indices
-        verifier_to_indices = {}
-        for i, task_response in enumerate(task_list_response.tasks):
-            if task_response.verifier_id:
-                if task_response.verifier_id not in verifier_to_indices:
-                    verifier_to_indices[task_response.verifier_id] = []
-                verifier_to_indices[task_response.verifier_id].append(i)
-        
-        # Load all unique verifiers in parallel
-        verifier_by_id = {}
-        if verifier_to_indices:
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                # Submit all verifier loading tasks
-                future_to_verifier_id = {
-                    executor.submit(self._load_verifier, verifier_id): verifier_id
-                    for verifier_id in verifier_to_indices.keys()
-                }
-                
-                # Collect results as they complete
-                for future in as_completed(future_to_verifier_id):
-                    verifier_id = future_to_verifier_id[future]
-                    try:
-                        verifier = future.result()
-                        verifier_by_id[verifier_id] = verifier
-                    except Exception as e:
-                        logger.warning(f"Failed to load verifier {verifier_id}: {e}")
-                        verifier_by_id[verifier_id] = None
-        
         # Transform TaskResponse objects to Task objects
         tasks = []
         for task_response in task_list_response.tasks:
+            # Create verifier function if verifier data is present
             verifier = None
-            if task_response.verifier_id and task_response.verifier_id in verifier_by_id:
-                verifier = verifier_by_id[task_response.verifier_id]
+            verifier_func = task_response.verifier_func
+            
+            if task_response.verifier:
+                # Use verifier code from the embedded verifier object
+                verifier_func = task_response.verifier.code
+                
+                # Create VerifierFunction from the embedded data
+                try:
+                    verifier = self._create_verifier_from_data(
+                        verifier_id=task_response.verifier.verifier_id,
+                        verifier_key=task_response.verifier.key,
+                        verifier_code=task_response.verifier.code,
+                        verifier_sha=task_response.verifier.sha256
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to create verifier {task_response.verifier.key}: {e}")
             
             task = Task(
                 key=task_response.key,
                 prompt=task_response.prompt,
                 env_id=task_response.environment_id,  # Map environment_id -> env_id
                 created_at=task_response.created_at,
-                verifier=verifier,
+                version=task_response.version,
+                env_variables=task_response.env_variables or {},
+                verifier_func=verifier_func,  # Set verifier code
+                verifier=verifier,  # Use created verifier or None
                 metadata={}  # Default empty metadata
             )
             tasks.append(task)
@@ -320,25 +307,25 @@ class Fleet:
         response = self.client.request("GET", "/v1/account")
         return AccountResponse(**response.json())
     
-    def _load_verifier(self, verifier_id: str) -> "SyncVerifierFunction":
-        """Load a verifier by ID and create a SyncVerifierFunction.
+    def _create_verifier_from_data(
+        self, 
+        verifier_id: str,
+        verifier_key: str,
+        verifier_code: str,
+        verifier_sha: str
+    ) -> "SyncVerifierFunction":
+        """Create a SyncVerifierFunction from verifier data.
         
         Args:
-            verifier_id: The verifier ID to fetch
+            verifier_id: The verifier ID
+            verifier_key: The verifier key
+            verifier_code: The verifier code
+            verifier_sha: The verifier SHA256
             
         Returns:
             SyncVerifierFunction created from the verifier code
         """
         from .verifiers.verifier import SyncVerifierFunction
-        
-        # Fetch verifier from API
-        response = self.client.request("GET", f"/v1/verifier/{verifier_id}")
-        verifier_data = response.json()
-        
-        # Extract verifier metadata
-        verifier_code = verifier_data["code"]
-        verifier_key = verifier_data["key"]
-        verifier_sha = verifier_data.get("sha256", "")
         
         # Extract function name from code
         function_name = extract_function_name(verifier_code)
@@ -380,7 +367,31 @@ class Fleet:
         if verifier_sha:
             verifier_func._bundle_sha = verifier_sha
         
+        # Store the original verifier code for reference
+        verifier_func._verifier_code = verifier_code
+        
         return verifier_func
+    
+    def _load_verifier(self, verifier_id: str) -> "SyncVerifierFunction":
+        """Load a verifier by ID and create a SyncVerifierFunction.
+        
+        Args:
+            verifier_id: The verifier ID to fetch
+            
+        Returns:
+            SyncVerifierFunction created from the verifier code
+        """
+        # Fetch verifier from API
+        response = self.client.request("GET", f"/v1/verifier/{verifier_id}")
+        verifier_data = response.json()
+        
+        # Use the common method to create verifier
+        return self._create_verifier_from_data(
+            verifier_id=verifier_id,
+            verifier_key=verifier_data["key"],
+            verifier_code=verifier_data["code"],
+            verifier_sha=verifier_data.get("sha256", "")
+        )
 
 
 # Shared

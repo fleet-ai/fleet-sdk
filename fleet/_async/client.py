@@ -261,47 +261,37 @@ class AsyncFleet:
         response = await self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
         
-        # Prepare to load verifiers in parallel
-        import asyncio
-        
-        # Create list to track verifier loading tasks
-        verifier_tasks = []
-        task_responses_with_indices = []
-        
-        # First pass: collect all verifier IDs that need loading
-        for i, task_response in enumerate(task_list_response.tasks):
-            if task_response.verifier_id:
-                verifier_task = self._load_verifier(task_response.verifier_id)
-                verifier_tasks.append(verifier_task)
-                task_responses_with_indices.append((i, task_response))
-        
-        # Load all verifiers in parallel
-        verifiers = []
-        if verifier_tasks:
-            try:
-                verifiers = await asyncio.gather(*verifier_tasks, return_exceptions=True)
-            except Exception as e:
-                logger.error(f"Error during parallel verifier loading: {e}")
-                verifiers = [None] * len(verifier_tasks)
-        
-        # Create a mapping of task index to verifier (or exception)
-        verifier_by_index = {}
-        for (idx, _), verifier_result in zip(task_responses_with_indices, verifiers):
-            if isinstance(verifier_result, Exception):
-                logger.warning(f"Failed to load verifier: {verifier_result}")
-                verifier_by_index[idx] = None
-            else:
-                verifier_by_index[idx] = verifier_result
-        
         # Transform TaskResponse objects to Task objects
         tasks = []
-        for i, task_response in enumerate(task_list_response.tasks):
+        for task_response in task_list_response.tasks:
+            # Create verifier function if verifier data is present
+            verifier = None
+            verifier_func = task_response.verifier_func
+            
+            if task_response.verifier:
+                # Use verifier code from the embedded verifier object
+                verifier_func = task_response.verifier.code
+                
+                # Create VerifierFunction from the embedded data
+                try:
+                    verifier = await self._create_verifier_from_data(
+                        verifier_id=task_response.verifier.verifier_id,
+                        verifier_key=task_response.verifier.key,
+                        verifier_code=task_response.verifier.code,
+                        verifier_sha=task_response.verifier.sha256
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to create verifier {task_response.verifier.key}: {e}")
+            
             task = Task(
                 key=task_response.key,
                 prompt=task_response.prompt,
                 env_id=task_response.environment_id,  # Map environment_id -> env_id
                 created_at=task_response.created_at,
-                verifier=verifier_by_index.get(i),  # Use loaded verifier or None
+                version=task_response.version,
+                env_variables=task_response.env_variables or {},
+                verifier_func=verifier_func,  # Set verifier code
+                verifier=verifier,  # Use created verifier or None
                 metadata={}  # Default empty metadata
             )
             tasks.append(task)
@@ -317,25 +307,25 @@ class AsyncFleet:
         response = await self.client.request("GET", "/v1/account")
         return AccountResponse(**response.json())
     
-    async def _load_verifier(self, verifier_id: str) -> "AsyncVerifierFunction":
-        """Load a verifier by ID and create an AsyncVerifierFunction.
+    async def _create_verifier_from_data(
+        self, 
+        verifier_id: str,
+        verifier_key: str,
+        verifier_code: str,
+        verifier_sha: str
+    ) -> "AsyncVerifierFunction":
+        """Create an AsyncVerifierFunction from verifier data.
         
         Args:
-            verifier_id: The verifier ID to fetch
+            verifier_id: The verifier ID
+            verifier_key: The verifier key
+            verifier_code: The verifier code
+            verifier_sha: The verifier SHA256
             
         Returns:
             AsyncVerifierFunction created from the verifier code
         """
         from .verifiers.verifier import AsyncVerifierFunction
-        
-        # Fetch verifier from API
-        response = await self.client.request("GET", f"/v1/verifier/{verifier_id}")
-        verifier_data = response.json()
-        
-        # Extract verifier metadata
-        verifier_code = verifier_data["code"]
-        verifier_key = verifier_data["key"]
-        verifier_sha = verifier_data.get("sha256", "")
         
         # Extract function name from code
         function_name = extract_function_name(verifier_code)
@@ -377,7 +367,31 @@ class AsyncFleet:
         if verifier_sha:
             verifier_func._bundle_sha = verifier_sha
         
+        # Store the original verifier code for reference
+        verifier_func._verifier_code = verifier_code
+        
         return verifier_func
+    
+    async def _load_verifier(self, verifier_id: str) -> "AsyncVerifierFunction":
+        """Load a verifier by ID and create an AsyncVerifierFunction.
+        
+        Args:
+            verifier_id: The verifier ID to fetch
+            
+        Returns:
+            AsyncVerifierFunction created from the verifier code
+        """
+        # Fetch verifier from API
+        response = await self.client.request("GET", f"/v1/verifier/{verifier_id}")
+        verifier_data = response.json()
+        
+        # Use the common method to create verifier
+        return await self._create_verifier_from_data(
+            verifier_id=verifier_id,
+            verifier_key=verifier_data["key"],
+            verifier_code=verifier_data["code"],
+            verifier_sha=verifier_data.get("sha256", "")
+        )
 
 
 # Shared
