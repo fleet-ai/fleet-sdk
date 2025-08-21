@@ -24,6 +24,7 @@ export FLEET_API_KEY="sk_your_key_here"
 
 ```python
 import fleet as flt
+import datetime
 
 # Create environment by key
 env = flt.env.make("fira")
@@ -31,11 +32,11 @@ env = flt.env.make("fira")
 # Reset environment with seed and options
 env.reset(
     seed=42,
-    timestamp=datetime.now()
+    timestamp=int(datetime.datetime.now().timestamp())
 )
 
-# Access environment state ('crm' is the resource id for a sqlite database)
-sql = env.state("sqlite://crm")
+# Access environment state ('current' is the resource id for a sqlite database)
+sql = env.state("sqlite://current")
 sql.exec("UPDATE customers SET status = 'active' WHERE id = 123")
 
 # Clean up
