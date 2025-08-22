@@ -213,6 +213,9 @@ class Fleet:
         instance.instance.load()
         return instance
 
+    def make_for_task(self, task: Task) -> SyncEnv:
+        return self.make(env_key=f"{task.env_id}:{task.version}")
+
     def instances(
         self, status: Optional[str] = None, region: Optional[str] = None
     ) -> List[SyncEnv]:
@@ -246,8 +249,54 @@ class Fleet:
 
     def delete(self, instance_id: str) -> InstanceResponse:
         return _delete_instance(self.client, instance_id)
+    
+    def load_tasks_from_file(self, filename: str) -> List[Task]:
+        with open(filename, 'r', encoding='utf-8') as f:
+            tasks_data = f.read()
 
-    def load_tasks(self, env_key: Optional[str] = None) -> List[Task]:
+        return self.load_task_array_from_string(tasks_data)
+
+    def load_task_array_from_string(self, serialized_tasks: List[Dict]) -> List[Task]:
+        tasks = []
+
+        json_tasks = json.loads(serialized_tasks)
+        for json_task in json_tasks:
+            parsed_task = self.load_task_from_json(json_task)
+            tasks.append(parsed_task)
+        return tasks
+
+    def load_task_from_string(self, task_string: str) -> Task:
+        task_json = json.loads(task_string)
+        return self.load_task_from_json(task_json)
+
+    def load_task_from_json(self, task_json: Dict) -> Task:
+        verifier = None
+        try:
+            if 'verifier_id' in task_json and task_json['verifier_id']:
+                verifier = self._create_verifier_from_data(
+                    verifier_id=task_json['verifier_id'],
+                    verifier_key=task_json['key'],
+                    verifier_code=task_json['verifier_func'],
+                    verifier_sha=task_json.get('verifier_sha', '')
+                )
+        except Exception as e:
+            logger.warning(f"Failed to create verifier {task_json['key']}: {e}")
+        
+        task = Task(
+            key=task_json['key'],
+            prompt=task_json['prompt'],
+            env_id=task_json['env_id'],  # Use env_id from the data
+            created_at=task_json['created_at'],
+            version=task_json.get('version'),
+            env_variables=task_json.get('env_variables', {}),
+            verifier_func=task_json.get('verifier_func'),  # Set verifier code
+            verifier=verifier,  # Use created verifier or None
+            metadata=task_json.get('metadata', {})  # Default empty metadata
+        )
+        return task
+
+
+    def load_tasks(self, env_key: Optional[str] = None, task_keys: Optional[List[str]] = None) -> List[Task]:
         """Load tasks for the authenticated team, optionally filtered by environment.
         
         Args:
@@ -259,6 +308,9 @@ class Fleet:
         params = {}
         if env_key is not None:
             params["env_key"] = env_key
+
+        if task_keys is not None:
+            params["task_keys"] = task_keys
             
         response = self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
@@ -294,6 +346,8 @@ class Fleet:
                 env_variables=task_response.env_variables or {},
                 verifier_func=verifier_func,  # Set verifier code
                 verifier=verifier,  # Use created verifier or None
+                verifier_id=task_response.verifier.verifier_id,
+                verifier_sha=task_response.verifier.sha256,
                 metadata={}  # Default empty metadata
             )
             tasks.append(task)
@@ -370,7 +424,6 @@ class Fleet:
             except Exception as e:
                 logger.error(f"Failed to import task {task.key}: {e}")
                 continue
-
 
     def account(self) -> AccountResponse:
         """Get account information including instance limits and usage.

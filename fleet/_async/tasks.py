@@ -24,6 +24,8 @@ class Task(BaseModel):
     version: Optional[str] = Field(None, description="Task version")
     verifier_func: Optional[str] = Field(None, description="Verifier function code")
     verifier: Optional[Any] = Field(None, description="Verifier function with decorator (async or sync)")
+    verifier_id: Optional[str] = Field(None, description="Verifier identifier")
+    verifier_sha: Optional[str] = Field(None, description="Verifier SHA256 hash")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional task metadata")
 
     @validator('key')
