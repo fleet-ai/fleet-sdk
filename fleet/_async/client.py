@@ -213,6 +213,9 @@ class AsyncFleet:
         await instance.instance.load()
         return instance
 
+    async def make_for_task(self, task: Task) -> AsyncEnv:
+        return self.make(env_key=f"{task.env_id}:{task.version}")
+
     async def instances(
         self, status: Optional[str] = None, region: Optional[str] = None
     ) -> List[AsyncEnv]:
@@ -246,6 +249,50 @@ class AsyncFleet:
 
     async def delete(self, instance_id: str) -> InstanceResponse:
         return await _delete_instance(self.client, instance_id)
+
+    async def load_tasks_from_file(self, filename: str) -> List[Task]:
+        with open(filename, 'r', encoding='utf-8') as f:
+            tasks_data = f.read()
+
+        return self.load_task_array_from_string(tasks_data)
+
+    async def load_task_array_from_string(self, serialized_tasks: List[Dict]) -> List[Task]:
+        tasks = []
+
+        json_tasks = json.loads(serialized_tasks)
+        for json_task in json_tasks:
+            parsed_task = self.load_task_from_json(json_task)
+            tasks.append(parsed_task)
+        return tasks
+
+    async def load_task_from_string(self, task_string: str) -> Task:
+        task_json = json.loads(task_string)
+        return self.load_task_from_json(task_json)
+
+    async def load_task_from_json(self, task_json: Dict) -> Task:
+        try:
+            if 'verifier_id' in task_json and task_json['verifier_id']:
+                verifier = self._create_verifier_from_data(
+                    verifier_id=task_json['verifier_id'],
+                    verifier_key=task_json['key'],
+                    verifier_code=task_json['verifier_func'],
+                    verifier_sha=task_json.get('verifier_sha', '')
+                )
+        except Exception as e:
+            logger.warning(f"Failed to create verifier {task_json['key']}: {e}")
+        
+        task = Task(
+            key=task_json['key'],
+            prompt=task_json['prompt'],
+            env_id=task_json['env_id'],  # Use env_id from the data
+            created_at=task_json['created_at'],
+            version=task_json.get('version'),
+            env_variables=task_json.get('env_variables', {}),
+            verifier_func=task_json.get('verifier_func'),  # Set verifier code
+            verifier=verifier,  # Use created verifier or None
+            metadata=task_json.get('metadata', {})  # Default empty metadata
+        )
+        return task
 
     async def load_tasks(self, env_key: Optional[str] = None) -> List[Task]:
         """Load tasks for the authenticated team, optionally filtered by environment.

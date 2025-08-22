@@ -1,4 +1,4 @@
-from ..client import Fleet, SyncEnv
+from ..client import Fleet, SyncEnv, Task
 from ..models import Environment as EnvironmentModel, AccountResponse
 from typing import List, Optional
 
@@ -6,10 +6,11 @@ from typing import List, Optional
 def make(env_key: str, region: Optional[str] = None) -> SyncEnv:
     return Fleet().make(env_key, region=region)
 
+def make_for_task(task: Task) -> SyncEnv:
+    return Fleet().make_for_task(task)
 
 def list_envs() -> List[EnvironmentModel]:
     return Fleet().list_envs()
-
 
 def list_regions() -> List[str]:
     return Fleet().list_regions()
