@@ -51,6 +51,7 @@ from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
 from .resources.browser import AsyncBrowserResource
+from ..resources.mcp import MCPResource
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,11 @@ class AsyncEnv(EnvironmentBase):
 
     def browser(self, name: str = "cdp") -> AsyncBrowserResource:
         return self.instance.browser(name)
+
+    @property
+    def mcp(self) -> MCPResource:
+        mcp_url = f"{self.urls.root}mcp"
+        return MCPResource(url=mcp_url, env_key=self.env_key)
 
     def state(self, uri: str) -> Resource:
         return self.instance.state(uri)

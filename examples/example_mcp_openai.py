@@ -8,7 +8,7 @@ client = OpenAI()
 
 
 def main():
-    env = flt.env.make("fira:v1.3.3")
+    env = flt.env.make("fira")
     print("Created environment:", env.urls.app)
     print("MCP URL:", env.mcp.url)
 
