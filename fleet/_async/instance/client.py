@@ -130,7 +130,7 @@ class AsyncInstanceClient:
 
     async def _load_resources(self) -> None:
         if self._resources is None:
-            response = await self.client.request("GET", "/resources")
+            response = await self.client.request("GET", "/resources", timeout=1.0)
             if response.status_code != 200:
                 self._resources = []
                 return
