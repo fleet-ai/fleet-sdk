@@ -14,6 +14,8 @@
 
 """Fleet Python SDK - Environment-based AI agent interactions."""
 
+from typing import Optional, List
+
 from .exceptions import (
     FleetError,
     FleetAPIError,
@@ -52,6 +54,8 @@ from .types import VerifierFunction
 
 # Create a module-level env attribute for convenient access
 from . import env
+from . import global_client as _global_client
+from ._async import global_client as _async_global_client
 
 __version__ = "0.1.0"
 
@@ -86,6 +90,51 @@ __all__ = [
     "TASK_SUCCESSFUL_SCORE",
     # Environment module
     "env",
+    # Global client helpers
+    "configure",
+    "get_client",
+    "reset_client",
     # Version
     "__version__",
 ]
+
+
+def load_tasks(env_key: Optional[str] = None) -> List[Task]:
+    """Load tasks without explicitly creating a client.
+
+    Example:
+        tasks = fleet.load_tasks(env_key="fira")
+    """
+    # Use global client by default so users can configure once
+    return _global_client.get_client().load_tasks(env_key=env_key)
+
+
+def configure(
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    max_retries: int | None = None,
+    timeout: float | None = None,
+):
+    """Configure global clients (sync and async) once per process.
+
+    Both sync and async default clients will be (re)created with the provided settings.
+    """
+    if max_retries is None:
+        from .config import DEFAULT_MAX_RETRIES as _MR
+        max_retries = _MR
+    if timeout is None:
+        from .config import DEFAULT_TIMEOUT as _TO
+        timeout = _TO
+    _global_client.configure(api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout)
+    _async_global_client.configure(api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout)
+
+
+def get_client() -> Fleet:
+    """Get the global sync client."""
+    return _global_client.get_client()
+
+
+def reset_client():
+    """Reset both sync and async global clients."""
+    _global_client.reset_client()
+    _async_global_client.reset_client()

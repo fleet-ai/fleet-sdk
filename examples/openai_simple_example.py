@@ -1,5 +1,5 @@
 from openai import OpenAI
-import fleet as flt
+import fleet
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -8,9 +8,9 @@ client = OpenAI()
 
 
 def main():
-    instance = flt.env.make("hubspot")
+    instance = fleet.env.make("hubspot")
 
-    browser = flt.FleetPlaywrightWrapper(instance)
+    browser = fleet.FleetPlaywrightWrapper(instance)
     browser.start()
 
     try:

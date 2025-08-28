@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional, Tuple, TypedDict
 from pathlib import Path
 from google import genai
 from google.genai import types
-import fleet as flt
+import fleet
 from dotenv import load_dotenv
 import base64
 import re
@@ -30,7 +30,7 @@ class Problem(TypedDict):
 class GeminiAgent:
     def __init__(
         self,
-        browser: flt.FleetPlaywrightWrapper,
+        browser: fleet.FleetPlaywrightWrapper,
         model: str = MODEL,
         print_steps: bool = True,
         debug: bool = False,
@@ -262,13 +262,13 @@ def evaluate_problem(
 
     try:
         # Create environment
-        env = flt.env.make(env_key)
+        env = fleet.env.make(env_key)
         print(
             f"[Problem {problem_idx + 1}/{total_problems}] Created environment for {problem['id']}: {env.urls.app}"
         )
 
         # Create browser wrapper
-        browser = flt.FleetPlaywrightWrapper(env)
+        browser = fleet.FleetPlaywrightWrapper(env)
         browser.start()
 
         # Create agent
@@ -314,10 +314,10 @@ def evaluate_problem(
 
 def interactive_mode():
     # Create a Fleet environment instance
-    instance = flt.env.make("hubspot")
+    instance = fleet.env.make("hubspot")
 
     # Create the browser wrapper
-    browser = flt.FleetPlaywrightWrapper(instance)
+    browser = fleet.FleetPlaywrightWrapper(instance)
     browser.start()
 
     try:

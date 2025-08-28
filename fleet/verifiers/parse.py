@@ -13,14 +13,28 @@ def extract_function_name(function_code: str) -> str | None:
     Returns:
         The function name if found, None otherwise
     """
-    # Pattern to match both def and async def functions
-    # Handles various formatting styles and type annotations
-    pattern = r'(?:async\s+)?def\s+(\w+)\s*\('
-    
-    match = re.search(pattern, function_code)
+    # Normalize escaped newlines and strip common Markdown code fences
+    code = function_code.replace("\\n", "\n").strip()
+
+    if "```" in code:
+        # Extract the first fenced block if present
+        fence_blocks = re.findall(r"```[a-zA-Z0-9_+-]*\n([\s\S]*?)\n```", code)
+        if fence_blocks:
+            code = fence_blocks[0].strip()
+
+    # Remove leading decorators (keep them for regex but allow preceding lines)
+    # Robust regex: allow optional decorators and whitespace before the def
+    pattern = r"^\s*(?:@[\w\.\n+() ,]*\n\s*)*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\("
+    match = re.search(pattern, code, flags=re.MULTILINE)
     if match:
         return match.group(1)
-    
+
+    # Fallback: search anywhere (not anchored) for a def signature
+    fallback = r"(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\("
+    match = re.search(fallback, code)
+    if match:
+        return match.group(1)
+
     return None
 
 

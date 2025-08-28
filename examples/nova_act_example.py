@@ -1,5 +1,5 @@
 import asyncio
-import fleet as flt
+import fleet
 from nova_act import NovaAct, ActResult
 from dotenv import load_dotenv
 
@@ -7,7 +7,7 @@ load_dotenv()
 
 
 async def main():
-    instance = await flt.env.make_async("hubspot:v1.2.7")
+    instance = await fleet.env.make_async("hubspot:v1.2.7")
     cdp_url = await instance.browser().cdp_url()
 
     loop = asyncio.get_event_loop()

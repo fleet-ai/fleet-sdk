@@ -4,7 +4,7 @@ import argparse
 import json
 from typing import TypedDict, List, Optional, Tuple
 from pathlib import Path
-import fleet as flt
+import fleet
 from nova_act import NovaAct, ActResult
 from dotenv import load_dotenv
 
@@ -36,7 +36,7 @@ async def process_problem(
     env = None
     try:
         # Create a new environment instance for this problem
-        env = await flt.env.make_async(env_key)
+        env = await fleet.env.make_async(env_key)
         print(
             f"[Problem {problem_idx + 1}/{total_problems}] Created environment for {problem['id']}: {env.urls.app}"
         )

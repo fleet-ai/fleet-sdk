@@ -1,5 +1,5 @@
 from openai import OpenAI
-import fleet as flt
+import fleet
 import json
 from typing import Callable
 from dotenv import load_dotenv
@@ -191,10 +191,10 @@ tools = []
 
 def main():
     # Create a Fleet environment instance
-    instance = flt.env.make("hubspot")
+    instance = fleet.env.make("hubspot")
 
     # Create the Playwright wrapper
-    browser = flt.FleetPlaywrightWrapper(instance)
+    browser = fleet.FleetPlaywrightWrapper(instance)
     browser.start()
 
     try:

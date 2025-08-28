@@ -1,5 +1,5 @@
 import asyncio
-import fleet as flt
+import fleet
 from fleet.verifiers import DatabaseSnapshot, IgnoreConfig, TASK_SUCCESSFUL_SCORE
 from dotenv import load_dotenv
 
@@ -68,7 +68,7 @@ def validate_new_deal_creation(
 async def main():
     # Create a new instance
     print("Creating new Hubspot instance...")
-    env = await flt.env.make_async("hubspot")
+    env = await fleet.env.make_async("hubspot")
     print(f"New Instance: {env.instance_id}")
 
     try:
