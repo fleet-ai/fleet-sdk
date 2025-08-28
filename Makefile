@@ -1,5 +1,8 @@
 .PHONY: help install-dev build test clean publish-to-pypi validate-tag unasync
 
+# Use the active Python interpreter (python3 preferred, fallback to python)
+PYTHON ?= $(shell command -v python3 || command -v python)
+
 help:
 	@echo "Fleet Python SDK Development Commands"
 	@echo "====================================="
@@ -12,15 +15,15 @@ help:
 	@echo "unasync        Generate sync code from async sources"
 
 install-dev:
-	python3.11 -m pip install --upgrade pip
-	pip install build twine
-	pip install -e .
+	$(PYTHON) -m pip install --upgrade pip
+	$(PYTHON) -m pip install --upgrade build twine
+	$(PYTHON) -m pip install -e ".[dev]"
 
 build: clean unasync
-	python3.11 -m build
+	$(PYTHON) -m build
 
 test:
-	python3.11 -m pytest
+	$(PYTHON) -m pytest
 
 clean:
 	rm -rf build/
@@ -31,7 +34,7 @@ clean:
 
 unasync:
 	@echo "Running unasync to generate sync code from async sources..."
-	@python3.11 -c "import os, unasync; \
+	@$(PYTHON) -c "import os, unasync; \
 	rule = unasync.Rule('fleet/_async/', 'fleet/', { \
 		'AsyncClient': 'Client', \
 		'AsyncInstanceClient': 'InstanceClient', \
@@ -66,7 +69,7 @@ unasync:
 	}); \
 	files = [os.path.join(root, f) for root, dirs, files in os.walk('fleet/_async/') for f in files if f.endswith('.py') and f != '__init__.py']; \
 	unasync.unasync_files(files, [rule])"
-	@python3.11 scripts/fix_sync_imports.py
+	@$(PYTHON) scripts/fix_sync_imports.py
 	@echo "✅ Sync code generated successfully!"
 
 validate-tag:
