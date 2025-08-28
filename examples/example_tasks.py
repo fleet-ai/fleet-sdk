@@ -1,16 +1,12 @@
-import fleet as flt
+import fleet
 from dotenv import load_dotenv
 
 load_dotenv()
 
-
-client = flt.Fleet()
-
-
 def main():
-    env = flt.env.make("fira")
+    env = fleet.env.make("fira")
 
-    tasks = client.load_tasks(env_key="fira")
+    tasks = fleet.load_tasks(env_key="fira")
     print(f"Loaded {len(tasks)} tasks")
 
     for i, task in enumerate(tasks):

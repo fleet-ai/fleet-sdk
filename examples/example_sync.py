@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """Example demonstrating browser control with Fleet Manager Client."""
 
-import fleet as flt
+import fleet
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
 def main():
-    environments = flt.env.list_envs()
+    environments = fleet.env.list_envs()
     print("Environments:", len(environments))
 
-    instances = flt.env.list_instances(status="running")
+    instances = fleet.env.list_instances(status="running")
     print("Instances:", len(instances))
 
     # Create a new instance
-    env = flt.env.make("hubspot")
+    env = fleet.env.make("hubspot")
     print("New Instance:", env.instance_id)
 
     response = env.reset(seed=42)

@@ -1,11 +1,11 @@
-import fleet as flt
+import fleet
 from fleet.verifiers.verifier import verifier
 from fleet.verifiers.db import IgnoreConfig
 
 
 @verifier(key="validate_finish_blue_green_deployment")
 def validate_finish_blue_green_deployment(
-    env: flt.Environment, final_answer: str | None = None
+    env: fleet.Environment, final_answer: str | None = None
 ) -> int:
     """Validate that DEBT-722 and DEBT-720 are marked as Done"""
     before = env.db("seed")
@@ -58,7 +58,7 @@ def validate_finish_blue_green_deployment(
 
 
 def main():
-    env = flt.env.make("fira:v1.3.1")
+    env = fleet.env.make("fira:v1.3.1")
     print(f"New Instance: {env.instance_id}")
 
     print(validate_finish_blue_green_deployment(env))

@@ -324,19 +324,34 @@ class AsyncFleet:
             verifier_func = task_response.verifier_func
             
             if task_response.verifier:
-                # Use verifier code from the embedded verifier object
-                verifier_func = task_response.verifier.code
-                
-                # Create VerifierFunction from the embedded data
-                try:
-                    verifier = await self._create_verifier_from_data(
-                        verifier_id=task_response.verifier.verifier_id,
-                        verifier_key=task_response.verifier.key,
-                        verifier_code=task_response.verifier.code,
-                        verifier_sha=task_response.verifier.sha256
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to create verifier {task_response.verifier.key}: {e}")
+                embedded_code = task_response.verifier.code or ""
+                is_embedded_error = embedded_code.strip().startswith("<error loading code:")
+                if not is_embedded_error:
+                    # Only override if the embedded code looks valid
+                    verifier_func = embedded_code
+                    # Create VerifierFunction from the embedded data
+                    try:
+                        verifier = await self._create_verifier_from_data(
+                            verifier_id=task_response.verifier.verifier_id,
+                            verifier_key=task_response.verifier.key,
+                            verifier_code=embedded_code,
+                            verifier_sha=task_response.verifier.sha256
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to create verifier {task_response.verifier.key}: {e}")
+                else:
+                    # Fallback: try fetching by ID if embedded code failed to load
+                    try:
+                        logger.warning(
+                            f"Embedded verifier code missing for {task_response.verifier.key} (NoSuchKey). "
+                            f"Attempting to refetch by id {task_response.verifier.verifier_id}"
+                        )
+                        verifier = await self._load_verifier(task_response.verifier.verifier_id)
+                    except Exception as e:
+                        logger.warning(
+                            f"Refetch by verifier id failed for {task_response.verifier.key}: {e}. "
+                            "Leaving verifier unset."
+                        )
             
             task = Task(
                 key=task_response.key,

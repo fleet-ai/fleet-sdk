@@ -320,7 +320,7 @@ def verifier(
             return 1.0 if actual_count >= expected_count else 0.0
         
         # Usage
-        env = await flt.env.make_async("fira")
+        env = await fleet.env.make_async("fira")
         
         # Local execution
         result = await check_user_count(env, 5)        # sync verifier

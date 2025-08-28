@@ -2,7 +2,7 @@
 """Example demonstrating browser control with Fleet Manager Client."""
 
 import asyncio
-import fleet as flt
+import fleet
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -10,7 +10,7 @@ load_dotenv()
 
 async def main():
     # Create a new instance
-    env = await flt.env.make_async("fira:v1.3.2")
+    env = await fleet.env.make_async("fira:v1.3.2")
     print(f"New Instance: {env.instance_id} ({env.region})")
     print("URL:", env.urls.app)
 

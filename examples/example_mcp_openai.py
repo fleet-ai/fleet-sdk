@@ -1,4 +1,4 @@
-import fleet as flt
+import fleet
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -8,7 +8,7 @@ client = OpenAI()
 
 
 def main():
-    env = flt.env.make("fira")
+    env = fleet.env.make("fira")
     print("Created environment:", env.urls.app)
     print("MCP URL:", env.mcp.url)
 

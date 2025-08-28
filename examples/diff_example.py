@@ -1,5 +1,5 @@
 import asyncio
-import fleet as flt
+import fleet
 from fleet.verifiers import IgnoreConfig
 from dotenv import load_dotenv
 
@@ -9,7 +9,7 @@ load_dotenv()
 async def main():
     # Create a new instance
     print("Creating new Hubspot instance...")
-    env = await flt.env.make_async("hubspot:v1.2.7")
+    env = await fleet.env.make_async("hubspot:v1.2.7")
     print(f"New Instance: {env.instance_id}")
 
     try:

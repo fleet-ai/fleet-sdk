@@ -83,8 +83,8 @@ def verifier(
             return 1.0 if actual_count >= expected_count else 0.0
         
         # Usage with different environments
-        env1 = flt.env.make("fira")
-        env2 = flt.env.make("another_env")
+        env1 = fleet.env.make("fira")
+        env2 = fleet.env.make("another_env")
         
         # Local execution
         result = await check_user_count(env1, 5)

@@ -2,21 +2,21 @@
 """Example demonstrating browser control with Fleet Manager Client."""
 
 import asyncio
-import fleet as flt
+import fleet
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
 async def main():
-    regions = await flt.env.list_regions_async()
+    regions = await fleet.env.list_regions_async()
     print("Regions:", regions)
 
-    environments = await flt.env.list_envs_async()
+    environments = await fleet.env.list_envs_async()
     print("Environments:", len(environments))
 
     # Create a new instance
-    env = await flt.env.make_async("hubspot")
+    env = await fleet.env.make_async("hubspot")
     print(f"New Instance: {env.instance_id} ({env.region})")
 
     response = await env.reset(seed=42)

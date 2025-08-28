@@ -1,6 +1,6 @@
-import fleet as flt
+import fleet
 
-account = flt.env.account()
+account = fleet.env.account()
 
 print(f"Team ID: {account.team_id}")
 print(f"Team Name: {account.team_name}")

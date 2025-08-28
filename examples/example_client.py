@@ -2,14 +2,14 @@
 """Example demonstrating browser control with Fleet Manager Client."""
 
 import asyncio
-import fleet as flt
+import fleet
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
 async def main():
-    fleet = flt.AsyncFleet()
+    fleet = fleet.AsyncFleet()
 
     environments = await fleet.list_envs()
     print("Environments:", len(environments))

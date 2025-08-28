@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from uuid import UUID
 
 from pydantic import BaseModel, Field, validator
@@ -111,3 +111,14 @@ class Task(BaseModel):
         # Deferred import to avoid circular dependencies
         from .client import Fleet
         return Fleet().make(env_key=self.env_key, region=region)
+
+
+def load_tasks(env_key: Optional[str] = None) -> List[Task]:
+    """Convenience function to load tasks without initializing a client.
+
+    Creates an `AsyncFleet` client under the hood and returns the tasks list.
+    """
+    # Use the global client by default so users can pre-configure it once
+    from .global_client import get_client
+    client = get_client()
+    return client.load_tasks(env_key=env_key)
