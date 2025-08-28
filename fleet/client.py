@@ -51,7 +51,7 @@ from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import SQLiteResource
 from .resources.browser import BrowserResource
-from .resources.mcp import MCPResource
+from ..resources.mcp import MCPResource
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +255,7 @@ class Fleet:
 
     def delete(self, instance_id: str) -> InstanceResponse:
         return _delete_instance(self.client, instance_id)
-    
+
     def load_tasks_from_file(self, filename: str) -> List[Task]:
         with open(filename, 'r', encoding='utf-8') as f:
             tasks_data = f.read()
@@ -276,7 +276,6 @@ class Fleet:
         return self.load_task_from_json(task_json)
 
     def load_task_from_json(self, task_json: Dict) -> Task:
-        verifier = None
         try:
             if 'verifier_id' in task_json and task_json['verifier_id']:
                 verifier = self._create_verifier_from_data(
@@ -301,8 +300,7 @@ class Fleet:
         )
         return task
 
-
-    def load_tasks(self, env_key: Optional[str] = None, task_keys: Optional[List[str]] = None) -> List[Task]:
+    def load_tasks(self, env_key: Optional[str] = None) -> List[Task]:
         """Load tasks for the authenticated team, optionally filtered by environment.
         
         Args:
@@ -314,9 +312,6 @@ class Fleet:
         params = {}
         if env_key is not None:
             params["env_key"] = env_key
-
-        if task_keys is not None:
-            params["task_keys"] = task_keys
             
         response = self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
@@ -352,8 +347,6 @@ class Fleet:
                 env_variables=task_response.env_variables or {},
                 verifier_func=verifier_func,  # Set verifier code
                 verifier=verifier,  # Use created verifier or None
-                verifier_id=task_response.verifier.verifier_id,
-                verifier_sha=task_response.verifier.sha256,
                 metadata={}  # Default empty metadata
             )
             tasks.append(task)
@@ -430,6 +423,7 @@ class Fleet:
             except Exception as e:
                 logger.error(f"Failed to import task {task.key}: {e}")
                 continue
+
 
     def account(self) -> AccountResponse:
         """Get account information including instance limits and usage.

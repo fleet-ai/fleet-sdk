@@ -101,3 +101,14 @@ class Task(BaseModel):
                 return result
         else:
             raise ValueError("No verifier function found for this task")
+
+    async def make_env(self, region: Optional[str] = None):
+        """Create an environment instance for this task's environment.
+
+        Uses the task's env_id (and version if present) to create the env.
+        """
+        if not self.env_id:
+            raise ValueError("Task has no env_id defined")
+        # Deferred import to avoid circular dependencies
+        from .client import AsyncFleet
+        return await AsyncFleet().make(env_key=self.env_key, region=region)

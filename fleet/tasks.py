@@ -62,7 +62,25 @@ class Task(BaseModel):
         For async verifiers, automatically runs them with asyncio.run().
         """
         if self.verifier:
-            return self.verifier.remote(env, *args, **kwargs)
+            import inspect
+            
+            result = self.verifier.remote(env, *args, **kwargs)
+            
+            # If the result is a coroutine, we need to run it
+            if inspect.iscoroutine(result):
+                # Check if we're already in an event loop
+                try:
+                    loop = asyncio.get_running_loop()
+                    # We're in an async context, can't use asyncio.run()
+                    raise RuntimeError(
+                        "Cannot run async verifier in sync mode while event loop is running. "
+                        "Use await task.verify_async() instead."
+                    )
+                except RuntimeError:
+                    # No event loop running, safe to use asyncio.run()
+                    return asyncio.run(result)
+            else:
+                return result
         else:
             raise ValueError("No verifier function found for this task")
     
@@ -82,3 +100,14 @@ class Task(BaseModel):
                 return result
         else:
             raise ValueError("No verifier function found for this task")
+
+    def make_env(self, region: Optional[str] = None):
+        """Create an environment instance for this task's environment.
+
+        Uses the task's env_id (and version if present) to create the env.
+        """
+        if not self.env_id:
+            raise ValueError("Task has no env_id defined")
+        # Deferred import to avoid circular dependencies
+        from .client import Fleet
+        return Fleet().make(env_key=self.env_key, region=region)

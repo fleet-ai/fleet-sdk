@@ -220,7 +220,7 @@ class AsyncFleet:
         return instance
 
     async def make_for_task(self, task: Task) -> AsyncEnv:
-        return self.make(env_key=f"{task.env_id}:{task.version}")
+        return await self.make(env_key=f"{task.env_id}:{task.version}")
 
     async def instances(
         self, status: Optional[str] = None, region: Optional[str] = None
