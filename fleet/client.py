@@ -211,7 +211,7 @@ class Fleet:
         response = self.client.request(
             "POST",
             "/v1/env/instances",
-            json=request.model_dump(),
+            json=request.model_dump(exclude_none=True),
             base_url=region_base_url,
         )
 
