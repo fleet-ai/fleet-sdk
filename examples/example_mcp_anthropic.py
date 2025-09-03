@@ -16,7 +16,9 @@ async def main():
     print("MCP URL:", env.mcp.url)
 
     async with streamablehttp_client(url=env.mcp.url) as streams:
-        async with ClientSession(read_stream=streams[0], write_stream=streams[1]) as session:
+        async with ClientSession(
+            read_stream=streams[0], write_stream=streams[1]
+        ) as session:
             await session.initialize()
 
             list_tools = await session.list_tools()
@@ -28,7 +30,6 @@ async def main():
                 }
                 for tool in list_tools.tools
             ]
-
 
             messages = [
                 {
@@ -54,7 +55,9 @@ async def main():
 
                     result = await session.call_tool(tool_name, tool_args)
                     tool_results.append({"call": tool_name, "result": result})
-                    output_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
+                    output_text.append(
+                        f"[Calling tool {tool_name} with args {tool_args}]"
+                    )
 
                     if hasattr(content, "text") and content.text:
                         messages.append({"role": "assistant", "content": content.text})

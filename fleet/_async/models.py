@@ -11,333 +11,334 @@ from pydantic import BaseModel, Field, conint
 
 
 class CDPDescribeResponse(BaseModel):
-    success: bool = Field(..., title='Success')
-    url: str = Field(..., title='Url')
-    devtools_url: str = Field(..., title='Devtools Url')
+    success: bool = Field(..., title="Success")
+    url: str = Field(..., title="Url")
+    devtools_url: str = Field(..., title="Devtools Url")
 
 
 class ChromeStartRequest(BaseModel):
-    start_page: Optional[str] = Field('about:blank', title='Start Page')
-    resolution: Optional[str] = Field('1920x1080', title='Resolution')
+    start_page: Optional[str] = Field("about:blank", title="Start Page")
+    resolution: Optional[str] = Field("1920x1080", title="Resolution")
 
 
 class ChromeStartResponse(BaseModel):
-    success: bool = Field(..., title='Success')
-    message: str = Field(..., title='Message')
+    success: bool = Field(..., title="Success")
+    message: str = Field(..., title="Message")
 
 
 class ChromeStatusResponse(BaseModel):
-    running: bool = Field(..., title='Running')
-    message: str = Field(..., title='Message')
+    running: bool = Field(..., title="Running")
+    message: str = Field(..., title="Message")
 
 
 class Environment(BaseModel):
-    env_key: str = Field(..., title='Env Key')
-    name: str = Field(..., title='Name')
-    description: Optional[str] = Field(..., title='Description')
-    default_version: Optional[str] = Field(..., title='Default Version')
-    versions: Dict[str, str] = Field(..., title='Versions')
+    env_key: str = Field(..., title="Env Key")
+    name: str = Field(..., title="Name")
+    description: Optional[str] = Field(..., title="Description")
+    default_version: Optional[str] = Field(..., title="Default Version")
+    versions: Dict[str, str] = Field(..., title="Versions")
 
 
 class Instance(BaseModel):
-    instance_id: str = Field(..., title='Instance Id')
-    env_key: str = Field(..., title='Env Key')
-    version: str = Field(..., title='Version')
-    status: str = Field(..., title='Status')
-    subdomain: str = Field(..., title='Subdomain')
-    created_at: str = Field(..., title='Created At')
-    updated_at: str = Field(..., title='Updated At')
-    terminated_at: Optional[str] = Field(None, title='Terminated At')
-    team_id: str = Field(..., title='Team Id')
-    region: str = Field(..., title='Region')
-    env_variables: Optional[Dict[str, Any]] = Field(None, title='Env Variables')
+    instance_id: str = Field(..., title="Instance Id")
+    env_key: str = Field(..., title="Env Key")
+    version: str = Field(..., title="Version")
+    status: str = Field(..., title="Status")
+    subdomain: str = Field(..., title="Subdomain")
+    created_at: str = Field(..., title="Created At")
+    updated_at: str = Field(..., title="Updated At")
+    terminated_at: Optional[str] = Field(None, title="Terminated At")
+    team_id: str = Field(..., title="Team Id")
+    region: str = Field(..., title="Region")
+    env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
 
 
 class InstanceRequest(BaseModel):
-    env_key: str = Field(..., title='Env Key')
-    version: Optional[str] = Field(None, title='Version')
-    region: Optional[str] = Field('us-west-1', title='Region')
-    seed: Optional[int] = Field(None, title='Seed')
-    timestamp: Optional[int] = Field(None, title='Timestamp')
-    p_error: Optional[float] = Field(None, title='P Error')
-    avg_latency: Optional[float] = Field(None, title='Avg Latency')
-    run_id: Optional[str] = Field(None, title='Run Id')
-    task_id: Optional[str] = Field(None, title='Task Id')
-    force_pull: Optional[bool] = Field(None, title='Force Pull')
-    env_variables: Optional[Dict[str, Any]] = Field(None, title='Env Variables')
-    created_from: Optional[str] = Field(None, title='Created From')
+    env_key: str = Field(..., title="Env Key")
+    version: Optional[str] = Field(None, title="Version")
+    region: Optional[str] = Field("us-west-1", title="Region")
+    seed: Optional[int] = Field(None, title="Seed")
+    timestamp: Optional[int] = Field(None, title="Timestamp")
+    p_error: Optional[float] = Field(None, title="P Error")
+    avg_latency: Optional[float] = Field(None, title="Avg Latency")
+    run_id: Optional[str] = Field(None, title="Run Id")
+    task_id: Optional[str] = Field(None, title="Task Id")
+    force_pull: Optional[bool] = Field(None, title="Force Pull")
+    env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
+    created_from: Optional[str] = Field(None, title="Created From")
 
 
 class InstanceStatus(Enum):
-    pending = 'pending'
-    running = 'running'
-    stopped = 'stopped'
-    error = 'error'
+    pending = "pending"
+    running = "running"
+    stopped = "stopped"
+    error = "error"
 
 
 class ManagerURLs(BaseModel):
-    api: str = Field(..., title='Api')
-    docs: str = Field(..., title='Docs')
-    reset: str = Field(..., title='Reset')
-    diff: str = Field(..., title='Diff')
-    snapshot: str = Field(..., title='Snapshot')
-    execute_verifier_function: str = Field(..., title='Execute Verifier Function')
+    api: str = Field(..., title="Api")
+    docs: str = Field(..., title="Docs")
+    reset: str = Field(..., title="Reset")
+    diff: str = Field(..., title="Diff")
+    snapshot: str = Field(..., title="Snapshot")
+    execute_verifier_function: str = Field(..., title="Execute Verifier Function")
     execute_verifier_function_with_upload: str = Field(
-        ..., title='Execute Verifier Function With Upload'
+        ..., title="Execute Verifier Function With Upload"
     )
 
 
 class QueryRequest(BaseModel):
-    query: str = Field(..., title='Query')
-    args: Optional[List] = Field(None, title='Args')
-    read_only: Optional[bool] = Field(True, title='Read Only')
+    query: str = Field(..., title="Query")
+    args: Optional[List] = Field(None, title="Args")
+    read_only: Optional[bool] = Field(True, title="Read Only")
 
 
 class QueryResponse(BaseModel):
-    success: bool = Field(..., title='Success')
-    columns: Optional[List[str]] = Field(None, title='Columns')
-    rows: Optional[List[List]] = Field(None, title='Rows')
-    rows_affected: Optional[int] = Field(None, title='Rows Affected')
-    last_insert_id: Optional[int] = Field(None, title='Last Insert Id')
-    error: Optional[str] = Field(None, title='Error')
-    message: str = Field(..., title='Message')
+    success: bool = Field(..., title="Success")
+    columns: Optional[List[str]] = Field(None, title="Columns")
+    rows: Optional[List[List]] = Field(None, title="Rows")
+    rows_affected: Optional[int] = Field(None, title="Rows Affected")
+    last_insert_id: Optional[int] = Field(None, title="Last Insert Id")
+    error: Optional[str] = Field(None, title="Error")
+    message: str = Field(..., title="Message")
 
 
 class RecreateResponse(BaseModel):
-    success: bool = Field(..., title='Success')
-    instance_id: str = Field(..., title='Instance Id')
-    env_key: str = Field(..., title='Env Key')
-    version: str = Field(..., title='Version')
-    recreated_at: str = Field(..., title='Recreated At')
+    success: bool = Field(..., title="Success")
+    instance_id: str = Field(..., title="Instance Id")
+    env_key: str = Field(..., title="Env Key")
+    version: str = Field(..., title="Version")
+    recreated_at: str = Field(..., title="Recreated At")
 
 
 class ResourceMode(Enum):
-    ro = 'ro'
-    rw = 'rw'
+    ro = "ro"
+    rw = "rw"
 
 
 class ResourceType(Enum):
-    sqlite = 'sqlite'
-    cdp = 'cdp'
+    sqlite = "sqlite"
+    cdp = "cdp"
 
 
 class RestoreRequest(BaseModel):
-    backup_id: Optional[str] = Field(None, title='Backup Id')
+    backup_id: Optional[str] = Field(None, title="Backup Id")
 
 
 class RestoreResponse(BaseModel):
-    success: bool = Field(..., title='Success')
-    backup_id: str = Field(..., title='Backup Id')
-    source_instance_id: str = Field(..., title='Source Instance Id')
-    target_instance_id: str = Field(..., title='Target Instance Id')
-    restored_at: str = Field(..., title='Restored At')
+    success: bool = Field(..., title="Success")
+    backup_id: str = Field(..., title="Backup Id")
+    source_instance_id: str = Field(..., title="Source Instance Id")
+    target_instance_id: str = Field(..., title="Target Instance Id")
+    restored_at: str = Field(..., title="Restored At")
 
 
 class SnapshotResponse(BaseModel):
-    success: bool = Field(..., title='Success')
-    backup_id: str = Field(..., title='Backup Id')
-    instance_id: str = Field(..., title='Instance Id')
-    s3_key: str = Field(..., title='S3 Key')
-    created_at: str = Field(..., title='Created At')
+    success: bool = Field(..., title="Success")
+    backup_id: str = Field(..., title="Backup Id")
+    instance_id: str = Field(..., title="Instance Id")
+    s3_key: str = Field(..., title="S3 Key")
+    created_at: str = Field(..., title="Created At")
 
 
 class TableSchema(BaseModel):
-    name: str = Field(..., title='Name')
-    sql: str = Field(..., title='Sql')
-    columns: List[Dict[str, Any]] = Field(..., title='Columns')
+    name: str = Field(..., title="Name")
+    sql: str = Field(..., title="Sql")
+    columns: List[Dict[str, Any]] = Field(..., title="Columns")
 
 
 class TaskRequest(BaseModel):
-    key: str = Field(..., title='Key')
-    prompt: str = Field(..., title='Prompt')
-    environment_id: str = Field(..., title='Environment Id')
-    verifier_id: Optional[str] = Field(None, title='Verifier Id')
-    version: Optional[str] = Field(None, title='Version')
-    env_variables: Optional[Dict[str, Any]] = Field(None, title='Env Variables')
+    key: str = Field(..., title="Key")
+    prompt: str = Field(..., title="Prompt")
+    environment_id: str = Field(..., title="Environment Id")
+    verifier_id: Optional[str] = Field(None, title="Verifier Id")
+    version: Optional[str] = Field(None, title="Version")
+    env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
 
 
 class VerifierData(BaseModel):
-    verifier_id: str = Field(..., title='Verifier Id')
-    key: str = Field(..., title='Key')
-    version: int = Field(..., title='Version')
-    sha256: str = Field(..., title='Sha256')
-    code: str = Field(..., title='Code')
-    comment: Optional[str] = Field(None, title='Comment')
-    created_at: str = Field(..., title='Created At')
+    verifier_id: str = Field(..., title="Verifier Id")
+    key: str = Field(..., title="Key")
+    version: int = Field(..., title="Version")
+    sha256: str = Field(..., title="Sha256")
+    code: str = Field(..., title="Code")
+    comment: Optional[str] = Field(None, title="Comment")
+    created_at: str = Field(..., title="Created At")
 
 
 class TaskResponse(BaseModel):
-    key: str = Field(..., title='Key')
-    prompt: str = Field(..., title='Prompt')
-    team_id: str = Field(..., title='Team Id')
-    environment_id: str = Field(..., title='Environment Id')
-    created_at: str = Field(..., title='Created At')
-    verifier_id: Optional[str] = Field(None, title='Verifier Id')
-    verifier_func: Optional[str] = Field(None, title='Verifier Func')
-    version: Optional[str] = Field(None, title='Version')
-    env_variables: Optional[Dict[str, Any]] = Field(None, title='Env Variables')
-    verifier: Optional[VerifierData] = Field(None, title='Verifier')
+    key: str = Field(..., title="Key")
+    prompt: str = Field(..., title="Prompt")
+    team_id: str = Field(..., title="Team Id")
+    environment_id: str = Field(..., title="Environment Id")
+    created_at: str = Field(..., title="Created At")
+    verifier_id: Optional[str] = Field(None, title="Verifier Id")
+    verifier_func: Optional[str] = Field(None, title="Verifier Func")
+    version: Optional[str] = Field(None, title="Version")
+    env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
+    verifier: Optional[VerifierData] = Field(None, title="Verifier")
 
 
 class ValidationError(BaseModel):
-    loc: List[Union[str, int]] = Field(..., title='Location')
-    msg: str = Field(..., title='Message')
-    type: str = Field(..., title='Error Type')
+    loc: List[Union[str, int]] = Field(..., title="Location")
+    msg: str = Field(..., title="Message")
+    type: str = Field(..., title="Error Type")
 
 
 class VerifiersCheckResponse(BaseModel):
     key: Optional[str] = Field(
-        None, description='Key of the verifier artifact', title='Key'
+        None, description="Key of the verifier artifact", title="Key"
     )
     version: Optional[int] = Field(
-        None, description='Version of the verifier artifact', title='Version'
+        None, description="Version of the verifier artifact", title="Version"
     )
     display_src: Optional[str] = Field(
-        None, description='Display source code of the verifier', title='Display Src'
+        None, description="Display source code of the verifier", title="Display Src"
     )
     created_at: Optional[str] = Field(
-        None, description='Creation timestamp', title='Created At'
+        None, description="Creation timestamp", title="Created At"
     )
     comment: Optional[str] = Field(
-        None, description='Comment about the verifier', title='Comment'
+        None, description="Comment about the verifier", title="Comment"
     )
     success: bool = Field(
-        ..., description='Whether the verification was successful', title='Success'
+        ..., description="Whether the verification was successful", title="Success"
     )
 
 
 class VerifiersExecuteRequest(BaseModel):
     key: Optional[str] = Field(
-        None, description='Key of the verifier artifact', title='Key'
+        None, description="Key of the verifier artifact", title="Key"
     )
     sha256: Optional[str] = Field(
         None,
-        description='SHA256 hash of the function (auto-generated if bundle is provided)',
-        title='Sha256',
+        description="SHA256 hash of the function (auto-generated if bundle is provided)",
+        title="Sha256",
     )
     bundle: Optional[str] = Field(
-        None, description='Base64 encoded bundle data', title='Bundle'
+        None, description="Base64 encoded bundle data", title="Bundle"
     )
     args: Optional[str] = Field(
-        None, description='Base64 encoded cloudpickled args', title='Args'
+        None, description="Base64 encoded cloudpickled args", title="Args"
     )
     args_array: Optional[List] = Field(
         None,
-        description='Array of argument values to pass to the function',
-        title='Args Array',
+        description="Array of argument values to pass to the function",
+        title="Args Array",
     )
     function_name: Optional[str] = Field(
-        'verify', description='Name of the function to execute', title='Function Name'
+        "verify", description="Name of the function to execute", title="Function Name"
     )
     timeout: Optional[conint(ge=1, le=300)] = Field(
-        60, description='Execution timeout in seconds', title='Timeout'
+        60, description="Execution timeout in seconds", title="Timeout"
     )
     region: Optional[str] = Field(
-        None, description='AWS region for execution', title='Region'
+        None, description="AWS region for execution", title="Region"
     )
     metadata: Optional[Dict[str, Any]] = Field(
-        None, description='Additional metadata', title='Metadata'
+        None, description="Additional metadata", title="Metadata"
     )
     comment: Optional[str] = Field(
-        None, description='Comment about the function', title='Comment'
+        None, description="Comment about the function", title="Comment"
     )
     display_src: Optional[str] = Field(
-        None, description='Display source code', title='Display Src'
+        None, description="Display source code", title="Display Src"
     )
 
 
 class VerifiersExecuteResponse(BaseModel):
     key: Optional[str] = Field(
-        None, description='Key of the verifier artifact', title='Key'
+        None, description="Key of the verifier artifact", title="Key"
     )
     version: Optional[int] = Field(
-        None, description='Version of the verifier artifact', title='Version'
+        None, description="Version of the verifier artifact", title="Version"
     )
     display_src: Optional[str] = Field(
-        None, description='Display source code of the verifier', title='Display Src'
+        None, description="Display source code of the verifier", title="Display Src"
     )
     created_at: Optional[str] = Field(
-        None, description='Creation timestamp', title='Created At'
+        None, description="Creation timestamp", title="Created At"
     )
     comment: Optional[str] = Field(
-        None, description='Comment about the verifier', title='Comment'
+        None, description="Comment about the verifier", title="Comment"
     )
     success: bool = Field(
-        ..., description='Whether the verification was successful', title='Success'
+        ..., description="Whether the verification was successful", title="Success"
     )
     result: Optional[Any] = Field(
-        None, description='The return value of the function', title='Result'
+        None, description="The return value of the function", title="Result"
     )
     error: Optional[Dict[str, Any]] = Field(
-        None, description='Error details if verification failed', title='Error'
+        None, description="Error details if verification failed", title="Error"
     )
     execution_time_ms: int = Field(
-        ..., description='Execution time in milliseconds', title='Execution Time Ms'
+        ..., description="Execution time in milliseconds", title="Execution Time Ms"
     )
     bundle_cache_hit: Optional[bool] = Field(
         False,
-        description='Whether the bundle was already cached',
-        title='Bundle Cache Hit',
+        description="Whether the bundle was already cached",
+        title="Bundle Cache Hit",
     )
     stdout: Optional[str] = Field(
-        None, description='Captured stdout from execution', title='Stdout'
+        None, description="Captured stdout from execution", title="Stdout"
     )
 
 
 class DescribeResponse(BaseModel):
-    success: bool = Field(..., title='Success')
-    resource_name: str = Field(..., title='Resource Name')
-    tables: Optional[List[TableSchema]] = Field(None, title='Tables')
-    error: Optional[str] = Field(None, title='Error')
-    message: str = Field(..., title='Message')
+    success: bool = Field(..., title="Success")
+    resource_name: str = Field(..., title="Resource Name")
+    tables: Optional[List[TableSchema]] = Field(None, title="Tables")
+    error: Optional[str] = Field(None, title="Error")
+    message: str = Field(..., title="Message")
 
 
 class HTTPValidationError(BaseModel):
-    detail: Optional[List[ValidationError]] = Field(None, title='Detail')
+    detail: Optional[List[ValidationError]] = Field(None, title="Detail")
 
 
 class InstanceURLs(BaseModel):
-    root: str = Field(..., title='Root')
-    app: List[str] = Field(..., title='App')
-    api: Optional[str] = Field(None, title='Api')
-    health: Optional[str] = Field(None, title='Health')
-    api_docs: Optional[str] = Field(None, title='Api Docs')
+    root: str = Field(..., title="Root")
+    app: List[str] = Field(..., title="App")
+    api: Optional[str] = Field(None, title="Api")
+    health: Optional[str] = Field(None, title="Health")
+    api_docs: Optional[str] = Field(None, title="Api Docs")
     manager: ManagerURLs
 
 
 class Resource(BaseModel):
-    name: str = Field(..., title='Name')
+    name: str = Field(..., title="Name")
     type: ResourceType
     mode: ResourceMode
-    label: Optional[str] = Field(None, title='Label')
+    label: Optional[str] = Field(None, title="Label")
 
 
 class ResourcesResponse(BaseModel):
-    resources: List[Resource] = Field(..., title='Resources')
+    resources: List[Resource] = Field(..., title="Resources")
 
 
 class TaskListResponse(BaseModel):
-    tasks: List[TaskResponse] = Field(..., title='Tasks')
-    total: int = Field(..., title='Total')
+    tasks: List[TaskResponse] = Field(..., title="Tasks")
+    total: int = Field(..., title="Total")
 
 
 class InstanceResponse(BaseModel):
-    instance_id: str = Field(..., title='Instance Id')
-    env_key: str = Field(..., title='Env Key')
-    version: str = Field(..., title='Version')
-    status: str = Field(..., title='Status')
-    subdomain: str = Field(..., title='Subdomain')
-    created_at: str = Field(..., title='Created At')
-    updated_at: str = Field(..., title='Updated At')
-    terminated_at: Optional[str] = Field(None, title='Terminated At')
-    team_id: str = Field(..., title='Team Id')
-    region: str = Field(..., title='Region')
-    env_variables: Optional[Dict[str, Any]] = Field(None, title='Env Variables')
-    urls: Optional[InstanceURLs] = Field(None, title='Urls')
-    health: Optional[bool] = Field(None, title='Health')
+    instance_id: str = Field(..., title="Instance Id")
+    env_key: str = Field(..., title="Env Key")
+    version: str = Field(..., title="Version")
+    status: str = Field(..., title="Status")
+    subdomain: str = Field(..., title="Subdomain")
+    created_at: str = Field(..., title="Created At")
+    updated_at: str = Field(..., title="Updated At")
+    terminated_at: Optional[str] = Field(None, title="Terminated At")
+    team_id: str = Field(..., title="Team Id")
+    region: str = Field(..., title="Region")
+    env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
+    urls: Optional[InstanceURLs] = Field(None, title="Urls")
+    health: Optional[bool] = Field(None, title="Health")
+
 
 class AccountResponse(BaseModel):
-    team_id: str = Field(..., title='Team Id')
-    team_name: str = Field(..., title='Team Name')
-    instance_limit: int = Field(..., title='Instance Limit')
-    instance_count: int = Field(..., title='Instance Count')
+    team_id: str = Field(..., title="Team Id")
+    team_name: str = Field(..., title="Team Name")
+    instance_limit: int = Field(..., title="Instance Limit")
+    instance_count: int = Field(..., title="Instance Count")

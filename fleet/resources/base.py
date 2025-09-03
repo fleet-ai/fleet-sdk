@@ -21,6 +21,6 @@ class Resource(ABC):
     @property
     def mode(self) -> ResourceMode:
         return self.resource.mode
-    
+
     def __repr__(self) -> str:
         return f"Resource(uri={self.uri}, mode={self.mode.value})"

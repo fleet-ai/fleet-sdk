@@ -6,8 +6,10 @@ from typing import List, Optional
 async def make_async(env_key: str, region: Optional[str] = None) -> AsyncEnv:
     return await AsyncFleet().make(env_key, region=region)
 
+
 async def make_for_task_async(task: Task) -> AsyncEnv:
     return await AsyncFleet().make_for_task(task)
+
 
 async def list_envs_async() -> List[EnvironmentModel]:
     return await AsyncFleet().list_envs()

@@ -9,7 +9,7 @@ from .decorator import (
 
 __all__ = [
     "DatabaseSnapshot",
-    "IgnoreConfig", 
+    "IgnoreConfig",
     "SnapshotDiff",
     "TASK_SUCCESSFUL_SCORE",
     "TASK_FAILED_SCORE",

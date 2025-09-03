@@ -1,6 +1,14 @@
 """Fleet env module - convenience functions for environment management."""
 
-from .client import make, make_for_task, list_envs, list_regions, get, list_instances, account
+from .client import (
+    make,
+    make_for_task,
+    list_envs,
+    list_regions,
+    get,
+    list_instances,
+    account,
+)
 
 # Import async versions from _async
 from .._async.env.client import (

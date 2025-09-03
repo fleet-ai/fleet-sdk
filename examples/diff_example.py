@@ -24,14 +24,14 @@ async def main():
         print("\n=== Taking Initial Snapshot ===")
         snapshot1 = await db.snapshot("initial_state")
         print(f"Snapshot created: {snapshot1.name}")
-        
+
         # Show current entries
         entries_count = await db.table("entries").count()
         print(f"Initial entry count: {entries_count}")
 
         # Make some changes
         print("\n=== Making Database Changes ===")
-        
+
         # 1. Insert a new deal
         print("\n1. Inserting new deal...")
         await db.exec("""
@@ -48,7 +48,7 @@ async def main():
                 '{}'
             )
         """)
-        
+
         # 2. Update an existing entry
         print("2. Updating existing entry...")
         await db.exec("""
@@ -56,7 +56,7 @@ async def main():
             SET name = 'Updated Contact Name'
             WHERE id = 1
         """)
-        
+
         # 3. Insert another entry
         print("3. Inserting another deal...")
         await db.exec("""
@@ -78,21 +78,26 @@ async def main():
         print("\n=== Taking Second Snapshot ===")
         snapshot2 = await db.snapshot("after_changes")
         print(f"Snapshot created: {snapshot2.name}")
-        
+
         new_entries_count = await db.table("entries").count()
         print(f"New entry count: {new_entries_count}")
 
         # Compare snapshots
         print("\n=== Comparing Snapshots ===")
-        
+
         # Configure what to ignore in diff
         ignore_config = IgnoreConfig(
             tables={"pageviews"},  # Ignore entire pageviews table
-            fields={"createdDate", "lastModifiedDate", "createdAt", "updatedAt"},  # Ignore timestamp fields
+            fields={
+                "createdDate",
+                "lastModifiedDate",
+                "createdAt",
+                "updatedAt",
+            },  # Ignore timestamp fields
         )
-        
+
         diff = await snapshot1.diff(snapshot2, ignore_config)
-        
+
         # Test 1: Validate all expected changes
         print("\nTest 1: Validating expected changes...")
         expected_changes = [
@@ -100,9 +105,14 @@ async def main():
             {"table": "entries", "pk": 99001, "field": None, "after": "__added__"},
             {"table": "entries", "pk": 99002, "field": None, "after": "__added__"},
             # Name updated
-            {"table": "entries", "pk": 1, "field": "name", "after": "Updated Contact Name"},
+            {
+                "table": "entries",
+                "pk": 1,
+                "field": "name",
+                "after": "Updated Contact Name",
+            },
         ]
-        
+
         try:
             await diff.expect_only(expected_changes)
             print("✓ All changes validated successfully!")
@@ -115,7 +125,7 @@ async def main():
             {"table": "entries", "pk": 99001, "field": None, "after": "__added__"},
             # Missing the second insert and the update
         ]
-        
+
         try:
             await diff.expect_only(incorrect_changes)
             print("✗ This should have failed!")
@@ -125,29 +135,29 @@ async def main():
 
         # Test 3: Query snapshot data directly
         print("\n=== Querying Snapshot Data ===")
-        
+
         # Query from first snapshot
         print("\nQuerying from initial snapshot:")
         initial_entry = await snapshot1.table("entries").eq("id", 1).first()
         if initial_entry:
             print(f"Entry 1 name in snapshot1: {initial_entry['name']}")
-        
+
         # Query from second snapshot
         print("\nQuerying from second snapshot:")
         updated_entry = await snapshot2.table("entries").eq("id", 1).first()
         if updated_entry:
             print(f"Entry 1 name in snapshot2: {updated_entry['name']}")
-        
+
         # Count deals in each snapshot
         deals_before = await snapshot1.table("entries").eq("type", "deal").all()
         deals_after = await snapshot2.table("entries").eq("type", "deal").all()
         print(f"\nDeals in snapshot1: {len(deals_before)}")
         print(f"Deals in snapshot2: {len(deals_after)}")
-        
+
         # Show new deals
         print("\nNew deals added:")
         for deal in deals_after:
-            if deal['id'] in [99001, 99002]:
+            if deal["id"] in [99001, 99002]:
                 print(f"  - {deal['name']} (id: {deal['id']})")
 
     finally:
@@ -158,4 +168,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())

@@ -87,7 +87,7 @@ async def main():
         # Get the database resource
         await env.instance.load()
         db = env.db()
-        
+
         # Take a snapshot before insertion
         print("\nTaking snapshot before insertion...")
         snapshot_before = await db.snapshot("before_insertion")
@@ -139,12 +139,17 @@ async def main():
         ignore_config = IgnoreConfig(
             tables={"pageviews"},
             table_fields={
-                "entries": {"createdDate", "lastModifiedDate", "createdAt", "updatedAt"},
+                "entries": {
+                    "createdDate",
+                    "lastModifiedDate",
+                    "createdAt",
+                    "updatedAt",
+                },
             },
         )
-        
+
         diff = await snapshot_before.diff(snapshot_after, ignore_config)
-        
+
         # Check diff results
         print("\nDiff validation:")
         expected_changes = [
@@ -155,7 +160,7 @@ async def main():
                 "after": "__added__",
             }
         ]
-        
+
         try:
             await diff.expect_only(expected_changes)
             print("✓ Diff validation passed - only expected changes detected")

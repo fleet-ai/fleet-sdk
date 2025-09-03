@@ -46,6 +46,7 @@ class BaseWrapper:
         headers["Authorization"] = f"Bearer {self.api_key}"
         # Debug log
         import logging
+
         logger = logging.getLogger(__name__)
         logger.debug(f"Headers being sent: {headers}")
         return headers
@@ -89,7 +90,7 @@ class SyncWrapper(BaseWrapper):
     def _handle_error_response(self, response: httpx.Response) -> None:
         """Handle HTTP error responses and convert to appropriate Fleet exceptions."""
         status_code = response.status_code
-        
+
         # Debug log 500 errors
         if status_code == 500:
             logger.error(f"Got 500 error from {response.url}")

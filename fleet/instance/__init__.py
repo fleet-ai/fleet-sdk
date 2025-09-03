@@ -19,5 +19,5 @@ __all__ = [
     "ChromeStartRequest",
     "ChromeStartResponse",
     "ChromeStatusResponse",
-    "ExecuteFunctionResponse"
+    "ExecuteFunctionResponse",
 ]

@@ -26,13 +26,13 @@ def create_bug_issue_sync(
     env, project_key: str = "SCRUM", issue_title: str = "Sample Bug"
 ) -> float:
     """Synchronous verifier for remote execution.
-    
+
     Note: This is designed for remote execution where env.db() returns sync resources.
     """
     # Define constants locally for remote execution
     TASK_SUCCESSFUL_SCORE = 1.0
     TASK_FAILED_SCORE = 0.0
-    
+
     try:
         # Get the database resource
         db = env.db()
@@ -96,7 +96,9 @@ async def create_bug_issue_async(
 async def main():
     """Run the task example."""
     print("=== Fleet Task Example with Jira ===\n")
-    print("Note: Both sync and async verifiers are now supported for remote execution.\n")
+    print(
+        "Note: Both sync and async verifiers are now supported for remote execution.\n"
+    )
 
     # Create task using the async verifier for local execution
     task = Task(
@@ -111,7 +113,9 @@ async def main():
     print(f"  Key: {task.key}")
     print(f"  Prompt: {task.prompt}")
     print(f"  Environment: {task.env_id}")
-    print(f"  Verifier: {task.verifier.key if hasattr(task.verifier, 'key') else 'create_bug_issue'}")
+    print(
+        f"  Verifier: {task.verifier.key if hasattr(task.verifier, 'key') else 'create_bug_issue'}"
+    )
     print(f"  Created at: {task.created_at}")
     print(f"  Metadata: {task.metadata}")
     print()
@@ -153,13 +157,16 @@ async def main():
         # Test async verifier remote execution
         print("Testing remote execution with async verifier...")
         try:
-            result = await create_bug_issue_async.remote(env, project_key="SCRUM", issue_title="Login button not working")
+            result = await create_bug_issue_async.remote(
+                env, project_key="SCRUM", issue_title="Login button not working"
+            )
             print(f"  ✓ Async remote check result: {result}")
         except NotImplementedError as e:
             print(f"  ✓ Expected error: {e}")
         except Exception as e:
             print(f"  ✗ Unexpected error: {e}")
             import traceback
+
             traceback.print_exc()
         print()
 
@@ -185,7 +192,9 @@ async def main():
             env, project_key="SCRUM", issue_title="Login button not working"
         )
         print(f"  Final check result: {result}")
-        print(f"  Task {'completed successfully' if result == TASK_SUCCESSFUL_SCORE else 'failed'}!")
+        print(
+            f"  Task {'completed successfully' if result == TASK_SUCCESSFUL_SCORE else 'failed'}!"
+        )
         print()
 
         # Clean up
@@ -196,6 +205,7 @@ async def main():
     except Exception as e:
         print(f"✗ Error: {e}")
         import traceback
+
         traceback.print_exc()
 
 

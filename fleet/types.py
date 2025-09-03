@@ -15,4 +15,4 @@ if TYPE_CHECKING:
 
 # Union type to support both async and sync verifiers
 # This definition works for both the async and sync versions of the codebase
-VerifierFunction = Union["SyncVerifierFunction", "AsyncVerifierFunction"] 
+VerifierFunction = Union["SyncVerifierFunction", "AsyncVerifierFunction"]

@@ -67,7 +67,7 @@ __all__ = [
     "AsyncEnv",
     # Models
     "InstanceResponse",
-    "SyncEnv", 
+    "SyncEnv",
     "Resource",
     "ResetResponse",
     # Task models
@@ -75,16 +75,16 @@ __all__ = [
     "VerifierFunction",
     # Exceptions
     "FleetError",
-    "FleetAPIError", 
+    "FleetAPIError",
     "FleetTimeoutError",
     "FleetConfigurationError",
     # Verifiers (async is default)
     "verifier",
-    "verifier_sync", 
+    "verifier_sync",
     "AsyncVerifierFunction",
     "SyncVerifierFunction",
     "DatabaseSnapshot",
-    "IgnoreConfig", 
+    "IgnoreConfig",
     "SnapshotDiff",
     "TASK_FAILED_SCORE",
     "TASK_SUCCESSFUL_SCORE",
@@ -121,12 +121,18 @@ def configure(
     """
     if max_retries is None:
         from .config import DEFAULT_MAX_RETRIES as _MR
+
         max_retries = _MR
     if timeout is None:
         from .config import DEFAULT_TIMEOUT as _TO
+
         timeout = _TO
-    _global_client.configure(api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout)
-    _async_global_client.configure(api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout)
+    _global_client.configure(
+        api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout
+    )
+    _async_global_client.configure(
+        api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout
+    )
 
 
 def get_client() -> Fleet:

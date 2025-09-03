@@ -9,9 +9,9 @@ from .verifier import (
 
 __all__ = [
     "DatabaseSnapshot",
-    "IgnoreConfig", 
+    "IgnoreConfig",
     "SnapshotDiff",
     "TASK_SUCCESSFUL_SCORE",
     "verifier",
     "AsyncVerifierFunction",
-] 
+]

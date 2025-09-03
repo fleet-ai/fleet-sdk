@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 def main():
     env = fleet.env.make("fira")
 

@@ -14,12 +14,17 @@ if TYPE_CHECKING:
 
 
 # Import types from verifiers module
-from fleet.verifiers.db import IgnoreConfig, _get_row_identifier, _format_row_for_error, _values_equivalent
+from fleet.verifiers.db import (
+    IgnoreConfig,
+    _get_row_identifier,
+    _format_row_for_error,
+    _values_equivalent,
+)
 
 
 class AsyncDatabaseSnapshot:
     """Async database snapshot that fetches data through API and stores locally for diffing."""
-    
+
     def __init__(self, resource: "AsyncSQLiteResource", name: str | None = None):
         self.resource = resource
         self.name = name or f"snapshot_{datetime.utcnow().isoformat()}"
@@ -27,51 +32,52 @@ class AsyncDatabaseSnapshot:
         self._data: dict[str, list[dict[str, Any]]] = {}
         self._schemas: dict[str, list[str]] = {}
         self._fetched = False
-        
+
     async def _ensure_fetched(self):
         """Fetch all data from remote database if not already fetched."""
         if self._fetched:
             return
-            
+
         # Get all tables
         tables_response = await self.resource.query(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         )
-        
+
         if not tables_response.rows:
             self._fetched = True
             return
-            
+
         table_names = [row[0] for row in tables_response.rows]
-        
+
         # Fetch data from each table
         for table in table_names:
             # Get table schema
             schema_response = await self.resource.query(f"PRAGMA table_info({table})")
             if schema_response.rows:
-                self._schemas[table] = [row[1] for row in schema_response.rows]  # Column names
-            
+                self._schemas[table] = [
+                    row[1] for row in schema_response.rows
+                ]  # Column names
+
             # Get all data
             data_response = await self.resource.query(f"SELECT * FROM {table}")
             if data_response.rows and data_response.columns:
                 self._data[table] = [
-                    dict(zip(data_response.columns, row))
-                    for row in data_response.rows
+                    dict(zip(data_response.columns, row)) for row in data_response.rows
                 ]
             else:
                 self._data[table] = []
-                
+
         self._fetched = True
-        
+
     async def tables(self) -> list[str]:
         """Get list of all tables in the snapshot."""
         await self._ensure_fetched()
         return list(self._data.keys())
-        
+
     def table(self, table_name: str) -> "AsyncSnapshotQueryBuilder":
         """Create a query builder for snapshot data."""
         return AsyncSnapshotQueryBuilder(self, table_name)
-        
+
     async def diff(
         self,
         other: "AsyncDatabaseSnapshot",
@@ -85,7 +91,7 @@ class AsyncDatabaseSnapshot:
 
 class AsyncSnapshotQueryBuilder:
     """Query builder that works on local snapshot data."""
-    
+
     def __init__(self, snapshot: AsyncDatabaseSnapshot, table: str):
         self._snapshot = snapshot
         self._table = table
@@ -94,62 +100,59 @@ class AsyncSnapshotQueryBuilder:
         self._limit: int | None = None
         self._order_by: str | None = None
         self._order_desc: bool = False
-        
+
     async def _get_data(self) -> list[dict[str, Any]]:
         """Get table data from snapshot."""
         await self._snapshot._ensure_fetched()
         return self._snapshot._data.get(self._table, [])
-        
+
     def eq(self, column: str, value: Any) -> "AsyncSnapshotQueryBuilder":
         qb = self._clone()
         qb._conditions.append((column, "=", value))
         return qb
-        
+
     def limit(self, n: int) -> "AsyncSnapshotQueryBuilder":
         qb = self._clone()
         qb._limit = n
         return qb
-        
+
     def sort(self, column: str, desc: bool = False) -> "AsyncSnapshotQueryBuilder":
         qb = self._clone()
         qb._order_by = column
         qb._order_desc = desc
         return qb
-        
+
     async def first(self) -> dict[str, Any] | None:
         rows = await self.all()
         return rows[0] if rows else None
-        
+
     async def all(self) -> list[dict[str, Any]]:
         data = await self._get_data()
-        
+
         # Apply filters
         filtered = data
         for col, op, val in self._conditions:
             if op == "=":
                 filtered = [row for row in filtered if row.get(col) == val]
-                
+
         # Apply sorting
         if self._order_by:
             filtered = sorted(
-                filtered,
-                key=lambda r: r.get(self._order_by),
-                reverse=self._order_desc
+                filtered, key=lambda r: r.get(self._order_by), reverse=self._order_desc
             )
-            
+
         # Apply limit
         if self._limit is not None:
-            filtered = filtered[:self._limit]
-            
+            filtered = filtered[: self._limit]
+
         # Apply column selection
         if self._select_cols != ["*"]:
             filtered = [
-                {col: row.get(col) for col in self._select_cols}
-                for row in filtered
+                {col: row.get(col) for col in self._select_cols} for row in filtered
             ]
-            
+
         return filtered
-        
+
     async def assert_exists(self):
         row = await self.first()
         if row is None:
@@ -164,7 +167,7 @@ class AsyncSnapshotQueryBuilder:
                 error_msg += f"\nConditions: {conditions_str}"
             raise AssertionError(error_msg)
         return self
-        
+
     def _clone(self) -> "AsyncSnapshotQueryBuilder":
         qb = AsyncSnapshotQueryBuilder(self._snapshot, self._table)
         qb._select_cols = list(self._select_cols)
@@ -177,7 +180,7 @@ class AsyncSnapshotQueryBuilder:
 
 class AsyncSnapshotDiff:
     """Compute & validate changes between two snapshots fetched via API."""
-    
+
     def __init__(
         self,
         before: AsyncDatabaseSnapshot,
@@ -188,62 +191,62 @@ class AsyncSnapshotDiff:
         self.after = after
         self.ignore_config = ignore_config or IgnoreConfig()
         self._cached: dict[str, Any] | None = None
-        
+
     async def _get_primary_key_columns(self, table: str) -> list[str]:
         """Get primary key columns for a table."""
         # Try to get from schema
         schema_response = await self.after.resource.query(f"PRAGMA table_info({table})")
         if not schema_response.rows:
             return ["id"]  # Default fallback
-            
+
         pk_columns = []
         for row in schema_response.rows:
             # row format: (cid, name, type, notnull, dflt_value, pk)
             if row[5] > 0:  # pk > 0 means it's part of primary key
                 pk_columns.append((row[5], row[1]))  # (pk_position, column_name)
-                
+
         if not pk_columns:
             # Try common defaults
             all_columns = [row[1] for row in schema_response.rows]
             if "id" in all_columns:
                 return ["id"]
             return ["rowid"]
-            
+
         # Sort by primary key position and return just the column names
         pk_columns.sort(key=lambda x: x[0])
         return [col[1] for col in pk_columns]
-        
+
     async def _collect(self):
         """Collect all differences between snapshots."""
         if self._cached is not None:
             return self._cached
-            
+
         all_tables = set(await self.before.tables()) | set(await self.after.tables())
         diff: dict[str, dict[str, Any]] = {}
-        
+
         for tbl in all_tables:
             if self.ignore_config.should_ignore_table(tbl):
                 continue
-                
+
             # Get primary key columns
             pk_columns = await self._get_primary_key_columns(tbl)
-            
+
             # Get data from both snapshots
             before_data = self.before._data.get(tbl, [])
             after_data = self.after._data.get(tbl, [])
-            
+
             # Create indexes by primary key
             def make_key(row: dict, pk_cols: list[str]) -> Any:
                 if len(pk_cols) == 1:
                     return row.get(pk_cols[0])
                 return tuple(row.get(col) for col in pk_cols)
-                
+
             before_index = {make_key(row, pk_columns): row for row in before_data}
             after_index = {make_key(row, pk_columns): row for row in after_data}
-            
+
             before_keys = set(before_index.keys())
             after_keys = set(after_index.keys())
-            
+
             # Find changes
             result = {
                 "table_name": tbl,
@@ -254,27 +257,23 @@ class AsyncSnapshotDiff:
                 "unchanged_count": 0,
                 "total_changes": 0,
             }
-            
+
             # Added rows
             for key in after_keys - before_keys:
-                result["added_rows"].append({
-                    "row_id": key,
-                    "data": after_index[key]
-                })
-                
+                result["added_rows"].append({"row_id": key, "data": after_index[key]})
+
             # Removed rows
             for key in before_keys - after_keys:
-                result["removed_rows"].append({
-                    "row_id": key,
-                    "data": before_index[key]
-                })
-                
+                result["removed_rows"].append(
+                    {"row_id": key, "data": before_index[key]}
+                )
+
             # Modified rows
             for key in before_keys & after_keys:
                 before_row = before_index[key]
                 after_row = after_index[key]
                 changes = {}
-                
+
                 for field in set(before_row.keys()) | set(after_row.keys()):
                     if self.ignore_config.should_ignore_field(tbl, field):
                         continue
@@ -282,31 +281,33 @@ class AsyncSnapshotDiff:
                     after_val = after_row.get(field)
                     if not _values_equivalent(before_val, after_val):
                         changes[field] = {"before": before_val, "after": after_val}
-                        
+
                 if changes:
-                    result["modified_rows"].append({
-                        "row_id": key,
-                        "changes": changes,
-                        "data": after_row  # Current state
-                    })
+                    result["modified_rows"].append(
+                        {
+                            "row_id": key,
+                            "changes": changes,
+                            "data": after_row,  # Current state
+                        }
+                    )
                 else:
                     result["unchanged_count"] += 1
-                    
+
             result["total_changes"] = (
-                len(result["added_rows"]) +
-                len(result["removed_rows"]) +
-                len(result["modified_rows"])
+                len(result["added_rows"])
+                + len(result["removed_rows"])
+                + len(result["modified_rows"])
             )
-            
+
             diff[tbl] = result
-            
+
         self._cached = diff
         return diff
-        
+
     async def expect_only(self, allowed_changes: list[dict[str, Any]]):
         """Ensure only specified changes occurred."""
         diff = await self._collect()
-        
+
         def _is_change_allowed(
             table: str, row_id: Any, field: str | None, after_value: Any
         ) -> bool:
@@ -317,7 +318,7 @@ class AsyncSnapshotDiff:
                 pk_match = (
                     str(allowed_pk) == str(row_id) if allowed_pk is not None else False
                 )
-                
+
                 if (
                     allowed["table"] == table
                     and pk_match
@@ -326,57 +327,65 @@ class AsyncSnapshotDiff:
                 ):
                     return True
             return False
-            
+
         # Collect all unexpected changes
         unexpected_changes = []
-        
+
         for tbl, report in diff.items():
             for row in report.get("modified_rows", []):
                 for f, vals in row["changes"].items():
                     if self.ignore_config.should_ignore_field(tbl, f):
                         continue
                     if not _is_change_allowed(tbl, row["row_id"], f, vals["after"]):
-                        unexpected_changes.append({
-                            "type": "modification",
-                            "table": tbl,
-                            "row_id": row["row_id"],
-                            "field": f,
-                            "before": vals.get("before"),
-                            "after": vals["after"],
-                            "full_row": row,
-                        })
-                        
+                        unexpected_changes.append(
+                            {
+                                "type": "modification",
+                                "table": tbl,
+                                "row_id": row["row_id"],
+                                "field": f,
+                                "before": vals.get("before"),
+                                "after": vals["after"],
+                                "full_row": row,
+                            }
+                        )
+
             for row in report.get("added_rows", []):
                 if not _is_change_allowed(tbl, row["row_id"], None, "__added__"):
-                    unexpected_changes.append({
-                        "type": "insertion",
-                        "table": tbl,
-                        "row_id": row["row_id"],
-                        "field": None,
-                        "after": "__added__",
-                        "full_row": row,
-                    })
-                    
+                    unexpected_changes.append(
+                        {
+                            "type": "insertion",
+                            "table": tbl,
+                            "row_id": row["row_id"],
+                            "field": None,
+                            "after": "__added__",
+                            "full_row": row,
+                        }
+                    )
+
             for row in report.get("removed_rows", []):
                 if not _is_change_allowed(tbl, row["row_id"], None, "__removed__"):
-                    unexpected_changes.append({
-                        "type": "deletion",
-                        "table": tbl,
-                        "row_id": row["row_id"],
-                        "field": None,
-                        "after": "__removed__",
-                        "full_row": row,
-                    })
-                    
+                    unexpected_changes.append(
+                        {
+                            "type": "deletion",
+                            "table": tbl,
+                            "row_id": row["row_id"],
+                            "field": None,
+                            "after": "__removed__",
+                            "full_row": row,
+                        }
+                    )
+
         if unexpected_changes:
             # Build comprehensive error message
             error_lines = ["Unexpected database changes detected:"]
             error_lines.append("")
-            
+
             for i, change in enumerate(unexpected_changes[:5], 1):
-                error_lines.append(f"{i}. {change['type'].upper()} in table '{change['table']}':")
+                error_lines.append(
+                    f"{i}. {change['type'].upper()} in table '{change['table']}':"
+                )
                 error_lines.append(f"   Row ID: {change['row_id']}")
-                
+
                 if change["type"] == "modification":
                     error_lines.append(f"   Field: {change['field']}")
                     error_lines.append(f"   Before: {repr(change['before'])}")
@@ -385,7 +394,7 @@ class AsyncSnapshotDiff:
                     error_lines.append("   New row added")
                 elif change["type"] == "deletion":
                     error_lines.append("   Row deleted")
-                    
+
                 # Show some context from the row
                 if "full_row" in change and change["full_row"]:
                     row_data = change["full_row"]
@@ -394,13 +403,15 @@ class AsyncSnapshotDiff:
                             row_data.get("data", {}), max_fields=5
                         )
                         error_lines.append(f"   Row data: {formatted_row}")
-                        
+
                 error_lines.append("")
-                
+
             if len(unexpected_changes) > 5:
-                error_lines.append(f"... and {len(unexpected_changes) - 5} more unexpected changes")
+                error_lines.append(
+                    f"... and {len(unexpected_changes) - 5} more unexpected changes"
+                )
                 error_lines.append("")
-                
+
             # Show what changes were allowed
             error_lines.append("Allowed changes were:")
             if allowed_changes:
@@ -412,18 +423,20 @@ class AsyncSnapshotDiff:
                         f"After: {repr(allowed.get('after'))}"
                     )
                 if len(allowed_changes) > 3:
-                    error_lines.append(f"  ... and {len(allowed_changes) - 3} more allowed changes")
+                    error_lines.append(
+                        f"  ... and {len(allowed_changes) - 3} more allowed changes"
+                    )
             else:
                 error_lines.append("  (No changes were allowed)")
-                
+
             raise AssertionError("\n".join(error_lines))
-            
+
         return self
 
 
 class AsyncQueryBuilder:
     """Async query builder that translates DSL to SQL and executes through the API."""
-    
+
     def __init__(self, resource: "AsyncSQLiteResource", table: str):
         self._resource = resource
         self._table = table
@@ -508,10 +521,7 @@ class AsyncQueryBuilder:
 
         # Joins
         for tbl, onmap in self._joins:
-            join_clauses = [
-                f"{self._table}.{l} = {tbl}.{r}"
-                for l, r in onmap.items()
-            ]
+            join_clauses = [f"{self._table}.{l} = {tbl}.{r}" for l, r in onmap.items()]
             sql.append(f"JOIN {tbl} ON {' AND '.join(join_clauses)}")
 
         # WHERE
@@ -558,10 +568,7 @@ class AsyncQueryBuilder:
         if not response.rows:
             return []
         # Convert List[List] to List[dict] using column names
-        return [
-            dict(zip(response.columns or [], row))
-            for row in response.rows
-        ]
+        return [dict(zip(response.columns or [], row)) for row in response.rows]
 
     # Assertions
     async def assert_exists(self):
@@ -679,17 +686,21 @@ class AsyncSQLiteResource(Resource):
         ignore_config: IgnoreConfig | None = None,
     ) -> AsyncSnapshotDiff:
         """Compare this database with another AsyncSQLiteResource.
-        
+
         Args:
             other: Another AsyncSQLiteResource to compare against
             ignore_config: Optional configuration for ignoring specific tables/fields
-            
+
         Returns:
             AsyncSnapshotDiff: Object containing the differences between the two databases
         """
         # Create snapshots of both databases
-        before_snapshot = await self.snapshot(name=f"before_{datetime.utcnow().isoformat()}")
-        after_snapshot = await other.snapshot(name=f"after_{datetime.utcnow().isoformat()}")
-        
+        before_snapshot = await self.snapshot(
+            name=f"before_{datetime.utcnow().isoformat()}"
+        )
+        after_snapshot = await other.snapshot(
+            name=f"after_{datetime.utcnow().isoformat()}"
+        )
+
         # Return the diff between the snapshots
         return await before_snapshot.diff(after_snapshot, ignore_config)

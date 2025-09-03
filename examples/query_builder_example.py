@@ -21,7 +21,7 @@ async def main():
 
         # Example 1: Query with the builder pattern
         print("\n=== Query Builder Examples ===")
-        
+
         # Find all entries of type 'deal'
         print("\n1. Finding all deals:")
         deals = await db.table("entries").eq("type", "deal").all()
@@ -86,14 +86,18 @@ async def main():
         )
         """
         await db.exec(insert_query)
-        
+
         # Verify insertion with query builder
         new_deal = await db.table("entries").eq("id", 99999).first()
         if new_deal:
             print(f"✓ Successfully inserted: {new_deal['name']}")
-            
+
             # Assert specific field value
-            await db.table("entries").eq("id", 99999).assert_eq("name", "Test Deal via Query Builder")
+            await (
+                db.table("entries")
+                .eq("id", 99999)
+                .assert_eq("name", "Test Deal via Query Builder")
+            )
             print("✓ Name assertion passed")
 
         # Using IN clause
@@ -114,4 +118,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())

@@ -41,5 +41,3 @@ def reset_client() -> None:
     """Reset the global default client. A new one will be created on next access."""
     global _default_client
     _default_client = None
-
-

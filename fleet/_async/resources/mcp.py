@@ -24,6 +24,7 @@ class AsyncMCPResource:
 
     async def list_tools(self):
         import aiohttp
+
         """
         Make an async request to list available tools from the MCP endpoint.
         
@@ -31,20 +32,15 @@ class AsyncMCPResource:
             List of available tools with name, description, and input_schema
         """
         async with aiohttp.ClientSession() as session:
-            payload = {
-                "jsonrpc": "2.0",
-                "method": "tools/list",
-                "params": {},
-                "id": 2
-            }
-            
+            payload = {"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": 2}
+
             async with session.post(self.url, json=payload) as response:
                 data = await response.json()
-                
+
                 # Extract tools from the response
                 if "result" in data and "tools" in data["result"]:
                     tools = data["result"]["tools"]
-                    
+
                     available_tools = [
                         {
                             "name": tool.get("name"),
@@ -53,7 +49,7 @@ class AsyncMCPResource:
                         }
                         for tool in tools
                     ]
-                    
+
                     return available_tools
                 else:
                     # Handle error or empty response
