@@ -34,7 +34,6 @@ from .models import (
     TaskRequest,
 )
 from .tasks import Task
-from .verifiers.parse import extract_function_name, convert_new_to_old_verifier
 
 if TYPE_CHECKING:
     from .verifiers import SyncVerifierFunction
@@ -463,7 +462,7 @@ class Fleet:
     def _create_verifier_from_data(
         self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str
     ) -> "SyncVerifierFunction":
-        """Create an AsyncVerifierFunction from verifier data.
+        """Create a SyncVerifierFunction from verifier data.
 
         Args:
             verifier_id: The verifier ID
@@ -472,72 +471,25 @@ class Fleet:
             verifier_sha: The verifier SHA256
 
         Returns:
-            AsyncVerifierFunction created from the verifier code
+            SyncVerifierFunction created from the verifier code
         """
+        from .tasks import verifier_from_string
         from .verifiers.verifier import SyncVerifierFunction
-
-        # Convert async verifier code to sync
-        if "async def" in verifier_code:
-            verifier_code = verifier_code.replace("async def", "def")
-        if "await " in verifier_code:
-            verifier_code = verifier_code.replace("await ", "")
-
-        # Check if this is a new format verifier (has before/after parameters)
-        if (
-            "before: DatabaseSnapshot" in verifier_code
-            and "after: DatabaseSnapshot" in verifier_code
-        ):
-            # Convert new format to old format
-            verifier_code = convert_new_to_old_verifier(verifier_code)
-            # Update function name since wrapper adds _wrapper suffix
-            original_name = extract_function_name(verifier_code.split("\n")[0])
-            if original_name and original_name.endswith("_wrapper"):
-                function_name = original_name
-            else:
-                function_name = extract_function_name(verifier_code)
-        else:
-            # Extract function name from code
-            function_name = extract_function_name(verifier_code)
-
-        if not function_name:
-            raise ValueError(
-                f"Could not extract function name from verifier {verifier_id}"
-            )
-
-        # Create a function object from the code
-        # Import necessary classes for the namespace
-        from .verifiers.db import IgnoreConfig, DatabaseSnapshot
-
-        # Create a namespace for the function
-        namespace = {
-            "__builtins__": __builtins__,
-            "Environment": object,  # Placeholder, will be provided at runtime
-            "IgnoreConfig": IgnoreConfig,
-            "DatabaseSnapshot": DatabaseSnapshot,
-            "TASK_FAILED_SCORE": 0,
-            "TASK_SUCCESSFUL_SCORE": 1,
-        }
-
-        # Execute the code to define the function
-        exec(verifier_code, namespace)
-
-        # Get the function object
-        if function_name not in namespace:
-            raise ValueError(f"Function {function_name} not found in verifier code")
-
-        func = namespace[function_name]
-
-        # Create and return AsyncVerifierFunction with SHA if available
-        # Since the function was created via exec, we need to provide the raw code
-        verifier_func = SyncVerifierFunction(
-            func=func,
-            key=verifier_key,
-            extra_requirements=[],
+        
+        # Use verifier_from_string to create the verifier
+        verifier_func = verifier_from_string(
+            verifier_func=verifier_code,
             verifier_id=verifier_id,
-            sha256=verifier_sha,  # Pass SHA directly to constructor
-            raw_code=verifier_code,  # Provide raw code since func won't have extractable source
+            verifier_key=verifier_key,
+            sha256=verifier_sha,
         )
-
+        
+        # Ensure we return a SyncVerifierFunction
+        if not isinstance(verifier_func, SyncVerifierFunction):
+            raise TypeError(
+                f"Expected SyncVerifierFunction but got {type(verifier_func).__name__}"
+            )
+        
         # Store the original verifier code for reference
         verifier_func._verifier_code = verifier_code
 
