@@ -162,13 +162,6 @@ class SyncVerifierFunction:
 
     def remote(self, env: SyncEnv, *args, **kwargs) -> float:
         """Remote execution of the verifier function with SHA-based bundle caching."""
-        # Async verifiers are now supported by the backend
-        # if self._is_async:
-        #     raise NotImplementedError(
-        #         f"Async verifier '{self.key}' cannot be executed remotely. "
-        #         "The remote execution environment only supports synchronous functions. "
-        #         "Please provide a synchronous version of your verifier."
-        #     )
 
         args_array = list(args)
         args_array.append({"env": env.instance_id})
@@ -217,6 +210,8 @@ class SyncVerifierFunction:
                 )
 
             # Handle response
+            if response.stdout:
+                print(response.stdout)
             if response.success:
                 return self._process_result(response.result)
             else:

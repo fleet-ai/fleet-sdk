@@ -8,8 +8,12 @@ def validate_finish_blue_green_deployment(
     env, final_answer: str | None = None
 ) -> int:
     """Validate that DEBT-722 and DEBT-720 are marked as Done"""
+    # Ensure resources are loaded for remote execution
+    env.instance.load()
     before = env.db("seed")
     after = env.db("current")
+
+    print("test")
 
     # Check final state
     try:
@@ -58,8 +62,17 @@ def validate_finish_blue_green_deployment(
 
 
 def main():
-    env = fleet.env.make("fira:v1.3.1")
+    env = fleet.env.make("fira")
     print(f"New Instance: {env.instance_id}")
+    
+    # Check available resources
+    try:
+        resources = env.instance.resources()
+        print("Available resources:")
+        for resource in resources:
+            print(f"  - {resource.type}: {resource.name}")
+    except Exception as e:
+        print(f"Could not list resources: {e}")
 
     print(validate_finish_blue_green_deployment(env))
     print(validate_finish_blue_green_deployment.remote(env))

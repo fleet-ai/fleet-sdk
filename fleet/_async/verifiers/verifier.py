@@ -217,6 +217,8 @@ class AsyncVerifierFunction:
                 )
 
             # Handle response
+            if response.stdout:
+                print(response.stdout)
             if response.success:
                 return self._process_result(response.result)
             else:
