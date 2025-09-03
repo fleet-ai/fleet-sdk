@@ -70,18 +70,18 @@ class AsyncEnv(EnvironmentBase):
                 self.manager_url, self._client.httpx_client if self._client else None
             )
         return self._instance
-    
+
     def app(self, name: str) -> AsyncInstanceClient:
         if name not in self._apps:
             # Extract base URL by removing the current app path (e.g., /sentry/api/v1/env)
             # manager_url looks like: https://xxx.fleetai.com/sentry/api/v1/env
-            base_url = self.manager_url.split('/api/v1/env')[0]
+            base_url = self.manager_url.split("/api/v1/env")[0]
             # Remove the current app name (e.g., /sentry) to get the root
-            if '/' in base_url:
-                parts = base_url.rsplit('/', 1)
+            if "/" in base_url:
+                parts = base_url.rsplit("/", 1)
                 if len(parts) == 2 and parts[0] != "https:/":
                     base_url = parts[0]
-            
+
             self._apps[name] = AsyncInstanceClient(
                 f"{base_url}/{name}/api/v1/env",
                 self._client.httpx_client if self._client else None,
@@ -131,28 +131,28 @@ class AsyncEnv(EnvironmentBase):
         return await _check_bundle_exists(self._load_client, bundle_hash)
 
     async def execute_verifier_remote(
-        self, 
-        bundle_data: bytes, 
+        self,
+        bundle_data: bytes,
         bundle_sha: str,
         key: str,
         function_name: str,
-        args: tuple, 
+        args: tuple,
         args_array: list,
-        kwargs: dict, 
+        kwargs: dict,
         timeout: Optional[int] = 30,
         needs_upload: bool = True,
     ) -> VerifiersExecuteResponse:
         return await _execute_verifier_remote(
-            self._load_client, 
-            bundle_data, 
+            self._load_client,
+            bundle_data,
             bundle_sha,
             key,
             function_name,
-            args, 
+            args,
             args_array,
-            kwargs, 
+            kwargs,
             timeout,
-            needs_upload
+            needs_upload,
         )
 
     def __getstate__(self):
@@ -195,18 +195,22 @@ class AsyncFleet:
         response = await self.client.request("GET", f"/v1/env/{env_key}")
         return EnvironmentModel(**response.json())
 
-    async def make(
-        self, env_key: str, region: Optional[str] = None
-    ) -> AsyncEnv:
+    async def make(self, env_key: str, region: Optional[str] = None) -> AsyncEnv:
         if ":" in env_key:
             env_key_part, version = env_key.split(":", 1)
-            if not version.startswith("v") and len(version) != 0 and version[0].isdigit():
+            if (
+                not version.startswith("v")
+                and len(version) != 0
+                and version[0].isdigit()
+            ):
                 version = f"v{version}"
         else:
             env_key_part = env_key
             version = None
 
-        request = InstanceRequest(env_key=env_key_part, version=version, region=region, created_from="sdk")
+        request = InstanceRequest(
+            env_key=env_key_part, version=version, region=region, created_from="sdk"
+        )
         region_base_url = REGION_BASE_URL.get(region)
         response = await self.client.request(
             "POST",
@@ -257,12 +261,14 @@ class AsyncFleet:
         return await _delete_instance(self.client, instance_id)
 
     async def load_tasks_from_file(self, filename: str) -> List[Task]:
-        with open(filename, 'r', encoding='utf-8') as f:
+        with open(filename, "r", encoding="utf-8") as f:
             tasks_data = f.read()
 
         return self.load_task_array_from_string(tasks_data)
 
-    async def load_task_array_from_string(self, serialized_tasks: List[Dict]) -> List[Task]:
+    async def load_task_array_from_string(
+        self, serialized_tasks: List[Dict]
+    ) -> List[Task]:
         tasks = []
 
         json_tasks = json.loads(serialized_tasks)
@@ -277,55 +283,57 @@ class AsyncFleet:
 
     async def load_task_from_json(self, task_json: Dict) -> Task:
         try:
-            if 'verifier_id' in task_json and task_json['verifier_id']:
+            if "verifier_id" in task_json and task_json["verifier_id"]:
                 verifier = self._create_verifier_from_data(
-                    verifier_id=task_json['verifier_id'],
-                    verifier_key=task_json['key'],
-                    verifier_code=task_json['verifier_func'],
-                    verifier_sha=task_json.get('verifier_sha', '')
+                    verifier_id=task_json["verifier_id"],
+                    verifier_key=task_json["key"],
+                    verifier_code=task_json["verifier_func"],
+                    verifier_sha=task_json.get("verifier_sha", ""),
                 )
         except Exception as e:
             logger.warning(f"Failed to create verifier {task_json['key']}: {e}")
-        
+
         task = Task(
-            key=task_json['key'],
-            prompt=task_json['prompt'],
-            env_id=task_json['env_id'],  # Use env_id from the data
-            created_at=task_json['created_at'],
-            version=task_json.get('version'),
-            env_variables=task_json.get('env_variables', {}),
-            verifier_func=task_json.get('verifier_func'),  # Set verifier code
+            key=task_json["key"],
+            prompt=task_json["prompt"],
+            env_id=task_json["env_id"],  # Use env_id from the data
+            created_at=task_json["created_at"],
+            version=task_json.get("version"),
+            env_variables=task_json.get("env_variables", {}),
+            verifier_func=task_json.get("verifier_func"),  # Set verifier code
             verifier=verifier,  # Use created verifier or None
-            metadata=task_json.get('metadata', {})  # Default empty metadata
+            metadata=task_json.get("metadata", {}),  # Default empty metadata
         )
         return task
 
     async def load_tasks(self, env_key: Optional[str] = None) -> List[Task]:
         """Load tasks for the authenticated team, optionally filtered by environment.
-        
+
         Args:
             env_key: Optional environment key to filter tasks by
-            
+
         Returns:
             List[Task] containing Task objects
         """
         params = {}
         if env_key is not None:
             params["env_key"] = env_key
-            
+
         response = await self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
-        
+
         # Transform TaskResponse objects to Task objects
         tasks = []
         for task_response in task_list_response.tasks:
             # Create verifier function if verifier data is present
             verifier = None
             verifier_func = task_response.verifier_func
-            
+
             if task_response.verifier:
                 embedded_code = task_response.verifier.code or ""
-                is_embedded_error = embedded_code.strip().startswith("<error loading code:")
+                is_embedded_error = embedded_code.strip().startswith(
+                    "<error loading code:"
+                )
                 if not is_embedded_error:
                     # Only override if the embedded code looks valid
                     verifier_func = embedded_code
@@ -335,10 +343,12 @@ class AsyncFleet:
                             verifier_id=task_response.verifier.verifier_id,
                             verifier_key=task_response.verifier.key,
                             verifier_code=embedded_code,
-                            verifier_sha=task_response.verifier.sha256
+                            verifier_sha=task_response.verifier.sha256,
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to create verifier {task_response.verifier.key}: {e}")
+                        logger.warning(
+                            f"Failed to create verifier {task_response.verifier.key}: {e}"
+                        )
                 else:
                     # Fallback: try fetching by ID if embedded code failed to load
                     try:
@@ -346,13 +356,15 @@ class AsyncFleet:
                             f"Embedded verifier code missing for {task_response.verifier.key} (NoSuchKey). "
                             f"Attempting to refetch by id {task_response.verifier.verifier_id}"
                         )
-                        verifier = await self._load_verifier(task_response.verifier.verifier_id)
+                        verifier = await self._load_verifier(
+                            task_response.verifier.verifier_id
+                        )
                     except Exception as e:
                         logger.warning(
                             f"Refetch by verifier id failed for {task_response.verifier.key}: {e}. "
                             "Leaving verifier unset."
                         )
-            
+
             task = Task(
                 key=task_response.key,
                 prompt=task_response.prompt,
@@ -362,19 +374,21 @@ class AsyncFleet:
                 env_variables=task_response.env_variables or {},
                 verifier_func=verifier_func,  # Set verifier code
                 verifier=verifier,  # Use created verifier or None
-                metadata={}  # Default empty metadata
+                metadata={},  # Default empty metadata
             )
             tasks.append(task)
-        
+
         return tasks
 
-    async def export_tasks(self, env_key: Optional[str] = None, filename: Optional[str] = None):
+    async def export_tasks(
+        self, env_key: Optional[str] = None, filename: Optional[str] = None
+    ):
         """Export tasks for the authenticated team, optionally filtered by environment.
-        
+
         Args:
             env_key: Optional environment key to filter tasks by
             filename: Optional filename to write tasks to. If not provided, defaults to 'tasks.json' or 'tasks_{env_key}.json'
-            
+
         Returns:
             str: Path to the exported file if tasks were written, None if no tasks found
         """
@@ -386,38 +400,38 @@ class AsyncFleet:
                     filename = f"tasks_{env_key}.json"
                 else:
                     filename = "tasks.json"
-            
+
             # Convert tasks to serializable format
             tasks_data = []
             for task in tasks:
                 task_dict = task.model_dump()
                 # Remove non-serializable verifier object, keep verifier_func (code string)
-                if 'verifier' in task_dict:
-                    task_dict.pop('verifier')
+                if "verifier" in task_dict:
+                    task_dict.pop("verifier")
                 tasks_data.append(task_dict)
-            
+
             # Write to JSON file
-            with open(filename, 'w', encoding='utf-8') as f:
+            with open(filename, "w", encoding="utf-8") as f:
                 json.dump(tasks_data, f, indent=2, default=str)
-            
+
             logger.info(f"Exported {len(tasks)} tasks to {filename}")
             return filename
         else:
             logger.info("No tasks found to export")
             return None
-            
+
     async def import_tasks(self, filename: str):
         """Import tasks from a JSON file.
-        
+
         Args:
             filename: Path to the JSON file of Task objects to import
-            
+
         Returns:
             List[Task] containing imported Task objects
         """
-        with open(filename, 'r', encoding='utf-8') as f:
+        with open(filename, "r", encoding="utf-8") as f:
             tasks_data = json.load(f)
-            
+
         # Create tasks from the loaded data
         tasks = []
         for task_data in tasks_data:
@@ -434,11 +448,12 @@ class AsyncFleet:
                 env_variables=task.env_variables or {},
             )
             try:
-                response = await self.client.request("POST", "/v1/tasks", json=payload.model_dump())
+                response = await self.client.request(
+                    "POST", "/v1/tasks", json=payload.model_dump()
+                )
             except Exception as e:
                 logger.error(f"Failed to import task {task.key}: {e}")
                 continue
-
 
     async def account(self) -> AccountResponse:
         """Get account information including instance limits and usage.
@@ -448,67 +463,68 @@ class AsyncFleet:
         """
         response = await self.client.request("GET", "/v1/account")
         return AccountResponse(**response.json())
-    
+
     async def _create_verifier_from_data(
-        self, 
-        verifier_id: str,
-        verifier_key: str,
-        verifier_code: str,
-        verifier_sha: str
+        self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str
     ) -> "AsyncVerifierFunction":
         """Create an AsyncVerifierFunction from verifier data.
-        
+
         Args:
             verifier_id: The verifier ID
             verifier_key: The verifier key
             verifier_code: The verifier code
             verifier_sha: The verifier SHA256
-            
+
         Returns:
             AsyncVerifierFunction created from the verifier code
         """
         from .verifiers.verifier import AsyncVerifierFunction
-        
+
         # Check if this is a new format verifier (has before/after parameters)
-        if 'before: DatabaseSnapshot' in verifier_code and 'after: DatabaseSnapshot' in verifier_code:
+        if (
+            "before: DatabaseSnapshot" in verifier_code
+            and "after: DatabaseSnapshot" in verifier_code
+        ):
             # Convert new format to old format
             verifier_code = convert_new_to_old_verifier(verifier_code)
             # Update function name since wrapper adds _wrapper suffix
-            original_name = extract_function_name(verifier_code.split('\n')[0])
-            if original_name and original_name.endswith('_wrapper'):
+            original_name = extract_function_name(verifier_code.split("\n")[0])
+            if original_name and original_name.endswith("_wrapper"):
                 function_name = original_name
             else:
                 function_name = extract_function_name(verifier_code)
         else:
             # Extract function name from code
             function_name = extract_function_name(verifier_code)
-        
+
         if not function_name:
-            raise ValueError(f"Could not extract function name from verifier {verifier_id}")
-        
+            raise ValueError(
+                f"Could not extract function name from verifier {verifier_id}"
+            )
+
         # Create a function object from the code
         # Import necessary classes for the namespace
         from ..verifiers.db import IgnoreConfig, DatabaseSnapshot
-        
+
         # Create a namespace for the function
         namespace = {
-            '__builtins__': __builtins__,
-            'Environment': object,  # Placeholder, will be provided at runtime
-            'IgnoreConfig': IgnoreConfig,
-            'DatabaseSnapshot': DatabaseSnapshot,
-            'TASK_FAILED_SCORE': 0,
-            'TASK_SUCCESSFUL_SCORE': 1,
+            "__builtins__": __builtins__,
+            "Environment": object,  # Placeholder, will be provided at runtime
+            "IgnoreConfig": IgnoreConfig,
+            "DatabaseSnapshot": DatabaseSnapshot,
+            "TASK_FAILED_SCORE": 0,
+            "TASK_SUCCESSFUL_SCORE": 1,
         }
-        
+
         # Execute the code to define the function
         exec(verifier_code, namespace)
-        
+
         # Get the function object
         if function_name not in namespace:
             raise ValueError(f"Function {function_name} not found in verifier code")
-        
+
         func = namespace[function_name]
-        
+
         # Create and return AsyncVerifierFunction with SHA if available
         # Since the function was created via exec, we need to provide the raw code
         verifier_func = AsyncVerifierFunction(
@@ -517,33 +533,33 @@ class AsyncFleet:
             extra_requirements=[],
             verifier_id=verifier_id,
             sha256=verifier_sha,  # Pass SHA directly to constructor
-            raw_code=verifier_code  # Provide raw code since func won't have extractable source
+            raw_code=verifier_code,  # Provide raw code since func won't have extractable source
         )
-        
+
         # Store the original verifier code for reference
         verifier_func._verifier_code = verifier_code
-        
+
         return verifier_func
-    
+
     async def _load_verifier(self, verifier_id: str) -> "AsyncVerifierFunction":
         """Load a verifier by ID and create an AsyncVerifierFunction.
-        
+
         Args:
             verifier_id: The verifier ID to fetch
-            
+
         Returns:
             AsyncVerifierFunction created from the verifier code
         """
         # Fetch verifier from API
         response = await self.client.request("GET", f"/v1/verifier/{verifier_id}")
         verifier_data = response.json()
-        
+
         # Use the common method to create verifier
         return await self._create_verifier_from_data(
             verifier_id=verifier_id,
             verifier_key=verifier_data["key"],
             verifier_code=verifier_data["code"],
-            verifier_sha=verifier_data.get("sha256", "")
+            verifier_sha=verifier_data.get("sha256", ""),
         )
 
 
@@ -588,23 +604,29 @@ async def _execute_verifier_remote(
         "timeout": timeout,
         "region": "us-west-1",  # TODO: make configurable
     }
-    
+
     # Add bundle data only if upload is needed
     if needs_upload:
         bundle_b64 = base64.b64encode(bundle_data).decode("utf-8")
         request_data["bundle"] = bundle_b64
-    
+
     # Debug logging
-    logger.debug(f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}")
+    logger.debug(
+        f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}"
+    )
     logger.debug(f"Request has bundle: {needs_upload}")
     logger.debug(f"Using client with base_url: {client.base_url}")
     logger.debug(f"Request data keys: {list(request_data.keys())}")
-    logger.debug(f"Bundle size: {len(request_data.get('bundle', ''))} chars" if 'bundle' in request_data else "No bundle")
+    logger.debug(
+        f"Bundle size: {len(request_data.get('bundle', ''))} chars"
+        if "bundle" in request_data
+        else "No bundle"
+    )
 
     # Note: This should be called on the instance URL, not the orchestrator
     # The instance has manager URLs for verifier execution
     response = await client.request("POST", "/v1/verifiers/execute", json=request_data)
-    
+
     # Debug the response
     response_json = response.json()
     logger.debug(f"Verifier execute response: {response_json}")
