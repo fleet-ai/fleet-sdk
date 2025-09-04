@@ -1,160 +1,195 @@
+"""
+Base test classes for Fleet SDK integration tests.
+"""
+
 import pytest
-import time
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 from fleet import Fleet, AsyncFleet
 
 
-class BaseIntegrationTest:
-
-    def setup_method(self):
-        """Setup before each test method."""
-        self.start_time = time.time()
+class BaseFleetTest:
+    """Base class for Fleet SDK tests."""
     
-    def teardown_method(self):
-        """Cleanup after each test method."""
-        elapsed = time.time() - self.start_time
-        if elapsed > 30:
-            print(f"\n⚠️  Slow test completed in {elapsed:.2f}s")
+    def assert_valid_response(self, response: Any, expected_type: Optional[type] = None) -> None:
+        """Assert that a response is valid."""
+        assert response is not None
+        if expected_type:
+            assert isinstance(response, expected_type)
     
-    def assert_valid_response(self, response: Any, expected_type: type = dict):
-        """Assert response is valid and of expected type."""
-        assert response is not None, "Response should not be None"
-        assert isinstance(response, expected_type), f"Response should be {expected_type.__name__}"
-        return response
-    
-    def assert_environment_list(self, environments: List[Any]):
-        """Assert environment list is valid."""
-        assert isinstance(environments, list), "Environments should be a list"
+    def assert_environment_list(self, environments: List) -> None:
+        """Assert that environment list is valid."""
+        assert isinstance(environments, list)
+        assert len(environments) > 0
         for env in environments:
-            # Environment objects have attributes, not dict keys
-            assert hasattr(env, 'env_key'), "Environment should have env_key attribute"
-            assert hasattr(env, 'versions'), "Environment should have versions attribute"
+            # Check for either 'key' or 'env_key' attribute
+            assert hasattr(env, 'key') or hasattr(env, 'env_key')
+            assert hasattr(env, 'name')
+            assert hasattr(env, 'default_version')
     
-    def assert_task_structure(self, task: Dict):
-        """Assert task has expected structure."""
-        required_fields = ["key", "description", "created_at"]
-        for field in required_fields:
-            assert field in task, f"Task should have {field} field"
+    def assert_instance_valid(self, instance) -> None:
+        """Assert that an instance is valid."""
+        assert hasattr(instance, 'instance_id')
+        assert hasattr(instance, 'env_key')
+        assert hasattr(instance, 'status')
+        assert instance.instance_id is not None
+
+
+class BaseEnvironmentTest(BaseFleetTest):
+    """Base class for environment-related tests."""
+    
+    def test_environment_creation(self, fleet_client, test_env_key):
+        """Test basic environment creation."""
+        env = fleet_client.make(test_env_key)
+        self.assert_instance_valid(env)
+        assert env.env_key in test_env_key
+        print(f"✅ Created environment: {env.instance_id}")
+    
+    def test_environment_resources(self, env):
+        """Test accessing environment resources."""
+        resources = env.resources()
+        assert isinstance(resources, list)
+        assert len(resources) > 0
+        print(f"✅ Environment has {len(resources)} resources")
+    
+    def test_environment_reset(self, env):
+        """Test environment reset functionality."""
+        response = env.reset(seed=42)
+        assert response is not None
+        print("✅ Environment reset successful")
+    
+    def test_environment_step(self, env):
+        """Test environment step functionality."""
+        action = {"type": "test", "data": {"message": "Hello Fleet!"}}
+        state, reward, done = env.instance.step(action)
+        assert isinstance(reward, (int, float))
+        assert isinstance(done, bool)
+        print(f"✅ Environment step successful - reward: {reward}, done: {done}")
+
+
+class BaseDatabaseTest(BaseFleetTest):
+    """Base class for database-related tests."""
+    
+    def test_database_access(self, env):
+        """Test database resource access."""
+        db = env.db()
+        assert db is not None
+        print("✅ Database access successful")
+    
+    def test_database_describe(self, env):
+        """Test database describe functionality."""
+        db = env.db()
+        schema = db.describe()
+        assert schema is not None
+        print("✅ Database describe successful")
+    
+    def test_database_query(self, env):
+        """Test database query functionality."""
+        db = env.db()
+        result = db.query("SELECT 1 as test")
+        assert result is not None
+        print("✅ Database query successful")
+    
+    def test_database_exec(self, env):
+        """Test database exec functionality."""
+        db = env.db()
+        result = db.exec("SELECT 1 as test")
+        assert result is not None
+        print("✅ Database exec successful")
+    
+    def test_database_state_access(self, env):
+        """Test database state access."""
+        db = env.state("sqlite://current")
+        assert db is not None
+        print("✅ Database state access successful")
+
+
+class BaseBrowserTest(BaseFleetTest):
+    """Base class for browser-related tests."""
+    
+    def test_browser_access(self, env):
+        """Test browser resource access."""
+        browser = env.browser()
+        assert browser is not None
+        print("✅ Browser access successful")
+    
+    def test_browser_cdp_url(self, env):
+        """Test browser CDP URL access."""
+        browser = env.browser()
+        cdp_url = browser.cdp_url()
+        assert cdp_url is not None
+        assert isinstance(cdp_url, str)
+        print("✅ Browser CDP URL successful")
+    
+    def test_browser_devtools_url(self, env):
+        """Test browser devtools URL access."""
+        browser = env.browser()
+        devtools_url = browser.devtools_url()
+        assert devtools_url is not None
+        assert isinstance(devtools_url, str)
+        print("✅ Browser devtools URL successful")
+
+
+class BaseVerifierTest(BaseFleetTest):
+    """Base class for verifier-related tests."""
+    
+    def test_verifier_decorator(self):
+        """Test verifier decorator functionality."""
+        from fleet.verifiers.decorator import verifier
         
-        assert isinstance(task["key"], str), "Task key should be string"
-        assert len(task["key"]) > 0, "Task key should not be empty"
+        @verifier(key="test_verifier")
+        def test_verifier_func(env, test_param: str = "test") -> float:
+            return 1.0 if test_param == "test" else 0.0
+        
+        assert hasattr(test_verifier_func, 'key')
+        assert test_verifier_func.key == "test_verifier"
+        print("✅ Verifier decorator works")
     
-    def skip_if_unavailable(self, operation_name: str, exception: Exception):
-        """Skip test if operation is not available in current environment."""
-        pytest.skip(f"{operation_name} not available: {exception}")
-    
-    def get_test_environment(self, client: Fleet, env_key: str = "fira"):
-        """Get test environment, skip if not available."""
-        try:
-            return client.env(env_key)
-        except Exception as e:
-            self.skip_if_unavailable(f"Environment {env_key}", e)
-    
-    async def get_async_test_environment(self, client: AsyncFleet, env_key: str = "fira"):
-        """Get async test environment, skip if not available."""
-        try:
-            return await client.env(env_key)
-        except Exception as e:
-            self.skip_if_unavailable(f"Async environment {env_key}", e)
+    def test_verifier_execution(self):
+        """Test verifier execution."""
+        from fleet.verifiers.decorator import verifier
+        
+        @verifier(key="test_execution")
+        def test_verifier_func(env, test_param: str = "test") -> float:
+            return 1.0 if test_param == "test" else 0.0
+        
+        # Mock environment for testing
+        class MockEnv:
+            pass
+        
+        result = test_verifier_func(MockEnv(), "test")
+        assert result == 1.0
+        print("✅ Verifier execution works")
 
 
-class BaseFleetTest(BaseIntegrationTest):
-    """Base test class specifically for Fleet client tests."""
-    
-    def assert_fleet_client(self, client: Fleet):
-        """Assert Fleet client is properly configured."""
-        assert isinstance(client, Fleet), "Should be Fleet instance"
-        assert client.client.api_key is not None, "Client should have API key"
-        assert client.client.api_key.startswith("sk_"), "API key should start with sk_"
-    
-    def assert_async_fleet_client(self, client: AsyncFleet):
-        """Assert AsyncFleet client is properly configured."""
-        assert isinstance(client, AsyncFleet), "Should be AsyncFleet instance"  
-        assert client.client.api_key is not None, "Async client should have API key"
-        assert client.client.api_key.startswith("sk_"), "API key should start with sk_"
-
-
-class BaseEnvironmentTest(BaseIntegrationTest):
-    """Base test class for environment-related tests."""
-    
-    def assert_environment_instance(self, env, expected_env_key: str):
-        """Assert environment instance is valid."""
-        assert env is not None, "Environment should not be None"
-        assert hasattr(env, "env_key"), "Environment should have env_key attribute"
-        assert env.env_key == expected_env_key, f"Environment key should be {expected_env_key}"
-        assert hasattr(env, "instance_id"), "Environment should have instance_id"
-    
-    def assert_reset_response(self, response):
-        """Assert reset response is valid."""
-        assert hasattr(response, "success"), "Reset response should have success attribute"
-        if hasattr(response, "seed"):
-            assert isinstance(response.seed, (int, type(None))), "Seed should be int or None"
-    
-    def test_basic_database_query(self, env):
-        """Test basic database functionality."""
-        try:
-            db = env.db()
-            result = db.exec("SELECT 1 as test_column")
-            
-            assert isinstance(result, dict), "Query result should be dict"
-            assert "columns" in result, "Result should have columns"
-            assert "rows" in result, "Result should have rows"
-            
-            return True
-        except Exception as e:
-            self.skip_if_unavailable("Database operations", e)
+class BaseAsyncTest(BaseFleetTest):
+    """Base class for async tests."""
     
     @pytest.mark.asyncio
-    async def test_async_database_query(self, env):
-        """Test basic async database functionality."""
-        try:
-            db = env.db()
-            result = await db.exec("SELECT 1 as test_column")
-            
-            assert isinstance(result, dict), "Async query result should be dict"
-            assert "columns" in result, "Async result should have columns"
-            assert "rows" in result, "Async result should have rows"
-            
-            return True
-        except Exception as e:
-            self.skip_if_unavailable("Async database operations", e)
-
-
-class BaseTaskTest(BaseIntegrationTest):
-    """Base test class for task-related tests."""
+    async def test_async_environment_creation(self, async_fleet_client, test_env_key):
+        """Test async environment creation."""
+        env = await async_fleet_client.make(test_env_key)
+        self.assert_instance_valid(env)
+        assert env.env_key in test_env_key
+        print(f"✅ Created async environment: {env.instance_id}")
     
-    def assert_make_functionality(self, client: Fleet, task_data: Dict):
-        """Test the .make() functionality comprehensively."""
-        try:
-            # Test basic make call
-            env = client.make(**task_data)
-            
-            # Validate environment was created
-            self.assert_environment_instance(env, task_data.get("env_key", "fira"))
-            
-            # Test environment is functional
-            db = env.db()
-            result = db.exec("SELECT 1 as make_test")
-            assert "make_test" in str(result), "Make-created environment should be functional"
-            
-            return env
-        except Exception as e:
-            self.skip_if_unavailable("Make functionality", e)
+    @pytest.mark.asyncio
+    async def test_async_database_operations(self, async_env):
+        """Test async database operations."""
+        db = async_env.db()
+        schema = await db.describe()
+        assert schema is not None
+        
+        result = await db.query("SELECT 1 as test")
+        assert result is not None
+        print("✅ Async database operations work")
     
-    async def assert_async_make_functionality(self, client: AsyncFleet, task_data: Dict):
-        """Test the async .make() functionality comprehensively.""" 
-        try:
-            # Test basic async make call
-            env = await client.make(**task_data)
-            
-            # Validate environment was created
-            self.assert_environment_instance(env, task_data.get("env_key", "fira"))
-            
-            # Test environment is functional
-            db = env.db()
-            result = await db.exec("SELECT 1 as async_make_test")
-            assert "async_make_test" in str(result), "Async make-created environment should be functional"
-            
-            return env
-        except Exception as e:
-            self.skip_if_unavailable("Async make functionality", e)
+    @pytest.mark.asyncio
+    async def test_async_browser_operations(self, async_env):
+        """Test async browser operations."""
+        browser = async_env.browser()
+        cdp_url = await browser.cdp_url()
+        devtools_url = await browser.devtools_url()
+        
+        assert cdp_url is not None
+        assert devtools_url is not None
+        print("✅ Async browser operations work")

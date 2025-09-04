@@ -2,99 +2,101 @@
 Pytest configuration and shared fixtures for Fleet SDK integration tests.
 """
 
+import pytest
 import os
 import sys
-import pytest
-from pathlib import Path
+from typing import List
 
-# Ensure we're testing the local SDK version, not installed one
-project_root = Path(__file__).parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
-import fleet
-from fleet import Fleet, AsyncFleet
-
+# Add the project root to the Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 
 def pytest_addoption(parser):
-    """Add command line options."""
+    """Add custom command line options."""
     parser.addoption(
-        "--api-key", 
-        action="store", 
+        "--api-key",
+        action="store",
+        default=None,
         help="Fleet API key for integration tests"
     )
 
+def pytest_collection_modifyitems(config, items):
+    """Mark tests based on command line options."""
+    api_key = config.getoption("--api-key")
+    
+    for item in items:
+        # Mark all integration tests
+        item.add_marker(pytest.mark.integration)
+        
+        # Skip slow tests by default unless explicitly requested
+        if "slow" in item.keywords:
+            item.add_marker(pytest.mark.slow)
 
-def pytest_configure(config):
-    """Configure pytest markers."""
-    config.addinivalue_line("markers", "integration: integration tests with real API calls")
-    config.addinivalue_line("markers", "slow: slow running tests")
-    config.addinivalue_line("markers", "requires_instance: tests requiring environment instance")
-
-
-@pytest.fixture(scope="session")
+@pytest.fixture
 def api_key(request):
-    """Get API key from environment or command line."""
-    # Try command line first
-    api_key_value = request.config.getoption("--api-key")
-    
-    # Fall back to environment variable
-    if not api_key_value:
-        api_key_value = os.getenv("FLEET_API_KEY")
-    
-    if not api_key_value:
-        pytest.skip("No API key provided. Set FLEET_API_KEY environment variable or use --api-key option")
-    
-    return api_key_value
+    """Get API key from command line or environment variable."""
+    api_key = request.config.getoption("--api-key")
+    if api_key is None:
+        api_key = os.getenv("FLEET_API_KEY")
+    return api_key
 
+@pytest.fixture
+def test_env_key():
+    """Get test environment key with fallback options."""
+    # Use user-defined test environment if available
+    user_env = os.getenv("FLEET_TEST_ENV_KEY")
+    if user_env:
+        return user_env
+    
+    # Fallback to available environments
+    available_envs = [
+        "dropbox:Forge1.1.0",
+        "hubspot:Forge1.1.0", 
+        "ramp:Forge1.1.0"
+    ]
+    
+    # Return first available environment
+    return available_envs[0]
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def fleet_client(api_key):
-    """Create sync Fleet client for testing."""
+    """Create Fleet client for testing."""
+    if not api_key:
+        pytest.skip("API key required for integration tests")
+    
+    from fleet import Fleet
     return Fleet(api_key=api_key)
 
-
-@pytest.fixture(scope="session") 
+@pytest.fixture
 def async_fleet_client(api_key):
     """Create async Fleet client for testing."""
+    if not api_key:
+        pytest.skip("API key required for integration tests")
+    
+    from fleet import AsyncFleet
     return AsyncFleet(api_key=api_key)
 
-
-@pytest.fixture(scope="session")
-def test_env_key():
-    """Default environment key for testing."""
-    return os.getenv("FLEET_TEST_ENV_KEY", "fira")
-
-
-@pytest.fixture(scope="session")
-def test_version():
-    """Default version for testing."""
-    return os.getenv("FLEET_TEST_VERSION", "v1.3.1")
-
-
-@pytest.fixture(scope="function")
+@pytest.fixture
 def env(fleet_client, test_env_key):
-    """Create a Fleet environment for testing."""
+    """Create environment instance for testing."""
+    env = None
     try:
-        environment = fleet_client.make(test_env_key)
-        yield environment
+        env = fleet_client.make(test_env_key)
+        yield env
     finally:
-        # Cleanup: terminate the environment
-        try:
-            environment.instance.terminate()
-        except Exception:
-            pass  # Ignore cleanup errors
+        if env and hasattr(env, 'close'):
+            env.close()
+        elif env and hasattr(env, 'instance') and hasattr(env.instance, 'terminate'):
+            env.instance.terminate()
 
-
-@pytest.fixture(scope="function")
+@pytest.fixture
 async def async_env(async_fleet_client, test_env_key):
-    """Create an async Fleet environment for testing."""
+    """Create async environment instance for testing."""
     try:
-        environment = await async_fleet_client.make(test_env_key)
-        yield environment
+        env = await async_fleet_client.make(test_env_key)
+        yield env
     finally:
-        # Cleanup: terminate the environment
-        try:
-            await environment.instance.terminate()
-        except Exception:
-            pass  # Ignore cleanup errors
+        if hasattr(env, 'close'):
+            await env.close()
+        elif hasattr(env, 'instance') and hasattr(env.instance, 'terminate'):
+            await env.instance.terminate()

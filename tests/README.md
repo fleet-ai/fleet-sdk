@@ -2,205 +2,109 @@
 
 Comprehensive integration tests for the Fleet Python SDK with real API calls
 
-## 📁 Structure
+## 🚀 Quick Start
+
+### Prerequisites
+```bash
+# Install test dependencies
+pip install -r requirements.txt
+
+# Set your Fleet API key
+export FLEET_API_KEY="sk_your_key_here"
+```
+
+### Run All Tests
+```bash
+cd tests
+python run_tests.py
+```
+
+### Run Fast Tests First
+```bash
+# Run quick tests for immediate feedback
+python -m pytest integration/test_environment_management.py::TestFleetEnvFunctions -v
+python -m pytest integration/test_performance.py::TestFastOperations -v
+```
+
+## 🎭 Test Environments
+
+Tests use these available environments:
+- **Dropbox** - Forge1.1.0 - region us-west-1
+- **Hubspot** - Forge1.1.0 - region us-west-1  
+- **Ramp** - Forge1.1.0 - region us-west-1
+
+## 📁 Test Structure
 
 ```
 tests/
-├── integration/
-│   ├── base_test.py          # DRY base classes with common functionality
-│   ├── test_sdk_import.py    # SDK import and basic functionality tests
-│   ├── test_fleet_core.py    # Core functionality including .make()
-│   ├── test_resources.py     # Database, browser, and resource tests
-│   └── test_verifiers.py     # Verifier functionality tests
-├── conftest.py               # Pytest configuration and fixtures
-├── pytest.ini               # Test settings and markers
-├── requirements.txt          # Test dependencies
-└── README.md                 # This file
-```
-
-## 🚀 Quick Start
-
-### 1. Install Dependencies
-
-```bash
-cd tests
-pip install -r requirements.txt
-```
-
-### 2. Set API Key
-
-```bash
-# Linux/Mac
-export FLEET_API_KEY="your-api-key-here"
-
-# Windows PowerShell
-$env:FLEET_API_KEY="your-api-key-here"
-
-# Or pass via command line
-pytest --api-key="your-api-key-here"
-```
-
-### 3. Run Tests
-
-```bash
-# Run all integration tests
-pytest
-
-# Run with verbose output
-pytest -v
-
-# Run specific test file
-pytest integration/test_fleet_core.py -v
-
-# Run tests in parallel (faster)
-pytest -n auto
-
-# Run only fast tests (exclude slow ones)
-pytest -m "not slow"
-```
-
-## 📋 Test Categories
-
-### Core Functionality Tests
-- **SDK Import Tests** (`test_sdk_import.py`) - Verify SDK modules can be imported
-- **Fleet Core Tests** (`test_fleet_core.py`) - Test `.make()`, environment management, task loading
-- **Resource Tests** (`test_resources.py`) - Database, browser resource functionality
-- **Verifier Tests** (`test_verifiers.py`) - Verifier creation, bundling, execution
-
-### Test Markers
-
-```bash
-# Integration tests (all tests are integration by default)
-pytest -m integration
-
-# Slow tests (>30 seconds)
-pytest -m slow
-
-# Tests requiring environment instances
-pytest -m requires_instance
-
-# Exclude slow tests
-pytest -m "not slow"
+├── conftest.py                    # Shared fixtures and configuration
+├── pytest.ini                    # Pytest configuration
+├── requirements.txt               # Test dependencies
+├── run_tests.py                   # Test runner script
+└── integration/
+    ├── __init__.py
+    ├── base_test.py               # Base test classes and utilities
+    ├── test_sdk_imports.py        # SDK import and packaging tests
+    ├── test_async_pattern.py      # Async pattern verification tests
+    ├── test_environment_management.py  # Environment management tests
+    ├── test_database_operations.py     # Database operation tests
+    ├── test_browser_operations.py      # Browser operation tests
+    ├── test_verifiers.py              # Verifier functionality tests
+    ├── test_mcp_integration.py        # MCP integration tests
+    ├── test_task_management.py        # Task management tests
+    └── test_performance.py             # Performance measurement tests
 ```
 
 ## 🔧 Configuration
 
 ### Environment Variables
+- `FLEET_API_KEY` - Your Fleet API key (required)
+- `FLEET_TEST_ENV_KEY` - Specific environment to test (optional)
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `FLEET_API_KEY` | Your Fleet API key (required) | None |
-| `FLEET_TEST_ENV_KEY` | Environment key for testing | `"fira"` |
-| `FLEET_TEST_VERSION` | Version for testing | `"v1.3.1"` |
+### Pytest Options
+- `--api-key` - Pass API key via command line
+- `-v` - Verbose output
+- `-k "test_name"` - Run specific test
+- `-m "asyncio"` - Run only async tests
+- `--tb=short` - Short traceback format
 
-### Command Line Options
+## 📊 Test Categories
 
-```bash
-pytest --api-key="sk_your_key"        # Set API key
-pytest --timeout=300                   # Set test timeout
-pytest -x                             # Stop on first failure
-pytest --tb=short                     # Short traceback format
-```
+### **Fast Tests** (No environment creation)
+- **SDK import tests** (`test_sdk_imports.py`) - Comprehensive import verification
+- **Basic client creation** - Fleet and AsyncFleet instantiation
+- **Public API function tests** - `fleet.env.list_envs()`, `fleet.env.list_regions()`
+- **Environment listing** - Available environments and regions
+- **Account information** - Team and account details
 
-## 📊 Expected Test Coverage
+### **Integration Tests** (Require environment)
+- Environment management
+- Database operations
+- Browser operations
+- Verifier execution
+- MCP integration
+- Task workflows
 
-### Major Functionality Tested
+### **Async Tests** (Async/await functionality)
+- Async environment creation
+- Async database operations
+- Async browser operations
+- Async verifiers
+- Async task management
+- **Async Pattern Verification** - Ensures correct resource access patterns
 
-✅ **SDK Import & Basic Usage**
-- Module imports work correctly
-- Client initialization 
-- Global client functions
+### **Performance Tests**
+- Environment creation time
+- Database operation time
+- Browser operation time
+- Fast API call timing
 
-✅ **Core Fleet Functionality**
-- `.make()` method with various parameters
-- Environment listing and access
-- Task loading and management
-- Async variants of all operations
+## 📈 Test Results
 
-✅ **Resource Management**
-- Database (SQLite) operations
-- Browser automation
-- State-based resource access
-- Error handling
-
-✅ **Verifier System**
-- Sync and async verifier creation
-- Verifier bundling
-- Remote execution (if supported)
-- Database interaction verifiers
-
-## 🚦 Running Specific Tests
-
-### Test the .make() Functionality
-```bash
-pytest integration/test_fleet_core.py::TestMakeFunctionality -v
-```
-
-### Test SDK Import
-```bash
-pytest integration/test_sdk_import.py -v
-```
-
-### Test Database Resources
-```bash
-pytest integration/test_resources.py::TestDatabaseResources -v
-```
-
-### Test Async Functionality
-```bash
-pytest integration/test_fleet_core.py::TestAsyncFleetClient -v
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**No API key provided**
-```
-Solution: Set FLEET_API_KEY environment variable or use --api-key option
-```
-
-**Tests skipped with "not available"**
-```
-This is normal - tests skip when functionality isn't available in your environment
-```
-
-**Timeout errors**
-```bash
-# Increase timeout for slow operations
-pytest --timeout=600
-```
-
-**Import errors**
-```
-Ensure you're running tests from the project root and Flask SDK is in the path
-```
-
-### Expected Output
-```
-======================== test session starts ========================
-collected 25+ items
-
-integration/test_sdk_import.py ✓✓✓✓✓✓✓✓
-integration/test_fleet_core.py ✓✓✓✓✓✓✓✓  
-integration/test_resources.py ✓✓✓✓✓✓
-integration/test_verifiers.py ✓✓✓✓✓
-
-==================== 25+ passed in 45.2s ====================
-```
-
-## 🔄 CI/CD Integration
-
-For continuous integration, use:
-
-```bash
-# Install dependencies  
-pip install -r tests/requirements.txt
-
-# Run tests with API key from secrets
-pytest --api-key="$FLEET_API_KEY" --tb=short
-
-# Generate test report
-pytest --html=test_report.html --self-contained-html
-```
+The test suite now includes:
+- **171+ tests** covering all major SDK functionality
+- **Async pattern verification** to ensure correct usage
+- **Performance measurement** for optimization
+- **Comprehensive error handling** and edge cases
+- **Real API integration** with live environments
 
