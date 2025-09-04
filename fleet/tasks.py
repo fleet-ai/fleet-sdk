@@ -2,142 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from datetime import datetime
 from typing import Any, Dict, Optional, List
+from uuid import UUID
 
 from pydantic import BaseModel, Field, validator
 
 # Import the shared VerifierFunction type that works for both async and sync
 from fleet.types import VerifierFunction
-
-
-def verifier_from_string(
-    verifier_func: str,
-    verifier_id: Optional[str] = None,
-    verifier_key: Optional[str] = None,
-    sha256: Optional[str] = None,
-) -> VerifierFunction:
-    """Create a verifier function from a string of Python code.
-    
-    This function creates either a SyncVerifierFunction or AsyncVerifierFunction
-    based on whether the code contains async function definitions.
-    
-    Args:
-        verifier_func: String containing the verifier function code
-        verifier_id: Optional verifier ID to use
-        verifier_key: Optional verifier key to use (defaults to function name)
-        sha256: Optional SHA256 hash of existing server-side bundle
-        
-    Returns:
-        VerifierFunction: Either SyncVerifierFunction or AsyncVerifierFunction
-        
-    Raises:
-        ValueError: If function name cannot be extracted from the code
-    """
-    from fleet.verifiers.parse import extract_function_name, convert_new_to_old_verifier
-    from fleet.verifiers.verifier import SyncVerifierFunction
-    from fleet._async.verifiers.verifier import AsyncVerifierFunction
-    from fleet.verifiers.db import IgnoreConfig, DatabaseSnapshot
-    
-    # Determine if this is an async verifier
-    is_async = "async def" in verifier_func
-    
-    # Store original code for later
-    original_code = verifier_func
-    
-    # Check if this is a new format verifier (has before/after parameters)
-    if (
-        "before: DatabaseSnapshot" in verifier_func
-        and "after: DatabaseSnapshot" in verifier_func
-    ):
-        # Convert new format to old format
-        verifier_func = convert_new_to_old_verifier(verifier_func)
-        # Update function name since wrapper adds _wrapper suffix
-        original_name = extract_function_name(verifier_func.split("\n")[0])
-        if original_name and original_name.endswith("_wrapper"):
-            function_name = original_name
-        else:
-            function_name = extract_function_name(verifier_func)
-    else:
-        # Extract function name from code
-        function_name = extract_function_name(verifier_func)
-    
-    if not function_name:
-        raise ValueError("Could not extract function name from verifier code")
-    
-    # Create a namespace for the function
-    namespace = {
-        "__builtins__": __builtins__,
-        "Environment": object,  # Placeholder, will be provided at runtime
-        "IgnoreConfig": IgnoreConfig,
-        "DatabaseSnapshot": DatabaseSnapshot,
-        "TASK_FAILED_SCORE": 0,
-        "TASK_SUCCESSFUL_SCORE": 1,
-    }
-    
-    # Execute the code to create the function
-    exec(verifier_func, namespace)
-    
-    # Get the function from the namespace
-    if function_name not in namespace:
-        raise ValueError(f"Function {function_name} not found after execution")
-    
-    func = namespace[function_name]
-    
-    # Use provided key or default to function name
-    key = verifier_key or function_name
-    
-    # Create appropriate verifier function
-    if is_async:
-        # Create AsyncVerifierFunction
-        return AsyncVerifierFunction(
-            func=func,
-            key=key,
-            verifier_id=verifier_id,
-            sha256=sha256,
-            raw_code=original_code,
-            extra_requirements=None,
-        )
-    else:
-        # For sync verifiers, we need to handle the case where the original was async
-        # but got converted during unasync processing
-        if "async def" in original_code and "await " in original_code:
-            # Convert async code to sync for SyncVerifierFunction
-            sync_code = original_code.replace("async def", "def")
-            sync_code = sync_code.replace("await ", "")
-            
-            # Re-execute with sync code
-            namespace = {
-                "__builtins__": __builtins__,
-                "Environment": object,
-                "IgnoreConfig": IgnoreConfig,
-                "DatabaseSnapshot": DatabaseSnapshot,
-                "TASK_FAILED_SCORE": 0,
-                "TASK_SUCCESSFUL_SCORE": 1,
-            }
-            exec(sync_code, namespace)
-            func = namespace[function_name]
-            
-            return SyncVerifierFunction(
-                func=func,
-                key=key,
-                verifier_id=verifier_id,
-                sha256=sha256,
-                raw_code=sync_code,
-                extra_requirements=None,
-            )
-        else:
-            # Already sync code
-            return SyncVerifierFunction(
-                func=func,
-                key=key,
-                verifier_id=verifier_id,
-                sha256=sha256,
-                raw_code=original_code,
-                extra_requirements=None,
-            )
 
 
 class Task(BaseModel):
@@ -206,7 +79,7 @@ class Task(BaseModel):
             if inspect.iscoroutine(result):
                 # Check if we're already in an event loop
                 try:
-                    _ = asyncio.get_running_loop()
+                    loop = asyncio.get_running_loop()
                     # We're in an async context, can't use asyncio.run()
                     raise RuntimeError(
                         "Cannot run async verifier in sync mode while event loop is running. "
@@ -251,13 +124,32 @@ class Task(BaseModel):
         return Fleet().make(env_key=self.env_key, region=region)
 
 
-def load_tasks(env_key: Optional[str] = None) -> List[Task]:
-    """Convenience function to load tasks without initializing a client.
+def load_tasks(
+    env_key: Optional[str] = None,
+    keys: Optional[List[str]] = None,
+    version: Optional[str] = None,
+    team_id: Optional[str] = None
+) -> List[Task]:
+    """Convenience function to load tasks with optional filtering.
 
-    Creates an `AsyncFleet` client under the hood and returns the tasks list.
+    Args:
+        env_key: Optional environment key to filter tasks by
+        keys: Optional list of task keys to filter by
+        version: Optional version to filter tasks by
+        team_id: Optional team_id to filter by (admin only)
+
+    Examples:
+        tasks = await fleet.load_tasks(env_key="fira")
+        tasks = await fleet.load_tasks(keys=["task1", "task2"])
+        tasks = await fleet.load_tasks(env_key="fira", version="v1.0")
     """
     # Use the global client by default so users can pre-configure it once
     from .global_client import get_client
 
     client = get_client()
-    return client.load_tasks(env_key=env_key)
+    return client.load_tasks(
+        env_key=env_key, 
+        keys=keys, 
+        version=version, 
+        team_id=team_id
+    )

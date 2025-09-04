@@ -7,7 +7,7 @@ def make(env_key: str, region: Optional[str] = None) -> SyncEnv:
     return Fleet().make(env_key, region=region)
 
 
-def make_for_task(task: Task) -> SyncEnv:
+def make_for_task_async(task: Task) -> SyncEnv:
     return Fleet().make_for_task(task)
 
 

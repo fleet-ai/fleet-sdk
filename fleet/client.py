@@ -50,7 +50,7 @@ from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import SQLiteResource
 from .resources.browser import BrowserResource
-from .resources.mcp import MCPResource
+from ..resources.mcp import MCPResource
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +254,9 @@ class Fleet:
     def execute_verifier_remote(
         self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
     ) -> VerifiersExecuteResponse:
-        return _execute_verifier_remote(self.client, bundle_data, args, kwargs, timeout)
+        return _execute_verifier_remote(
+            self.client, bundle_data, args, kwargs, timeout
+        )
 
     def delete(self, instance_id: str) -> InstanceResponse:
         return _delete_instance(self.client, instance_id)
@@ -265,7 +267,9 @@ class Fleet:
 
         return self.load_task_array_from_string(tasks_data)
 
-    def load_task_array_from_string(self, serialized_tasks: List[Dict]) -> List[Task]:
+    def load_task_array_from_string(
+        self, serialized_tasks: List[Dict]
+    ) -> List[Task]:
         tasks = []
 
         json_tasks = json.loads(serialized_tasks)
@@ -303,11 +307,20 @@ class Fleet:
         )
         return task
 
-    def load_tasks(self, env_key: Optional[str] = None) -> List[Task]:
-        """Load tasks for the authenticated team, optionally filtered by environment.
+    def load_tasks(
+        self, 
+        env_key: Optional[str] = None,
+        keys: Optional[List[str]] = None,
+        version: Optional[str] = None,
+        team_id: Optional[str] = None
+    ) -> List[Task]:
+        """Load tasks for the authenticated team, with optional filtering.
 
         Args:
             env_key: Optional environment key to filter tasks by
+            keys: Optional list of task keys to filter by
+            version: Optional version to filter tasks by (client-side filter)
+            team_id: Optional team_id to filter by (admin only)
 
         Returns:
             List[Task] containing Task objects
@@ -315,6 +328,10 @@ class Fleet:
         params = {}
         if env_key is not None:
             params["env_key"] = env_key
+        if keys is not None:
+            params["task_keys"] = keys
+        if team_id is not None:
+            params["team_id"] = team_id
 
         response = self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
@@ -374,6 +391,10 @@ class Fleet:
                 metadata={},  # Default empty metadata
             )
             tasks.append(task)
+
+        # Apply client-side filtering for version if specified
+        if version is not None:
+            tasks = [task for task in tasks if task.version == version]
 
         return tasks
 
@@ -464,7 +485,7 @@ class Fleet:
     def _create_verifier_from_data(
         self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str
     ) -> "SyncVerifierFunction":
-        """Create a SyncVerifierFunction from verifier data.
+        """Create an AsyncVerifierFunction from verifier data.
 
         Args:
             verifier_id: The verifier ID
@@ -473,10 +494,16 @@ class Fleet:
             verifier_sha: The verifier SHA256
 
         Returns:
-            SyncVerifierFunction created from the verifier code
+            AsyncVerifierFunction created from the verifier code
         """
-        from .tasks import verifier_from_string
+        from ..tasks import verifier_from_string
         from .verifiers.verifier import SyncVerifierFunction
+
+        # Convert async verifier code to sync
+        if 'async def' in verifier_code:
+            verifier_code = verifier_code.replace('async def', 'def')
+        if 'await ' in verifier_code:
+            verifier_code = verifier_code.replace('await ', '')
         
         # Use verifier_from_string to create the verifier
         verifier_func = verifier_from_string(
@@ -486,10 +513,10 @@ class Fleet:
             sha256=verifier_sha,
         )
         
-        # Ensure we return a SyncVerifierFunction
+        # Ensure we return an AsyncVerifierFunction
         if not isinstance(verifier_func, SyncVerifierFunction):
             raise TypeError(
-                f"Expected SyncVerifierFunction but got {type(verifier_func).__name__}"
+                f"Expected AsyncVerifierFunction but got {type(verifier_func).__name__}"
             )
         
         # Store the original verifier code for reference

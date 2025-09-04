@@ -1,0 +1,18 @@
+{
+  "env_key": "fira",
+  "instance_id": "03e89c90",
+  "timestamp": "2025-07-24T21:59:12.628935Z",
+  "session_id": "env-03e89c90-1753394177",
+  "tool_logs": [],
+  "action_logs": [],
+  "page_url": "",
+  "viewport_size": [
+    1920,
+    1080
+  ],
+  "metadata": {
+    "snapshot_version": "1.0",
+    "tool_log_count": 0,
+    "action_log_count": 0
+  }
+}
