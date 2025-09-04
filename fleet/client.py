@@ -50,7 +50,7 @@ from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import SQLiteResource
 from .resources.browser import BrowserResource
-from ..resources.mcp import MCPResource
+from .resources.mcp import SyncMCPResource
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +105,9 @@ class SyncEnv(EnvironmentBase):
         return self.instance.browser(name)
 
     @property
-    def mcp(self) -> MCPResource:
+    def mcp(self) -> SyncMCPResource:
         mcp_url = f"{self.urls.root}mcp"
-        return MCPResource(url=mcp_url, env_key=self.env_key)
+        return SyncMCPResource(url=mcp_url, env_key=self.env_key)
 
     def state(self, uri: str) -> Resource:
         return self.instance.state(uri)
@@ -496,14 +496,8 @@ class Fleet:
         Returns:
             AsyncVerifierFunction created from the verifier code
         """
-        from ..tasks import verifier_from_string
-        from .verifiers.verifier import SyncVerifierFunction
-
-        # Convert async verifier code to sync
-        if 'async def' in verifier_code:
-            verifier_code = verifier_code.replace('async def', 'def')
-        if 'await ' in verifier_code:
-            verifier_code = verifier_code.replace('await ', '')
+        from .tasks import verifier_from_string
+        from .verifiers import SyncVerifierFunction
         
         # Use verifier_from_string to create the verifier
         verifier_func = verifier_from_string(
@@ -512,12 +506,6 @@ class Fleet:
             verifier_key=verifier_key,
             sha256=verifier_sha,
         )
-        
-        # Ensure we return an AsyncVerifierFunction
-        if not isinstance(verifier_func, SyncVerifierFunction):
-            raise TypeError(
-                f"Expected AsyncVerifierFunction but got {type(verifier_func).__name__}"
-            )
         
         # Store the original verifier code for reference
         verifier_func._verifier_code = verifier_code

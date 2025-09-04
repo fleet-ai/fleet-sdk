@@ -50,7 +50,7 @@ from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
 from .resources.browser import AsyncBrowserResource
-from ..resources.mcp import MCPResource
+from .resources.mcp import AsyncMCPResource
 
 logger = logging.getLogger(__name__)
 
@@ -105,9 +105,9 @@ class AsyncEnv(EnvironmentBase):
         return self.instance.browser(name)
 
     @property
-    def mcp(self) -> MCPResource:
+    def mcp(self) -> AsyncMCPResource:
         mcp_url = f"{self.urls.root}mcp"
-        return MCPResource(url=mcp_url, env_key=self.env_key)
+        return AsyncMCPResource(url=mcp_url, env_key=self.env_key)
 
     def state(self, uri: str) -> Resource:
         return self.instance.state(uri)
@@ -506,12 +506,6 @@ class AsyncFleet:
             verifier_key=verifier_key,
             sha256=verifier_sha,
         )
-        
-        # Ensure we return an AsyncVerifierFunction
-        if not isinstance(verifier_func, AsyncVerifierFunction):
-            raise TypeError(
-                f"Expected AsyncVerifierFunction but got {type(verifier_func).__name__}"
-            )
         
         # Store the original verifier code for reference
         verifier_func._verifier_code = verifier_code

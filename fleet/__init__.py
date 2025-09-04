@@ -46,8 +46,11 @@ from ._async.verifiers import (
     AsyncVerifierFunction,
 )
 
-# Import async tasks (default tasks are async for modern usage)
-from ._async.tasks import Task
+# Import async tasks (default tasks are async for modern usage)  
+from ._async.tasks import Task, load_tasks
+
+# Import sync load_tasks function
+from .tasks import load_tasks as load_tasks_sync
 
 # Import shared types
 from .types import VerifierFunction
@@ -94,19 +97,14 @@ __all__ = [
     "configure",
     "get_client",
     "reset_client",
+    # Module-level functions (async is default)
+    "load_tasks",
+    "load_tasks_sync",
     # Version
     "__version__",
 ]
 
 
-def load_tasks(env_key: Optional[str] = None) -> List[Task]:
-    """Load tasks without explicitly creating a client.
-
-    Example:
-        tasks = fleet.load_tasks(env_key="fira")
-    """
-    # Use global client by default so users can configure once
-    return _global_client.get_client().load_tasks(env_key=env_key)
 
 
 def configure(

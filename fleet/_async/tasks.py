@@ -125,6 +125,56 @@ class Task(BaseModel):
         return await AsyncFleet().make(env_key=self.env_key, region=region)
 
 
+def verifier_from_string(
+    verifier_func: str,
+    verifier_id: str,
+    verifier_key: str,
+    sha256: str = ""
+) -> 'VerifierFunction':
+    """Create a verifier function from string code.
+    
+    Args:
+        verifier_func: The verifier function code as a string
+        verifier_id: Unique identifier for the verifier
+        verifier_key: Key/name for the verifier
+        sha256: SHA256 hash of the verifier code
+        
+    Returns:
+        VerifierFunction instance that can be used to verify tasks
+    """
+    try:
+        import inspect
+        from .verifiers import verifier, AsyncVerifierFunction
+        
+        # Create a local namespace for executing the code
+        local_namespace = {}
+        
+        # Execute the verifier code in the namespace
+        exec(verifier_func, globals(), local_namespace)
+        
+        # Find the function that was defined
+        func_obj = None
+        for name, obj in local_namespace.items():
+            if inspect.isfunction(obj):
+                func_obj = obj
+                break
+        
+        if func_obj is None:
+            raise ValueError("No function found in verifier code")
+        
+        # Create an AsyncVerifierFunction instance
+        verifier_instance = AsyncVerifierFunction(func_obj, verifier_key, verifier_id)
+        
+        # Store additional metadata
+        verifier_instance._verifier_code = verifier_func
+        verifier_instance._sha256 = sha256
+        
+        return verifier_instance
+        
+    except Exception as e:
+        raise ValueError(f"Failed to create verifier from string: {e}")
+
+
 async def load_tasks(
     env_key: Optional[str] = None,
     keys: Optional[List[str]] = None,

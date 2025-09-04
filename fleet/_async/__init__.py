@@ -35,7 +35,7 @@ from .verifiers import (
 )
 
 # Import async tasks
-from .tasks import Task
+from .tasks import Task, load_tasks
 
 # Import shared types
 from ..types import VerifierFunction
@@ -91,33 +91,6 @@ __all__ = [
     # Version
     "__version__",
 ]
-
-
-async def load_tasks(
-    env_key: Optional[str] = None,
-    keys: Optional[List[str]] = None,
-    version: Optional[str] = None,
-    team_id: Optional[str] = None
-) -> List[Task]:
-    """Load tasks with optional filtering.
-
-    Args:
-        env_key: Optional environment key to filter tasks by
-        keys: Optional list of task keys to filter by
-        version: Optional version to filter tasks by
-
-    Examples:
-        tasks = await fleet.load_tasks(env_key="fira")
-        tasks = await fleet.load_tasks(keys=["task1", "task2"])
-        tasks = await fleet.load_tasks(env_key="fira", version="v1.0")
-    """
-    # Use global client by default so users can configure once
-    return await _async_global_client.get_client().load_tasks(
-        env_key=env_key, 
-        keys=keys, 
-        version=version, 
-        team_id=team_id
-    )
 
 
 async def list_envs() -> List[Environment]:

@@ -2,7 +2,7 @@
 
 from .client import (
     make,
-    make_for_task,
+    make_for_task_async,
     list_envs,
     list_regions,
     get,
@@ -22,7 +22,7 @@ from .._async.env.client import (
 
 __all__ = [
     "make",
-    "make_for_task",
+    "make_for_task_async",
     "list_envs",
     "list_regions",
     "list_instances",

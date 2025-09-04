@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .client import Fleet
-from ..config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
+from .config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
 
 
 _default_client: Optional[Fleet] = None
