@@ -175,6 +175,8 @@ class AsyncFleet:
     ):
         if api_key is None:
             api_key = os.getenv("FLEET_API_KEY")
+        if base_url is None:
+            base_url = os.getenv("FLEET_BASE_URL")
         self._httpx_client = httpx_client or default_httpx_client(max_retries, timeout)
         self.client = AsyncWrapper(
             api_key=api_key,
