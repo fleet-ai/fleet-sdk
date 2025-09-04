@@ -307,11 +307,20 @@ class AsyncFleet:
         )
         return task
 
-    async def load_tasks(self, env_key: Optional[str] = None) -> List[Task]:
-        """Load tasks for the authenticated team, optionally filtered by environment.
+    async def load_tasks(
+        self, 
+        env_key: Optional[str] = None,
+        keys: Optional[List[str]] = None,
+        version: Optional[str] = None,
+        team_id: Optional[str] = None
+    ) -> List[Task]:
+        """Load tasks for the authenticated team, with optional filtering.
 
         Args:
             env_key: Optional environment key to filter tasks by
+            keys: Optional list of task keys to filter by
+            version: Optional version to filter tasks by (client-side filter)
+            team_id: Optional team_id to filter by (admin only)
 
         Returns:
             List[Task] containing Task objects
@@ -319,6 +328,10 @@ class AsyncFleet:
         params = {}
         if env_key is not None:
             params["env_key"] = env_key
+        if keys is not None:
+            params["task_keys"] = keys
+        if team_id is not None:
+            params["team_id"] = team_id
 
         response = await self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
@@ -378,6 +391,10 @@ class AsyncFleet:
                 metadata={},  # Default empty metadata
             )
             tasks.append(task)
+
+        # Apply client-side filtering for version if specified
+        if version is not None:
+            tasks = [task for task in tasks if task.version == version]
 
         return tasks
 

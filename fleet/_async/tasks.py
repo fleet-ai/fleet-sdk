@@ -125,13 +125,32 @@ class Task(BaseModel):
         return await AsyncFleet().make(env_key=self.env_key, region=region)
 
 
-async def load_tasks(env_key: Optional[str] = None) -> List[Task]:
-    """Convenience function to load tasks without initializing a client.
+async def load_tasks(
+    env_key: Optional[str] = None,
+    keys: Optional[List[str]] = None,
+    version: Optional[str] = None,
+    team_id: Optional[str] = None
+) -> List[Task]:
+    """Convenience function to load tasks with optional filtering.
 
-    Creates an `AsyncFleet` client under the hood and returns the tasks list.
+    Args:
+        env_key: Optional environment key to filter tasks by
+        keys: Optional list of task keys to filter by
+        version: Optional version to filter tasks by
+        team_id: Optional team_id to filter by (admin only)
+
+    Examples:
+        tasks = await fleet.load_tasks(env_key="fira")
+        tasks = await fleet.load_tasks(keys=["task1", "task2"])
+        tasks = await fleet.load_tasks(env_key="fira", version="v1.0")
     """
     # Use the global client by default so users can pre-configure it once
     from .global_client import get_client
 
     client = get_client()
-    return await client.load_tasks(env_key=env_key)
+    return await client.load_tasks(
+        env_key=env_key, 
+        keys=keys, 
+        version=version, 
+        team_id=team_id
+    )
