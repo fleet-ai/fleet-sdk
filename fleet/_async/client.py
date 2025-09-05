@@ -20,7 +20,7 @@ import httpx
 import json
 import logging
 import os
-from typing import List, Optional, Dict, TYPE_CHECKING
+from typing import List, Optional, Dict, Any, TYPE_CHECKING
 
 from .base import EnvironmentBase, AsyncWrapper
 from ..models import (
@@ -196,7 +196,7 @@ class AsyncFleet:
         response = await self.client.request("GET", f"/v1/env/{env_key}")
         return EnvironmentModel(**response.json())
 
-    async def make(self, env_key: str, region: Optional[str] = None) -> AsyncEnv:
+    async def make(self, env_key: str, region: Optional[str] = None, env_variables: Optional[Dict[str, Any]] = None) -> AsyncEnv:
         if ":" in env_key:
             env_key_part, version = env_key.split(":", 1)
             if (
@@ -210,7 +210,7 @@ class AsyncFleet:
             version = None
 
         request = InstanceRequest(
-            env_key=env_key_part, version=version, region=region, created_from="sdk"
+            env_key=env_key_part, version=version, region=region, env_variables=env_variables, created_from="sdk"
         )
         region_base_url = REGION_BASE_URL.get(region)
         response = await self.client.request(

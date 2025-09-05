@@ -14,7 +14,7 @@
 
 """Fleet Python SDK - Async Environment-based AI agent interactions."""
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from ..exceptions import (
     FleetError,
@@ -108,13 +108,14 @@ async def environment(env_key: str) -> Environment:
     return await _async_global_client.get_client().environment(env_key)
 
 
-async def make(env_key: str, region: Optional[str] = None) -> AsyncEnv:
+async def make(env_key: str, region: Optional[str] = None, env_variables: Optional[Dict[str, Any]] = None) -> AsyncEnv:
     """Create a new environment instance.
     
     Example:
         env = await fleet.make("fira")
+        env_with_vars = await fleet.make("fira", env_variables={"LOGGED_IN_NAME": "Alice"})
     """
-    return await _async_global_client.get_client().make(env_key, region)
+    return await _async_global_client.get_client().make(env_key, region, env_variables)
 
 
 async def make_for_task(task: Task) -> AsyncEnv:
