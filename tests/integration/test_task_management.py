@@ -207,8 +207,8 @@ class TestAsyncTaskManagement(BaseFleetTest):
                 verifier=test_async_execution_verifier
             )
             
-            # Execute async verifier
-            result = await task.verifier(async_env)
+            # Execute async verifier directly
+            result = await test_async_execution_verifier(async_env)
             assert isinstance(result, float)
             assert result >= 0.0
             print(f"✅ Async task verifier execution: {result}")

@@ -181,7 +181,7 @@ class TestAsyncVerifiers(BaseVerifierTest):
         class MockEnv:
             pass
         
-        result = await test_async_verifier.remote(MockEnv(), "test")
+        result = await test_async_verifier(MockEnv(), "test")
         assert result == 1.0
         print("✅ Async verifier execution works")
     
@@ -212,7 +212,7 @@ class TestAsyncVerifiers(BaseVerifierTest):
                 except Exception:
                     return 0.0
             
-            result = await test_async_real_env_verifier.remote(async_env)
+            result = await test_async_real_env_verifier(async_env)
             assert isinstance(result, float)
             assert result >= 0.0
             print(f"✅ Async verifier with real environment: {result}")

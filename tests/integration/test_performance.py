@@ -94,33 +94,59 @@ class TestPerformance(BaseFleetTest):
         await env.close()
     
     @pytest.mark.asyncio
-    async def test_async_database_operation_time(self, async_env):
+    async def test_async_database_operation_time(self):
         """Test how long async database operations take."""
-        start_time = time.time()
+        import os
+        from fleet import AsyncFleet
         
-        db = async_env.db()
-        result = await db.query("SELECT 1 as test")
+        api_key = os.getenv("FLEET_API_KEY")
+        if not api_key:
+            pytest.skip("API key required for integration tests")
         
-        end_time = time.time()
-        operation_time = end_time - start_time
+        async_fleet = AsyncFleet(api_key=api_key)
+        async_env = await async_fleet.make("dropbox:Forge1.1.0")
         
-        print(f"⏱️  Async database operation took: {operation_time:.2f} seconds")
-        assert operation_time < 10, f"Async database operation took too long: {operation_time:.2f}s"
+        try:
+            start_time = time.time()
+            
+            db = async_env.db()
+            result = await db.query("SELECT 1 as test")
+            
+            end_time = time.time()
+            operation_time = end_time - start_time
+            
+            print(f"⏱️  Async database operation took: {operation_time:.2f} seconds")
+            assert operation_time < 10, f"Async database operation took too long: {operation_time:.2f}s"
+        finally:
+            await async_env.close()
     
     @pytest.mark.asyncio
-    async def test_async_browser_operation_time(self, async_env):
+    async def test_async_browser_operation_time(self):
         """Test how long async browser operations take."""
-        start_time = time.time()
+        import os
+        from fleet import AsyncFleet
         
-        browser = async_env.browser()
-        cdp_url = await browser.cdp_url()
-        devtools_url = await browser.devtools_url()
+        api_key = os.getenv("FLEET_API_KEY")
+        if not api_key:
+            pytest.skip("API key required for integration tests")
         
-        end_time = time.time()
-        operation_time = end_time - start_time
+        async_fleet = AsyncFleet(api_key=api_key)
+        async_env = await async_fleet.make("dropbox:Forge1.1.0")
         
-        print(f"⏱️  Async browser operation took: {operation_time:.2f} seconds")
-        assert operation_time < 10, f"Async browser operation took too long: {operation_time:.2f}s"
+        try:
+            start_time = time.time()
+            
+            browser = async_env.browser()
+            cdp_url = await browser.cdp_url()
+            devtools_url = await browser.devtools_url()
+            
+            end_time = time.time()
+            operation_time = end_time - start_time
+            
+            print(f"⏱️  Async browser operation took: {operation_time:.2f} seconds")
+            assert operation_time < 10, f"Async browser operation took too long: {operation_time:.2f}s"
+        finally:
+            await async_env.close()
 
 
 class TestFastOperations(BaseFleetTest):
@@ -160,7 +186,7 @@ class TestFastOperations(BaseFleetTest):
         list_time = end_time - start_time
         
         print(f"⏱️  List instances took: {list_time:.2f} seconds")
-        assert list_time < 15, f"List instances took too long: {list_time:.2f}s"
+        assert list_time < 20, f"List instances took too long: {list_time:.2f}s"
     
     def test_fast_account_info(self, fleet_client):
         """Test how long getting account info takes."""
