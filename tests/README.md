@@ -19,6 +19,7 @@ cd tests
 python run_tests.py
 ```
 
+
 ### Run Fast Tests First
 ```bash
 # Run quick tests for immediate feedback
@@ -99,12 +100,21 @@ tests/
 - Browser operation time
 - Fast API call timing
 
-## 📈 Test Results
+## ⚡ Parallel Execution
 
-The test suite now includes:
-- **171+ tests** covering all major SDK functionality
-- **Async pattern verification** to ensure correct usage
-- **Performance measurement** for optimization
-- **Comprehensive error handling** and edge cases
-- **Real API integration** with live environments
+Run tests in parallel for 2-4x faster execution:
+
+```bash
+# Auto-detect CPU cores
+python -m pytest integration/ -n auto
+
+# Use specific number of workers
+python -m pytest integration/ -n 4
+
+# Run only fast tests in parallel
+python -m pytest integration/ -m fast -n auto
+
+# Run with API key
+python -m pytest integration/ -n auto --api-key=your_key_here
+```
 
