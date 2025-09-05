@@ -1,0 +1,133 @@
+name: Fleet SDK Test Suite
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of tests to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - fast
+          - integration
+          - async
+      parallel:
+        description: 'Run tests in parallel'
+        required: true
+        default: true
+        type: boolean
+      workers:
+        description: 'Number of parallel workers (0 = auto-detect)'
+        required: true
+        default: 0
+        type: number
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        python-version: [3.9, 3.10, 3.11, 3.12]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r tests/requirements.txt
+    
+    - name: Set up test environment
+      env:
+        FLEET_API_KEY: ${{ secrets.FLEET_API_KEY }}
+        FLEET_TEST_ENV_KEY: ${{ secrets.FLEET_TEST_ENV_KEY }}
+      run: |
+        echo "API Key configured: ${{ secrets.FLEET_API_KEY != '' }}"
+        echo "Test Environment Key configured: ${{ secrets.FLEET_TEST_ENV_KEY != '' }}"
+    
+    - name: Run tests
+      env:
+        FLEET_API_KEY: ${{ secrets.FLEET_API_KEY }}
+        FLEET_TEST_ENV_KEY: ${{ secrets.FLEET_TEST_ENV_KEY }}
+      run: |
+        cd tests
+        
+        # Build test command based on inputs
+        CMD="python -m pytest"
+        
+        # Add test selection
+        if [ "${{ github.event.inputs.test_type }}" = "fast" ]; then
+          CMD="$CMD -m fast"
+        elif [ "${{ github.event.inputs.test_type }}" = "integration" ]; then
+          CMD="$CMD integration/"
+        elif [ "${{ github.event.inputs.test_type }}" = "async" ]; then
+          CMD="$CMD -m asyncio"
+        else
+          CMD="$CMD integration/"
+        fi
+        
+        # Add parallel execution
+        if [ "${{ github.event.inputs.parallel }}" = "true" ]; then
+          if [ "${{ github.event.inputs.workers }}" = "0" ]; then
+            CMD="$CMD -n auto"
+          else
+            CMD="$CMD -n ${{ github.event.inputs.workers }}"
+          fi
+        fi
+        
+        # Add common options
+        CMD="$CMD -v --tb=short --timeout=300"
+        
+        echo "Running: $CMD"
+        $CMD
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.python-version }}
+        path: |
+          tests/.pytest_cache/
+          tests/htmlcov/
+        retention-days: 7
+    
+    - name: Comment on PR (if applicable)
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          
+          // Look for test result files and create a summary
+          const summary = `## 🧪 Test Results for Python ${{ matrix.python-version }}
+          
+          **Test Type:** ${{ github.event.inputs.test_type }}
+          **Parallel:** ${{ github.event.inputs.parallel }}
+          **Workers:** ${{ github.event.inputs.workers === '0' ? 'auto' : github.event.inputs.workers }}
+          
+          ✅ Tests completed successfully!`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: summary
+          });
