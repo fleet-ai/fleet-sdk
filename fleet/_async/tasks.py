@@ -144,7 +144,7 @@ def verifier_from_string(
     """
     try:
         import inspect
-        from .verifiers import verifier, AsyncVerifierFunction
+        from .verifiers import verifier, AsyncVerifierFunction, IgnoreConfig
         
         # Create a local namespace for executing the code
         local_namespace = {}

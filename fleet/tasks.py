@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import asyncio
 from datetime import datetime
 from typing import Any, Dict, Optional, List
 from uuid import UUID
@@ -143,7 +144,7 @@ def verifier_from_string(
     """
     try:
         import inspect
-        from .verifiers import verifier, SyncVerifierFunction
+        from .verifiers import verifier, SyncVerifierFunction, IgnoreConfig
         
         # Create a local namespace for executing the code
         local_namespace = {}
