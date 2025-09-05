@@ -144,10 +144,17 @@ def verifier_from_string(
     """
     try:
         import inspect
-        from .verifiers import verifier, AsyncVerifierFunction, IgnoreConfig
+        from .verifiers import verifier, AsyncVerifierFunction
+        from fleet.verifiers.code import TASK_SUCCESSFUL_SCORE, TASK_FAILED_SCORE
+        from fleet.verifiers.db import IgnoreConfig
         
         # Create a local namespace for executing the code
-        local_namespace = {}
+        local_namespace = {
+            'TASK_SUCCESSFUL_SCORE': TASK_SUCCESSFUL_SCORE,
+            'TASK_FAILED_SCORE': TASK_FAILED_SCORE,
+            'IgnoreConfig': IgnoreConfig,
+            'Environment': object  # Add Environment type if needed
+        }
         
         # Execute the verifier code in the namespace
         exec(verifier_func, globals(), local_namespace)
