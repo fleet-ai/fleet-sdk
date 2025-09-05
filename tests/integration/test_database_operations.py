@@ -1,6 +1,5 @@
 """
 Tests for database operations functionality.
-Based on examples/example.py, examples/example_client.py, examples/example_sync.py, examples/example_action_log.py
 """
 
 import pytest
@@ -113,58 +112,149 @@ class TestAsyncDatabaseOperations(BaseDatabaseTest):
     """Test async database operations."""
     
     @pytest.mark.asyncio
-    async def test_async_database_query(self, async_env):
+    async def test_async_database_query(self):
         """Test async database query."""
-        db = async_env.db()
-        result = await db.query("SELECT 1 as test")
-        assert result is not None
-        print("✅ Async database query successful")
+        import os
+        from fleet import AsyncFleet
+        
+        api_key = os.getenv("FLEET_API_KEY")
+        if not api_key:
+            pytest.skip("API key required for integration tests")
+        
+        async_fleet = AsyncFleet(api_key=api_key)
+        async_env = await async_fleet.make("dropbox:Forge1.1.0")
+        
+        try:
+            db = async_env.db()
+            result = await db.query("SELECT 1 as test")
+            assert result is not None
+            print("✅ Async database query successful")
+        finally:
+            await async_env.close()
     
     @pytest.mark.asyncio
-    async def test_async_database_exec(self, async_env):
+    async def test_async_database_exec(self):
         """Test async database exec."""
-        db = async_env.db()
-        result = await db.exec("SELECT 1 as test")
-        assert result is not None
-        print("✅ Async database exec successful")
+        import os
+        from fleet import AsyncFleet
+        
+        api_key = os.getenv("FLEET_API_KEY")
+        if not api_key:
+            pytest.skip("API key required for integration tests")
+        
+        async_fleet = AsyncFleet(api_key=api_key)
+        async_env = await async_fleet.make("dropbox:Forge1.1.0")
+        
+        try:
+            db = async_env.db()
+            result = await db.exec("SELECT 1 as test")
+            assert result is not None
+            print("✅ Async database exec successful")
+        finally:
+            await async_env.close()
     
     @pytest.mark.asyncio
-    async def test_async_database_describe(self, async_env):
+    async def test_async_database_describe(self):
         """Test async database describe."""
-        db = async_env.db()
-        schema = await db.describe()
-        assert schema is not None
-        print("✅ Async database describe successful")
+        import os
+        from fleet import AsyncFleet
+        
+        api_key = os.getenv("FLEET_API_KEY")
+        if not api_key:
+            pytest.skip("API key required for integration tests")
+        
+        async_fleet = AsyncFleet(api_key=api_key)
+        async_env = await async_fleet.make("dropbox:Forge1.1.0")
+        
+        try:
+            db = async_env.db()
+            schema = await db.describe()
+            assert schema is not None
+            print("✅ Async database describe successful")
+        finally:
+            await async_env.close()
     
     @pytest.mark.asyncio
-    async def test_async_database_query_with_args(self, async_env):
+    async def test_async_database_query_with_args(self):
         """Test async database query with arguments."""
-        db = async_env.db()
-        result = await db.query("SELECT ? as test_value", args=["test_data"])
-        assert result is not None
-        print("✅ Async database query with args successful")
+        import os
+        from fleet import AsyncFleet
+        
+        api_key = os.getenv("FLEET_API_KEY")
+        if not api_key:
+            pytest.skip("API key required for integration tests")
+        
+        async_fleet = AsyncFleet(api_key=api_key)
+        async_env = await async_fleet.make("dropbox:Forge1.1.0")
+        
+        try:
+            db = async_env.db()
+            result = await db.query("SELECT ? as test_value", args=["test_data"])
+            assert result is not None
+            print("✅ Async database query with args successful")
+        finally:
+            await async_env.close()
     
     @pytest.mark.asyncio
-    async def test_async_database_exec_with_args(self, async_env):
+    async def test_async_database_exec_with_args(self):
         """Test async database exec with arguments."""
-        db = async_env.db()
-        result = await db.exec("SELECT ? as test_value", args=["test_data"])
-        assert result is not None
-        print("✅ Async database exec with args successful")
+        import os
+        from fleet import AsyncFleet
+        
+        api_key = os.getenv("FLEET_API_KEY")
+        if not api_key:
+            pytest.skip("API key required for integration tests")
+        
+        async_fleet = AsyncFleet(api_key=api_key)
+        async_env = await async_fleet.make("dropbox:Forge1.1.0")
+        
+        try:
+            db = async_env.db()
+            result = await db.exec("SELECT ? as test_value", args=["test_data"])
+            assert result is not None
+            print("✅ Async database exec with args successful")
+        finally:
+            await async_env.close()
     
     @pytest.mark.asyncio
-    async def test_async_database_state_access(self, async_env):
+    async def test_async_database_state_access(self):
         """Test async database state access."""
-        db = async_env.state("sqlite://current")
-        assert db is not None
-        print("✅ Async database state access successful")
+        import os
+        from fleet import AsyncFleet
+        
+        api_key = os.getenv("FLEET_API_KEY")
+        if not api_key:
+            pytest.skip("API key required for integration tests")
+        
+        async_fleet = AsyncFleet(api_key=api_key)
+        async_env = await async_fleet.make("dropbox:Forge1.1.0")
+        
+        try:
+            db = async_env.state("sqlite://current")
+            assert db is not None
+            print("✅ Async database state access successful")
+        finally:
+            await async_env.close()
     
     @pytest.mark.asyncio
-    async def test_async_database_specific_db(self, async_env):
+    async def test_async_database_specific_db(self):
         """Test async accessing specific database by name."""
-        db = async_env.db("action_log")
-        assert db is not None
-        print("✅ Async database specific db access successful")
+        import os
+        from fleet import AsyncFleet
+        
+        api_key = os.getenv("FLEET_API_KEY")
+        if not api_key:
+            pytest.skip("API key required for integration tests")
+        
+        async_fleet = AsyncFleet(api_key=api_key)
+        async_env = await async_fleet.make("dropbox:Forge1.1.0")
+        
+        try:
+            db = async_env.db("action_log")
+            assert db is not None
+            print("✅ Async database specific db access successful")
+        finally:
+            await async_env.close()
 
 
 class TestDatabaseIntegration(BaseFleetTest):

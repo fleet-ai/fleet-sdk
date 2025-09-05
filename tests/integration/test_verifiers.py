@@ -186,26 +186,38 @@ class TestAsyncVerifiers(BaseVerifierTest):
         print("✅ Async verifier execution works")
     
     @pytest.mark.asyncio
-    async def test_async_verifier_with_real_environment(self, async_env):
+    async def test_async_verifier_with_real_environment(self):
         """Test async verifier with real async environment."""
+        import os
+        from fleet import AsyncFleet
         from fleet.verifiers.decorator import verifier
         
-        @verifier(key="test_async_real_env")
-        async def test_async_real_env_verifier(env) -> float:
-            try:
-                # Test async database access
-                db = env.db()
-                result = await db.query("SELECT 1 as test")
-                if result is not None:
-                    return 1.0
-                return 0.0
-            except Exception:
-                return 0.0
+        api_key = os.getenv("FLEET_API_KEY")
+        if not api_key:
+            pytest.skip("API key required for integration tests")
         
-        result = await test_async_real_env_verifier.remote(async_env)
-        assert isinstance(result, float)
-        assert result >= 0.0
-        print(f"✅ Async verifier with real environment: {result}")
+        async_fleet = AsyncFleet(api_key=api_key)
+        async_env = await async_fleet.make("dropbox:Forge1.1.0")
+        
+        try:
+            @verifier(key="test_async_real_env")
+            async def test_async_real_env_verifier(env) -> float:
+                try:
+                    # Test async database access
+                    db = env.db()
+                    result = await db.query("SELECT 1 as test")
+                    if result is not None:
+                        return 1.0
+                    return 0.0
+                except Exception:
+                    return 0.0
+            
+            result = await test_async_real_env_verifier.remote(async_env)
+            assert isinstance(result, float)
+            assert result >= 0.0
+            print(f"✅ Async verifier with real environment: {result}")
+        finally:
+            await async_env.close()
 
 
 class TestVerifierAdvanced(BaseFleetTest):
