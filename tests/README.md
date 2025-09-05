@@ -118,3 +118,26 @@ python -m pytest integration/ -m fast -n auto
 python -m pytest integration/ -n auto --api-key=your_key_here
 ```
 
+## 🔄 CI/CD Integration
+
+The test suite includes GitHub Actions workflow for automated testing:
+
+### **Manual Trigger Only**
+- Runs only when manually triggered (`workflow_dispatch`)
+- Supports multiple Python versions (3.9, 3.10, 3.11, 3.12)
+- Configurable test types and parallel execution
+
+### **Required Secrets**
+Set these in your GitHub repository settings:
+- `FLEET_API_KEY` - Your Fleet API key
+- `FLEET_TEST_ENV_KEY` - Test environment key (optional)
+
+### **Usage**
+1. Go to **Actions** tab in GitHub
+2. Select **Fleet SDK Test Suite**
+3. Click **Run workflow**
+4. Configure:
+   - **Test Type**: `all`, `fast`, `integration`, or `async`
+   - **Parallel**: Enable/disable parallel execution
+   - **Workers**: Number of workers (0 = auto-detect)
+
