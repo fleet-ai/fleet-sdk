@@ -172,9 +172,9 @@ class TestAsyncVerifiers(BaseVerifierTest):
     @pytest.mark.asyncio
     async def test_async_verifier_execution(self):
         """Test async verifier execution."""
-        from fleet.verifiers.decorator import verifier
+        from fleet import verifier as async_verifier
         
-        @verifier(key="test_async_execution")
+        @async_verifier(key="test_async_execution")
         async def test_async_verifier(env, param: str = "test") -> float:
             return 1.0 if param == "test" else 0.0
         
@@ -200,7 +200,8 @@ class TestAsyncVerifiers(BaseVerifierTest):
         async_env = await async_fleet.make("dropbox:Forge1.1.0")
         
         try:
-            @verifier(key="test_async_real_env")
+            from fleet import verifier as async_verifier
+            @async_verifier(key="test_async_real_env")
             async def test_async_real_env_verifier(env) -> float:
                 try:
                     # Test async database access

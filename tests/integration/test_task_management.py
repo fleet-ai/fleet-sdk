@@ -187,7 +187,8 @@ class TestAsyncTaskManagement(BaseFleetTest):
         async_env = await async_fleet.make("hubspot:Forge1.1.0")
         
         try:
-            @verifier(key="test_async_execution_verifier")
+            from fleet import verifier as async_verifier
+            @async_verifier(key="test_async_execution_verifier")
             async def test_async_execution_verifier(env) -> float:
                 try:
                     # Test async database access
