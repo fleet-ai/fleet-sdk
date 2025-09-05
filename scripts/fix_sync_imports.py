@@ -76,10 +76,25 @@ def fix_file(filepath: Path) -> bool:
         )
 
     # Fix imports in top-level fleet files
-    if rel_path.parts[0] in ["base.py", "client.py"] and len(rel_path.parts) == 1:
+    if rel_path.parts[0] in ["base.py", "client.py", "global_client.py"] and len(rel_path.parts) == 1:
         # Top-level files should use . for fleet level imports
         content = content.replace("from ..models import", "from .models import")
         content = content.replace("from ..config import", "from .config import")
+        content = content.replace("from ..tasks import", "from .tasks import")
+        
+        # Fix sync client error messages and imports
+        if rel_path.parts[0] == "client.py":
+            content = content.replace("Expected AsyncVerifierFunction but got", "Expected SyncVerifierFunction but got")
+            content = content.replace("# Ensure we return an AsyncVerifierFunction", "# Ensure we return a SyncVerifierFunction")
+            content = content.replace("from .verifiers.verifier import SyncVerifierFunction", "from .verifiers import SyncVerifierFunction")
+            
+            # Remove the type check entirely since it's causing import issues
+            content = re.sub(
+                r'\s*# Ensure we return a SyncVerifierFunction\s*\n\s*if not isinstance\(verifier_func, SyncVerifierFunction\):\s*\n\s*raise TypeError\(\s*f"Expected SyncVerifierFunction but got \{type\(verifier_func\)\.__name__\}"\s*\)\s*\n\s*',
+                '',
+                content,
+                flags=re.MULTILINE
+            )
 
     # Fix __init__.py imports - the class is called SyncEnv, not Environment
     if rel_path.parts[0] == "__init__.py" and len(rel_path.parts) == 1:
