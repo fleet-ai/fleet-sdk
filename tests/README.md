@@ -19,6 +19,12 @@ cd tests
 python run_tests.py
 ```
 
+### Run Unit Tests Only (No API Key Required)
+```bash
+cd tests/unit
+python run_unit_tests.py
+```
+
 
 ### Run Fast Tests First
 ```bash
@@ -42,18 +48,31 @@ tests/
 ├── pytest.ini                    # Pytest configuration
 ├── requirements.txt               # Test dependencies
 ├── run_tests.py                   # Test runner script
-└── integration/
+├── integration/                   # Integration tests (real API calls)
+│   ├── __init__.py
+│   ├── base_test.py               # Base test classes and utilities
+│   ├── test_sdk_imports.py        # SDK import and packaging tests
+│   ├── test_async_pattern.py      # Async pattern verification tests
+│   ├── test_environment_management.py  # Environment management tests
+│   ├── test_database_operations.py     # Database operation tests
+│   ├── test_browser_operations.py      # Browser operation tests
+│   ├── test_verifiers.py              # Verifier functionality tests
+│   ├── test_mcp_integration.py        # MCP integration tests
+│   ├── test_task_management.py        # Task management tests
+│   └── test_performance.py             # Performance measurement tests
+└── unit/                          # Unit tests (mock data only)
     ├── __init__.py
-    ├── base_test.py               # Base test classes and utilities
-    ├── test_sdk_imports.py        # SDK import and packaging tests
-    ├── test_async_pattern.py      # Async pattern verification tests
-    ├── test_environment_management.py  # Environment management tests
-    ├── test_database_operations.py     # Database operation tests
-    ├── test_browser_operations.py      # Browser operation tests
-    ├── test_verifiers.py              # Verifier functionality tests
-    ├── test_mcp_integration.py        # MCP integration tests
-    ├── test_task_management.py        # Task management tests
-    └── test_performance.py             # Performance measurement tests
+    ├── pytest.ini                 # Unit test configuration
+    ├── run_unit_tests.py          # Unit test runner script
+    ├── constants.py               # Mock data constants
+    ├── helpers.py                 # Mock factories and utilities
+    ├── base_test.py               # Base unit test classes
+    ├── test_client.py             # Fleet/AsyncFleet client tests
+    ├── test_environment.py        # Environment management tests
+    ├── test_resources.py          # Database/browser resource tests
+    ├── test_verifiers.py          # Verifier functionality tests
+    ├── test_tasks.py              # Task management tests
+    └── test_models.py             # Data model tests
 ```
 
 ## 🔧 Configuration
@@ -100,6 +119,44 @@ tests/
 - Browser operation time
 - Fast API call timing
 
+## 🧪 Unit Tests (Mock Data)
+
+### **Client Tests** (`test_client.py`)
+- Fleet and AsyncFleet client initialization
+- Configuration validation
+- Error handling scenarios
+- Interface consistency
+
+### **Environment Tests** (`test_environment.py`)
+- Environment creation and management
+- Environment listing and filtering
+- Resource access patterns
+- Lifecycle management
+
+### **Resource Tests** (`test_resources.py`)
+- Database resource operations
+- Browser resource operations
+- Query execution and results
+- Resource integration
+
+### **Verifier Tests** (`test_verifiers.py`)
+- Verifier decorator functionality
+- Sync and async verifier patterns
+- Execution and validation logic
+- Error handling scenarios
+
+### **Task Tests** (`test_tasks.py`)
+- Task creation and management
+- Task verification workflows
+- Task filtering and lifecycle
+- Performance characteristics
+
+### **Model Tests** (`test_models.py`)
+- Data model validation
+- Serialization and deserialization
+- Field validation and constraints
+- Model consistency
+
 ## ⚡ Parallel Execution
 
 Run tests in parallel for 2-4x faster execution:
@@ -140,4 +197,13 @@ Set these in your GitHub repository settings:
    - **Test Type**: `all`, `fast`, `integration`, or `async`
    - **Parallel**: Enable/disable parallel execution
    - **Workers**: Number of workers (0 = auto-detect)
+
+## 📈 Test Coverage
+
+- **171+ integration tests** covering all major SDK functionality
+- **100+ unit tests** with comprehensive mock data coverage
+- **Real API integration** with live environments
+- **Async/await pattern verification**
+- **Performance measurement** and optimization
+- **Mock data validation** for all SDK components
 
