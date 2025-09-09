@@ -44,7 +44,12 @@ from .instance import (
     ResetResponse,
     ExecuteFunctionResponse,
 )
-from .config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT, REGION_BASE_URL
+from .config import (
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_TIMEOUT,
+    REGION_BASE_URL,
+    GLOBAL_BASE_URL,
+)
 from .instance.base import default_httpx_client
 from .instance.client import ValidatorType
 from .resources.base import Resource
@@ -196,7 +201,12 @@ class Fleet:
         response = self.client.request("GET", f"/v1/env/{env_key}")
         return EnvironmentModel(**response.json())
 
-    def make(self, env_key: str, region: Optional[str] = None, env_variables: Optional[Dict[str, Any]] = None) -> SyncEnv:
+    def make(
+        self,
+        env_key: str,
+        region: Optional[str] = None,
+        env_variables: Optional[Dict[str, Any]] = None,
+    ) -> SyncEnv:
         if ":" in env_key:
             env_key_part, version = env_key.split(":", 1)
             if (
@@ -210,14 +220,23 @@ class Fleet:
             version = None
 
         request = InstanceRequest(
-            env_key=env_key_part, version=version, region=region, env_variables=env_variables, created_from="sdk"
+            env_key=env_key_part,
+            version=version,
+            region=region,
+            env_variables=env_variables,
+            created_from="sdk",
         )
-        region_base_url = REGION_BASE_URL.get(region)
+
+        # Only use region-specific base URL if no custom base URL is set
+        base_url = None
+        if region and self.client.base_url == GLOBAL_BASE_URL:
+            base_url = REGION_BASE_URL.get(region)
+
         response = self.client.request(
             "POST",
             "/v1/env/instances",
             json=request.model_dump(exclude_none=True),
-            base_url=region_base_url,
+            base_url=base_url,
         )
 
         instance = SyncEnv(client=self.client, **response.json())
@@ -254,9 +273,7 @@ class Fleet:
     def execute_verifier_remote(
         self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
     ) -> VerifiersExecuteResponse:
-        return _execute_verifier_remote(
-            self.client, bundle_data, args, kwargs, timeout
-        )
+        return _execute_verifier_remote(self.client, bundle_data, args, kwargs, timeout)
 
     def delete(self, instance_id: str) -> InstanceResponse:
         return _delete_instance(self.client, instance_id)
@@ -267,9 +284,7 @@ class Fleet:
 
         return self.load_task_array_from_string(tasks_data)
 
-    def load_task_array_from_string(
-        self, serialized_tasks: List[Dict]
-    ) -> List[Task]:
+    def load_task_array_from_string(self, serialized_tasks: List[Dict]) -> List[Task]:
         tasks = []
 
         json_tasks = json.loads(serialized_tasks)
@@ -308,11 +323,11 @@ class Fleet:
         return task
 
     def load_tasks(
-        self, 
+        self,
         env_key: Optional[str] = None,
         keys: Optional[List[str]] = None,
         version: Optional[str] = None,
-        team_id: Optional[str] = None
+        team_id: Optional[str] = None,
     ) -> List[Task]:
         """Load tasks for the authenticated team, with optional filtering.
 
@@ -498,7 +513,7 @@ class Fleet:
         """
         from .tasks import verifier_from_string
         from .verifiers import SyncVerifierFunction
-        
+
         # Use verifier_from_string to create the verifier
         verifier_func = verifier_from_string(
             verifier_func=verifier_code,
@@ -506,7 +521,7 @@ class Fleet:
             verifier_key=verifier_key,
             sha256=verifier_sha,
         )
-        
+
         # Store the original verifier code for reference
         verifier_func._verifier_code = verifier_code
 
