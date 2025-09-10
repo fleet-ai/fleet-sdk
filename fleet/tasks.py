@@ -37,11 +37,6 @@ class Task(BaseModel):
 
     @validator("key")
     def validate_key_format(cls, v):
-        """Validate key follows kebab-case format."""
-        if not re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", v):
-            raise ValueError(
-                f"Invalid task key format: {v}. Must follow kebab-case format."
-            )
         return v
 
     @validator("created_at", pre=True, always=True)
