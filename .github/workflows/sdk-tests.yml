@@ -134,11 +134,13 @@ jobs:
           const testEmoji = testType === 'unit' ? '🔬' : '🧪';
           const testDescription = testType === 'unit' ? 'Unit Tests (Mock Data)' : 'Integration Tests';
           
+          const workers = '${{ github.event.inputs.workers }}' === '0' ? 'auto' : '${{ github.event.inputs.workers }}';
+          
           const summary = `## ${testEmoji} Test Results for Python ${{ matrix.python-version }}
           
           **Test Type:** ${testDescription}
           **Parallel:** ${{ github.event.inputs.parallel }}
-          **Workers:** ${{ github.event.inputs.workers === '0' ? 'auto' : github.event.inputs.workers }}
+          **Workers:** ${workers}
           
           ✅ Tests completed successfully!`;
           
