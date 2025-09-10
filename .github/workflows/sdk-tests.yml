@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - all
+          - unit
           - fast
           - integration
           - async
@@ -30,7 +31,7 @@ jobs:
     
     strategy:
       matrix:
-        python-version: [3.9, 3.10, 3.11, 3.12]
+        python-version: [3.8, 3.9, 3.10, 3.11, 3.12]
     
     steps:
     - name: Checkout code
@@ -52,6 +53,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
+        pip install -e .
         pip install -r tests/requirements.txt
     
     - name: Set up test environment
@@ -59,8 +61,12 @@ jobs:
         FLEET_API_KEY: ${{ secrets.FLEET_API_KEY }}
         FLEET_TEST_ENV_KEY: ${{ secrets.FLEET_TEST_ENV_KEY }}
       run: |
-        echo "API Key configured: ${{ secrets.FLEET_API_KEY != '' }}"
-        echo "Test Environment Key configured: ${{ secrets.FLEET_TEST_ENV_KEY != '' }}"
+        if [ "${{ github.event.inputs.test_type }}" != "unit" ]; then
+          echo "API Key configured: ${{ secrets.FLEET_API_KEY != '' }}"
+          echo "Test Environment Key configured: ${{ secrets.FLEET_TEST_ENV_KEY != '' }}"
+        else
+          echo "Unit tests - no API keys required (using mock data)"
+        fi
     
     - name: Run tests
       env:
@@ -73,7 +79,9 @@ jobs:
         CMD="python -m pytest"
         
         # Add test selection
-        if [ "${{ github.event.inputs.test_type }}" = "fast" ]; then
+        if [ "${{ github.event.inputs.test_type }}" = "unit" ]; then
+          CMD="$CMD unit/"
+        elif [ "${{ github.event.inputs.test_type }}" = "fast" ]; then
           CMD="$CMD -m fast"
         elif [ "${{ github.event.inputs.test_type }}" = "integration" ]; then
           CMD="$CMD integration/"
@@ -83,7 +91,7 @@ jobs:
           CMD="$CMD integration/"
         fi
         
-        # Add parallel execution
+        # Add parallel execution (unit tests can run in parallel)
         if [ "${{ github.event.inputs.parallel }}" = "true" ]; then
           if [ "${{ github.event.inputs.workers }}" = "0" ]; then
             CMD="$CMD -n auto"
@@ -92,8 +100,12 @@ jobs:
           fi
         fi
         
-        # Add common options
-        CMD="$CMD -v --tb=short --timeout=300"
+        # Add common options with different timeouts
+        if [ "${{ github.event.inputs.test_type }}" = "unit" ]; then
+          CMD="$CMD -v --tb=short --timeout=30"
+        else
+          CMD="$CMD -v --tb=short --timeout=300"
+        fi
         
         echo "Running: $CMD"
         $CMD
@@ -102,10 +114,11 @@ jobs:
       uses: actions/upload-artifact@v3
       if: always()
       with:
-        name: test-results-${{ matrix.python-version }}
+        name: test-results-${{ github.event.inputs.test_type }}-${{ matrix.python-version }}
         path: |
           tests/.pytest_cache/
           tests/htmlcov/
+          tests/unit/.pytest_cache/
         retention-days: 7
     
     - name: Comment on PR (if applicable)
@@ -117,9 +130,13 @@ jobs:
           const path = require('path');
           
           // Look for test result files and create a summary
-          const summary = `## 🧪 Test Results for Python ${{ matrix.python-version }}
+          const testType = '${{ github.event.inputs.test_type }}';
+          const testEmoji = testType === 'unit' ? '🔬' : '🧪';
+          const testDescription = testType === 'unit' ? 'Unit Tests (Mock Data)' : 'Integration Tests';
           
-          **Test Type:** ${{ github.event.inputs.test_type }}
+          const summary = `## ${testEmoji} Test Results for Python ${{ matrix.python-version }}
+          
+          **Test Type:** ${testDescription}
           **Parallel:** ${{ github.event.inputs.parallel }}
           **Workers:** ${{ github.event.inputs.workers === '0' ? 'auto' : github.event.inputs.workers }}
           
