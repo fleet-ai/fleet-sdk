@@ -1,0 +1,10 @@
+# Fleet SDK Integration Test Dependencies
+
+# Core testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-timeout>=2.1.0
+
+# Additional testing utilities
+pytest-xdist>=3.0.0  # Parallel test execution
+pytest-mock>=3.10.0  # Enhanced mocking
