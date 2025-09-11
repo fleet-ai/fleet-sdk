@@ -47,10 +47,10 @@ from ._async.verifiers import (
 )
 
 # Import async tasks (default tasks are async for modern usage)  
-from ._async.tasks import Task, load_tasks
+from ._async.tasks import Task, load_tasks as load_tasks_async
 
 # Import sync load_tasks function
-from .tasks import load_tasks as load_tasks_sync
+from .tasks import load_tasks
 
 # Import shared types
 from .types import VerifierFunction
@@ -99,7 +99,7 @@ __all__ = [
     "reset_client",
     # Module-level functions (async is default)
     "load_tasks",
-    "load_tasks_sync",
+    "load_tasks_async",
     # Version
     "__version__",
 ]
