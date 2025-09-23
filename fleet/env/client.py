@@ -3,8 +3,15 @@ from ..models import Environment as EnvironmentModel, AccountResponse
 from typing import List, Optional, Dict, Any
 
 
-def make(env_key: str, region: Optional[str] = None, env_variables: Optional[Dict[str, Any]] = None) -> SyncEnv:
-    return Fleet().make(env_key, region=region, env_variables=env_variables)
+def make(
+    env_key: str,
+    data_key: Optional[str] = None,
+    region: Optional[str] = None,
+    env_variables: Optional[Dict[str, Any]] = None,
+) -> SyncEnv:
+    return Fleet().make(
+        env_key, data_key=data_key, region=region, env_variables=env_variables
+    )
 
 
 def make_for_task_async(task: Task) -> SyncEnv:
