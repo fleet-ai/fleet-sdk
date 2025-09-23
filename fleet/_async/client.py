@@ -14,6 +14,7 @@
 
 """Fleet API Client for making HTTP requests to Fleet services."""
 
+import asyncio
 import base64
 import cloudpickle
 import httpx
@@ -286,7 +287,7 @@ class AsyncFleet:
         with open(filename, "r", encoding="utf-8") as f:
             tasks_data = f.read()
 
-        return self.load_task_array_from_string(tasks_data)
+        return await self.load_task_array_from_string(tasks_data)
 
     async def load_task_array_from_string(
         self, serialized_tasks: List[Dict]
@@ -295,18 +296,19 @@ class AsyncFleet:
 
         json_tasks = json.loads(serialized_tasks)
         for json_task in json_tasks:
-            parsed_task = self.load_task_from_json(json_task)
+            parsed_task = await self.load_task_from_json(json_task)
             tasks.append(parsed_task)
         return tasks
 
     async def load_task_from_string(self, task_string: str) -> Task:
         task_json = json.loads(task_string)
-        return self.load_task_from_json(task_json)
+        return await self.load_task_from_json(task_json)
 
     async def load_task_from_json(self, task_json: Dict) -> Task:
+        verifier = None
         try:
             if "verifier_id" in task_json and task_json["verifier_id"]:
-                verifier = self._create_verifier_from_data(
+                verifier = await self._create_verifier_from_data(
                     verifier_id=task_json["verifier_id"],
                     verifier_key=task_json["key"],
                     verifier_code=task_json["verifier_func"],
@@ -357,48 +359,95 @@ class AsyncFleet:
         response = await self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
 
-        # Transform TaskResponse objects to Task objects
-        tasks = []
-        for task_response in task_list_response.tasks:
-            # Create verifier function if verifier data is present
-            verifier = None
-            verifier_func = task_response.verifier_func
+        # Prepare verifier loading coroutines
+        verifier_coroutines = []
+        task_responses_with_indices = []
 
+        for idx, task_response in enumerate(task_list_response.tasks):
             if task_response.verifier:
                 embedded_code = task_response.verifier.code or ""
                 is_embedded_error = embedded_code.strip().startswith(
                     "<error loading code:"
                 )
-                if not is_embedded_error:
-                    # Only override if the embedded code looks valid
-                    verifier_func = embedded_code
-                    # Create VerifierFunction from the embedded data
-                    try:
-                        verifier = await self._create_verifier_from_data(
-                            verifier_id=task_response.verifier.verifier_id,
-                            verifier_key=task_response.verifier.key,
-                            verifier_code=embedded_code,
-                            verifier_sha=task_response.verifier.sha256,
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to create verifier {task_response.verifier.key}: {e}"
-                        )
-                else:
-                    # Fallback: try fetching by ID if embedded code failed to load
-                    try:
-                        logger.warning(
-                            f"Embedded verifier code missing for {task_response.verifier.key} (NoSuchKey). "
-                            f"Attempting to refetch by id {task_response.verifier.verifier_id}"
-                        )
-                        verifier = await self._load_verifier(
-                            task_response.verifier.verifier_id
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Refetch by verifier id failed for {task_response.verifier.key}: {e}. "
-                            "Leaving verifier unset."
-                        )
+
+                async def create_verifier_with_fallback(tr, emb_code, is_error):
+                    """Create verifier with fallback logic."""
+                    if not is_error:
+                        # Try to create from embedded data
+                        try:
+                            return await self._create_verifier_from_data(
+                                verifier_id=tr.verifier.verifier_id,
+                                verifier_key=tr.verifier.key,
+                                verifier_code=emb_code,
+                                verifier_sha=tr.verifier.sha256,
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to create verifier {tr.verifier.key}: {e}"
+                            )
+                            return None
+                    else:
+                        # Fallback: try fetching by ID
+                        try:
+                            logger.warning(
+                                f"Embedded verifier code missing for {tr.verifier.key} (NoSuchKey). "
+                                f"Attempting to refetch by id {tr.verifier.verifier_id}"
+                            )
+                            return await self._load_verifier(tr.verifier.verifier_id)
+                        except Exception as e:
+                            logger.warning(
+                                f"Refetch by verifier id failed for {tr.verifier.key}: {e}. "
+                                "Leaving verifier unset."
+                            )
+                            return None
+
+                # Add the coroutine for parallel execution
+                verifier_coroutines.append(
+                    create_verifier_with_fallback(
+                        task_response, embedded_code, is_embedded_error
+                    )
+                )
+                task_responses_with_indices.append((idx, task_response))
+            else:
+                # No verifier needed
+                verifier_coroutines.append(None)
+                task_responses_with_indices.append((idx, task_response))
+
+        # Execute all verifier loading in parallel
+        if verifier_coroutines:
+            verifier_results = await asyncio.gather(
+                *[
+                    coro if coro is not None else asyncio.sleep(0)
+                    for coro in verifier_coroutines
+                ],
+                return_exceptions=True,
+            )
+        else:
+            verifier_results = []
+
+        # Build tasks with results
+        tasks = []
+        for (idx, task_response), verifier_result in zip(
+            task_responses_with_indices, verifier_results
+        ):
+            # Handle verifier result
+            verifier = None
+            verifier_func = task_response.verifier_func
+
+            if task_response.verifier:
+                # Process verifier result
+                if isinstance(verifier_result, Exception):
+                    logger.warning(
+                        f"Verifier loading failed for {task_response.key}: {verifier_result}"
+                    )
+                elif verifier_result is not None:
+                    verifier = verifier_result
+                    embedded_code = task_response.verifier.code or ""
+                    is_embedded_error = embedded_code.strip().startswith(
+                        "<error loading code:"
+                    )
+                    if not is_embedded_error:
+                        verifier_func = embedded_code
 
             task = Task(
                 key=task_response.key,
@@ -507,7 +556,7 @@ class AsyncFleet:
         self,
         task_key: str,
         prompt: Optional[str] = None,
-        verifier_code: Optional[str] = None
+        verifier_code: Optional[str] = None,
     ) -> TaskResponse:
         """Update an existing task.
 
@@ -519,10 +568,7 @@ class AsyncFleet:
         Returns:
             TaskResponse containing the updated task details
         """
-        payload = TaskUpdateRequest(
-            prompt=prompt,
-            verifier_code=verifier_code
-        )
+        payload = TaskUpdateRequest(prompt=prompt, verifier_code=verifier_code)
         response = await self.client.request(
             "PUT", f"/v1/tasks/{task_key}", json=payload.model_dump(exclude_none=True)
         )
@@ -542,8 +588,7 @@ class AsyncFleet:
         Returns:
             AsyncVerifierFunction created from the verifier code
         """
-        from ..tasks import verifier_from_string
-        from .verifiers.verifier import AsyncVerifierFunction
+        from .tasks import verifier_from_string
 
         # Use verifier_from_string to create the verifier
         verifier_func = verifier_from_string(
