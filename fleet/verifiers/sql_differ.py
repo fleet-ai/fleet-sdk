@@ -1,5 +1,5 @@
 import sqlite3
-from typing import Any
+from typing import Any, Optional, List, Dict, Tuple
 
 
 class SQLiteDiffer:
@@ -7,7 +7,7 @@ class SQLiteDiffer:
         self.before_db = before_db
         self.after_db = after_db
 
-    def get_table_schema(self, db_path: str, table_name: str) -> list[str]:
+    def get_table_schema(self, db_path: str, table_name: str) -> List[str]:
         """Get column names for a table"""
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -16,7 +16,7 @@ class SQLiteDiffer:
         conn.close()
         return columns
 
-    def get_primary_key_columns(self, db_path: str, table_name: str) -> list[str]:
+    def get_primary_key_columns(self, db_path: str, table_name: str) -> List[str]:
         """Get all primary key columns for a table, ordered by their position"""
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -34,7 +34,7 @@ class SQLiteDiffer:
         pk_columns.sort(key=lambda x: x[0])
         return [col[1] for col in pk_columns]
 
-    def get_all_tables(self, db_path: str) -> list[str]:
+    def get_all_tables(self, db_path: str) -> List[str]:
         """Get all table names from database"""
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -49,8 +49,8 @@ class SQLiteDiffer:
         self,
         db_path: str,
         table_name: str,
-        primary_key_columns: list[str] | None = None,
-    ) -> tuple[dict[Any, dict], list[str]]:
+        primary_key_columns: Optional[List[str]] = None,
+    ) -> Tuple[Dict[Any, dict], List[str]]:
         """Get table data indexed by primary key (single column or composite)"""
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -97,7 +97,7 @@ class SQLiteDiffer:
         conn.close()
         return data, primary_key_columns
 
-    def compare_rows(self, before_row: dict, after_row: dict) -> dict[str, dict]:
+    def compare_rows(self, before_row: dict, after_row: dict) -> Dict[str, dict]:
         """Compare two rows field by field"""
         changes = {}
 
@@ -113,7 +113,7 @@ class SQLiteDiffer:
         return changes
 
     def diff_table(
-        self, table_name: str, primary_key_columns: list[str] | None = None
+        self, table_name: str, primary_key_columns: Optional[List[str]] = None
     ) -> dict:
         """Create comprehensive diff of a table"""
         before_data, detected_pk = self.get_table_data(

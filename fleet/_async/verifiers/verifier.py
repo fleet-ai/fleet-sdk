@@ -12,7 +12,7 @@ import uuid
 import logging
 import hashlib
 import asyncio
-from typing import Any, Callable, Dict, Optional, List, TypeVar, Set
+from typing import Any, Callable, Dict, Optional, List, TypeVar, Set, Tuple
 
 from .bundler import FunctionBundler
 from ..client import AsyncEnv
@@ -56,7 +56,7 @@ class AsyncVerifierFunction:
         # Copy function metadata
         functools.update_wrapper(self, func)
 
-    def _get_or_create_bundle(self) -> tuple[bytes, str]:
+    def _get_or_create_bundle(self) -> Tuple[bytes, str]:
         """Get or create bundle data and return (bundle_data, sha)."""
         if self._bundle_data is None or self._bundle_sha is None:
             # If we have raw code, create a bundle from it
@@ -98,7 +98,7 @@ class AsyncVerifierFunction:
 
         return self._bundle_data, self._bundle_sha
 
-    async def _check_bundle_status(self, env: AsyncEnv) -> tuple[str, bool]:
+    async def _check_bundle_status(self, env: AsyncEnv) -> Tuple[str, bool]:
         """Check if bundle needs to be uploaded and return (sha, needs_upload)."""
         bundle_data, bundle_sha = self._get_or_create_bundle()
 
