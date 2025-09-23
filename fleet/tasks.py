@@ -47,7 +47,7 @@ class Task(BaseModel):
     @property
     def env_key(self) -> str:
         """Get the environment key combining env_id and version."""
-        if self.version:
+        if self.version and self.version != "None":
             return f"{self.env_id}:{self.version}"
         return self.env_id
 

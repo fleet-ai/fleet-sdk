@@ -16,6 +16,7 @@
 
 import base64
 import cloudpickle
+import concurrent.futures
 import httpx
 import json
 import logging
@@ -353,48 +354,107 @@ class Fleet:
         response = self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
 
-        # Transform TaskResponse objects to Task objects
-        tasks = []
-        for task_response in task_list_response.tasks:
-            # Create verifier function if verifier data is present
-            verifier = None
-            verifier_func = task_response.verifier_func
+        # Prepare verifier loading tasks
+        verifier_tasks = []
+        task_responses_with_indices = []
 
+        for idx, task_response in enumerate(task_list_response.tasks):
             if task_response.verifier:
                 embedded_code = task_response.verifier.code or ""
                 is_embedded_error = embedded_code.strip().startswith(
                     "<error loading code:"
                 )
-                if not is_embedded_error:
-                    # Only override if the embedded code looks valid
-                    verifier_func = embedded_code
-                    # Create VerifierFunction from the embedded data
-                    try:
-                        verifier = self._create_verifier_from_data(
-                            verifier_id=task_response.verifier.verifier_id,
-                            verifier_key=task_response.verifier.key,
-                            verifier_code=embedded_code,
-                            verifier_sha=task_response.verifier.sha256,
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to create verifier {task_response.verifier.key}: {e}"
-                        )
-                else:
-                    # Fallback: try fetching by ID if embedded code failed to load
-                    try:
-                        logger.warning(
-                            f"Embedded verifier code missing for {task_response.verifier.key} (NoSuchKey). "
-                            f"Attempting to refetch by id {task_response.verifier.verifier_id}"
-                        )
-                        verifier = self._load_verifier(
-                            task_response.verifier.verifier_id
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Refetch by verifier id failed for {task_response.verifier.key}: {e}. "
-                            "Leaving verifier unset."
-                        )
+
+                def create_verifier_with_fallback(tr, emb_code, is_error):
+                    """Create verifier with fallback logic."""
+                    if not is_error:
+                        # Try to create from embedded data
+                        try:
+                            return self._create_verifier_from_data(
+                                verifier_id=tr.verifier.verifier_id,
+                                verifier_key=tr.verifier.key,
+                                verifier_code=emb_code,
+                                verifier_sha=tr.verifier.sha256,
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"Failed to create verifier {tr.verifier.key}: {e}"
+                            )
+                            return None
+                    else:
+                        # Fallback: try fetching by ID
+                        try:
+                            logger.warning(
+                                f"Embedded verifier code missing for {tr.verifier.key} (NoSuchKey). "
+                                f"Attempting to refetch by id {tr.verifier.verifier_id}"
+                            )
+                            return self._load_verifier(tr.verifier.verifier_id)
+                        except Exception as e:
+                            logger.warning(
+                                f"Refetch by verifier id failed for {tr.verifier.key}: {e}. "
+                                "Leaving verifier unset."
+                            )
+                            return None
+
+                # Add the task for parallel execution
+                verifier_tasks.append(
+                    (
+                        create_verifier_with_fallback,
+                        task_response,
+                        embedded_code,
+                        is_embedded_error,
+                    )
+                )
+                task_responses_with_indices.append((idx, task_response))
+            else:
+                # No verifier needed
+                verifier_tasks.append(None)
+                task_responses_with_indices.append((idx, task_response))
+
+        # Execute all verifier loading in parallel using ThreadPoolExecutor
+        verifier_results = []
+        if verifier_tasks:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                futures = []
+                for task in verifier_tasks:
+                    if task is not None:
+                        func, tr, emb_code, is_error = task
+                        future = executor.submit(func, tr, emb_code, is_error)
+                        futures.append(future)
+                    else:
+                        futures.append(None)
+
+                # Collect results
+                for future in futures:
+                    if future is None:
+                        verifier_results.append(None)
+                    else:
+                        try:
+                            result = future.result()
+                            verifier_results.append(result)
+                        except Exception as e:
+                            logger.warning(f"Verifier loading failed: {e}")
+                            verifier_results.append(None)
+
+        # Build tasks with results
+        tasks = []
+        for (idx, task_response), verifier_result in zip(
+            task_responses_with_indices, verifier_results
+        ):
+            # Handle verifier result
+            verifier = None
+            verifier_func = task_response.verifier_func
+
+            if task_response.verifier:
+                # Process verifier result
+                if verifier_result is not None:
+                    verifier = verifier_result
+                    embedded_code = task_response.verifier.code or ""
+                    is_embedded_error = embedded_code.strip().startswith(
+                        "<error loading code:"
+                    )
+                    if not is_embedded_error:
+                        verifier_func = embedded_code
 
             task = Task(
                 key=task_response.key,
@@ -503,7 +563,7 @@ class Fleet:
         self,
         task_key: str,
         prompt: Optional[str] = None,
-        verifier_code: Optional[str] = None
+        verifier_code: Optional[str] = None,
     ) -> TaskResponse:
         """Update an existing task.
 
@@ -515,10 +575,7 @@ class Fleet:
         Returns:
             TaskResponse containing the updated task details
         """
-        payload = TaskUpdateRequest(
-            prompt=prompt,
-            verifier_code=verifier_code
-        )
+        payload = TaskUpdateRequest(prompt=prompt, verifier_code=verifier_code)
         response = self.client.request(
             "PUT", f"/v1/tasks/{task_key}", json=payload.model_dump(exclude_none=True)
         )
