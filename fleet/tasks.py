@@ -27,7 +27,9 @@ class Task(BaseModel):
     version: Optional[str] = Field(None, description="Task version")
     verifier_func: Optional[str] = Field(None, description="Verifier function code")
     verifier: Optional[Any] = Field(
-        None, description="Verifier function with decorator (async or sync)"
+        None,
+        description="Verifier function with decorator (async or sync)",
+        exclude=True,
     )
     verifier_id: Optional[str] = Field(None, description="Verifier identifier")
     verifier_sha: Optional[str] = Field(None, description="Verifier SHA256 hash")
@@ -66,6 +68,10 @@ class Task(BaseModel):
         For sync environments, calls the sync verifier directly.
         For async verifiers, automatically runs them with asyncio.run().
         """
+        # If verifier doesn't exist but verifier_func does, rebuild it
+        if not self.verifier and self.verifier_func:
+            self._rebuild_verifier()
+
         if self.verifier:
             import inspect
 
@@ -96,6 +102,10 @@ class Task(BaseModel):
         For async environments, awaits the async verifier.
         Works with both sync and async verifiers in async contexts.
         """
+        # If verifier doesn't exist but verifier_func does, rebuild it
+        if not self.verifier and self.verifier_func:
+            self._rebuild_verifier()
+
         if self.verifier:
             result = self.verifier.remote(*args, **kwargs)
             # If it's a coroutine, await it
@@ -107,6 +117,19 @@ class Task(BaseModel):
                 return result
         else:
             raise ValueError("No verifier function found for this task")
+
+    def _rebuild_verifier(self):
+        """Rebuild the verifier from verifier_func string if it exists."""
+        if self.verifier_func:
+            # Use the same logic as in verifier_from_string
+            verifier_id = self.verifier_id or self.key
+            verifier = verifier_from_string(
+                verifier_func=self.verifier_func,
+                verifier_id=verifier_id,
+                verifier_key=self.key,
+                sha256=self.verifier_sha or "",
+            )
+            self.verifier = verifier
 
     def make_env(self, region: Optional[str] = None):
         """Create an environment instance for this task's environment.
