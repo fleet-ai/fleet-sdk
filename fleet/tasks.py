@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import re
 import asyncio
 from datetime import datetime
 from typing import Any, Dict, Optional, List
-from uuid import UUID
 
 from pydantic import BaseModel, Field, validator
 
@@ -268,7 +266,6 @@ def update_task(
         response = fleet.update_task("my-task", verifier_code="def verify(env): return True")
     """
     from .global_client import get_client
-    from .models import TaskResponse
 
     client = get_client()
     return client.update_task(
