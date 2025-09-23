@@ -156,6 +156,11 @@ class TaskRequest(BaseModel):
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
 
 
+class TaskUpdateRequest(BaseModel):
+    prompt: Optional[str] = Field(None, title="Prompt")
+    verifier_code: Optional[str] = Field(None, title="Verifier Code")
+
+
 class VerifierData(BaseModel):
     verifier_id: str = Field(..., title="Verifier Id")
     key: str = Field(..., title="Key")

@@ -32,6 +32,8 @@ from .models import (
     TaskListResponse,
     AccountResponse,
     TaskRequest,
+    TaskResponse,
+    TaskUpdateRequest,
 )
 from .tasks import Task
 
@@ -496,6 +498,31 @@ class Fleet:
         """
         response = self.client.request("GET", "/v1/account")
         return AccountResponse(**response.json())
+
+    def update_task(
+        self,
+        task_key: str,
+        prompt: Optional[str] = None,
+        verifier_code: Optional[str] = None
+    ) -> TaskResponse:
+        """Update an existing task.
+
+        Args:
+            task_key: The key of the task to update
+            prompt: New prompt text for the task (optional)
+            verifier_code: Python code for task verification (optional)
+
+        Returns:
+            TaskResponse containing the updated task details
+        """
+        payload = TaskUpdateRequest(
+            prompt=prompt,
+            verifier_code=verifier_code
+        )
+        response = self.client.request(
+            "PUT", f"/v1/tasks/{task_key}", json=payload.model_dump(exclude_none=True)
+        )
+        return TaskResponse(**response.json())
 
     def _create_verifier_from_data(
         self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str

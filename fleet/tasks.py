@@ -232,8 +232,38 @@ def load_tasks(
 
     client = get_client()
     return client.load_tasks(
-        env_key=env_key, 
-        keys=keys, 
-        version=version, 
+        env_key=env_key,
+        keys=keys,
+        version=version,
         team_id=team_id
+    )
+
+
+def update_task(
+    task_key: str,
+    prompt: Optional[str] = None,
+    verifier_code: Optional[str] = None
+):
+    """Convenience function to update an existing task.
+
+    Args:
+        task_key: The key of the task to update
+        prompt: New prompt text for the task (optional)
+        verifier_code: Python code for task verification (optional)
+
+    Returns:
+        TaskResponse containing the updated task details
+
+    Examples:
+        response = fleet.update_task("my-task", prompt="New prompt text")
+        response = fleet.update_task("my-task", verifier_code="def verify(env): return True")
+    """
+    from .global_client import get_client
+    from .models import TaskResponse
+
+    client = get_client()
+    return client.update_task(
+        task_key=task_key,
+        prompt=prompt,
+        verifier_code=verifier_code
     )
