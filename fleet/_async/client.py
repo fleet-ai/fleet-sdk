@@ -377,7 +377,7 @@ class AsyncFleet:
         # Prepare verifier loading coroutines with concurrency limit
         verifier_coroutines = []
         task_responses_with_indices = []
-        semaphore = asyncio.Semaphore(10)  # Limit to 10 concurrent operations
+        semaphore = asyncio.Semaphore(100)  # Limit to 10 concurrent operations
 
         for idx, task_response in enumerate(task_list_response.tasks):
             if task_response.verifier:
@@ -632,7 +632,7 @@ class AsyncFleet:
             AsyncVerifierFunction created from the verifier code
         """
         # Fetch verifier from API
-        response = await self.client.request("GET", f"/v1/verifier/{verifier_id}")
+        response = await self.client.request("GET", f"/v1/verifiers/{verifier_id}")
         verifier_data = response.json()
 
         # Use the common method to create verifier

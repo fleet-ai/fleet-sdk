@@ -636,7 +636,7 @@ class Fleet:
             AsyncVerifierFunction created from the verifier code
         """
         # Fetch verifier from API
-        response = self.client.request("GET", f"/v1/verifier/{verifier_id}")
+        response = self.client.request("GET", f"/v1/verifiers/{verifier_id}")
         verifier_data = response.json()
 
         # Use the common method to create verifier
