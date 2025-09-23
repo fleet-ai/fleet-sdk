@@ -12,10 +12,22 @@ import uuid
 import logging
 import hashlib
 import inspect
-from typing import Any, Callable, Dict, Optional, List, TypeVar, Set
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Optional,
+    List,
+    TypeVar,
+    Set,
+    TYPE_CHECKING,
+    Tuple,
+)
 
 from .bundler import FunctionBundler
-from ..client import SyncEnv
+
+if TYPE_CHECKING:
+    from ..client import SyncEnv
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +68,7 @@ class SyncVerifierFunction:
         # Copy function metadata
         functools.update_wrapper(self, func)
 
-    def _get_or_create_bundle(self) -> tuple[bytes, str]:
+    def _get_or_create_bundle(self) -> Tuple[bytes, str]:
         """Get or create bundle data and return (bundle_data, sha)."""
         if self._bundle_data is None or self._bundle_sha is None:
             # If we have raw code, create a bundle from it
@@ -98,7 +110,7 @@ class SyncVerifierFunction:
 
         return self._bundle_data, self._bundle_sha
 
-    def _check_bundle_status(self, env: SyncEnv) -> tuple[str, bool]:
+    def _check_bundle_status(self, env: "SyncEnv") -> Tuple[str, bool]:
         """Check if bundle needs to be uploaded and return (sha, needs_upload)."""
         bundle_data, bundle_sha = self._get_or_create_bundle()
 
@@ -129,7 +141,7 @@ class SyncVerifierFunction:
         logger.info(f"Bundle {bundle_sha[:8]}... needs to be uploaded")
         return bundle_sha, True  # Upload needed
 
-    def __call__(self, env: SyncEnv, *args, **kwargs) -> float:
+    def __call__(self, env: "SyncEnv", *args, **kwargs) -> float:
         """Local execution of the verifier function with env as first parameter."""
         try:
             if self._is_async:
@@ -160,7 +172,7 @@ class SyncVerifierFunction:
             # Return error score 0
             return 0.0
 
-    def remote(self, env: SyncEnv, *args, **kwargs) -> float:
+    def remote(self, env: "SyncEnv", *args, **kwargs) -> float:
         """Remote execution of the verifier function with SHA-based bundle caching."""
         # Async verifiers are now supported by the backend
         # if self._is_async:
@@ -272,7 +284,7 @@ Remote traceback:
         except:
             raise RuntimeError(full_message)
 
-    def _get_env_id(self, env: SyncEnv) -> str:
+    def _get_env_id(self, env: "SyncEnv") -> str:
         """Generate a unique identifier for the environment."""
         # Use instance base URL or similar unique identifier
         if hasattr(env, "instance") and hasattr(env.instance, "base_url"):

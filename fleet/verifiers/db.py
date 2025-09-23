@@ -22,9 +22,11 @@ import json
 #  Low‑level helpers
 ################################################################################
 
-SQLValue = str | int | float | None
-Condition = tuple[str, str, SQLValue]  # (column, op, value)
-JoinSpec = tuple[str, dict[str, str]]  # (table, on mapping)
+from typing import Union, Tuple, Dict, List, Optional, Any, Set
+
+SQLValue = Union[str, int, float, None]
+Condition = Tuple[str, str, SQLValue]  # (column, op, value)
+JoinSpec = Tuple[str, Dict[str, str]]  # (table, on mapping)
 
 
 def _is_json_string(value: Any) -> bool:
@@ -98,13 +100,13 @@ class QueryBuilder:
     def __init__(self, snapshot: "DatabaseSnapshot", table: str):  # noqa: UP037
         self._snapshot = snapshot
         self._table = table
-        self._select_cols: list[str] = ["*"]
-        self._conditions: list[Condition] = []
-        self._joins: list[JoinSpec] = []
-        self._limit: int | None = None
-        self._order_by: str | None = None
+        self._select_cols: List[str] = ["*"]
+        self._conditions: List[Condition] = []
+        self._joins: List[JoinSpec] = []
+        self._limit: Optional[int] = None
+        self._order_by: Optional[str] = None
         # Cache for idempotent executions
-        self._cached_rows: list[dict[str, Any]] | None = None
+        self._cached_rows: Optional[List[Dict[str, Any]]] = None
 
     # ---------------------------------------------------------------------
     #  Column projection / limiting / ordering
@@ -150,12 +152,12 @@ class QueryBuilder:
     def lte(self, column: str, value: SQLValue) -> "QueryBuilder":  # noqa: UP037
         return self._add_condition(column, "<=", value)
 
-    def in_(self, column: str, values: list[SQLValue]) -> "QueryBuilder":  # noqa: UP037
+    def in_(self, column: str, values: List[SQLValue]) -> "QueryBuilder":  # noqa: UP037
         qb = self._clone()
         qb._conditions.append((column, "IN", tuple(values)))
         return qb
 
-    def not_in(self, column: str, values: list[SQLValue]) -> "QueryBuilder":  # noqa: UP037
+    def not_in(self, column: str, values: List[SQLValue]) -> "QueryBuilder":  # noqa: UP037
         qb = self._clone()
         qb._conditions.append((column, "NOT IN", tuple(values)))
         return qb
@@ -174,7 +176,7 @@ class QueryBuilder:
     # ---------------------------------------------------------------------
     #  JOIN (simple inner join)
     # ---------------------------------------------------------------------
-    def join(self, other_table: str, on: dict[str, str]) -> "QueryBuilder":  # noqa: UP037
+    def join(self, other_table: str, on: Dict[str, str]) -> "QueryBuilder":  # noqa: UP037
         """`on` expects {local_col: remote_col}."""
         qb = self._clone()
         qb._joins.append((other_table, on))
@@ -183,10 +185,10 @@ class QueryBuilder:
     # ---------------------------------------------------------------------
     #  Execution helpers
     # ---------------------------------------------------------------------
-    def _compile(self) -> tuple[str, list[Any]]:
+    def _compile(self) -> Tuple[str, List[Any]]:
         cols = ", ".join(self._select_cols)
         sql = [f"SELECT {cols} FROM {self._table}"]
-        params: list[Any] = []
+        params: List[Any] = []
 
         # Joins -------------------------------------------------------------
         for tbl, onmap in self._joins:
@@ -224,7 +226,7 @@ class QueryBuilder:
 
         return " ".join(sql), params
 
-    def _execute(self) -> list[dict[str, Any]]:
+    def _execute(self) -> List[Dict[str, Any]]:
         if self._cached_rows is not None:
             return self._cached_rows
 
@@ -255,10 +257,10 @@ class QueryBuilder:
         conn.close()
         return _CountResult(val)
 
-    def first(self) -> dict[str, Any] | None:
+    def first(self) -> Optional[Dict[str, Any]]:
         return self.limit(1)._execute()[0] if self.limit(1)._execute() else None
 
-    def all(self) -> list[dict[str, Any]]:
+    def all(self) -> List[Dict[str, Any]]:
         return self._execute()
 
     # Assertions -----------------------------------------------------------
@@ -357,9 +359,9 @@ class IgnoreConfig:
 
     def __init__(
         self,
-        tables: set[str] | None = None,
-        fields: set[str] | None = None,
-        table_fields: dict[str, set[str]] | None = None,
+        tables: Optional[Set[str]] = None,
+        fields: Optional[Set[str]] = None,
+        table_fields: Optional[Dict[str, Set[str]]] = None,
     ):
         """
         Args:
@@ -386,7 +388,7 @@ class IgnoreConfig:
         return False
 
 
-def _format_row_for_error(row: dict[str, Any], max_fields: int = 10) -> str:
+def _format_row_for_error(row: Dict[str, Any], max_fields: int = 10) -> str:
     """Format a row dictionary for error messages with truncation if needed."""
     if not row:
         return "{empty row}"
@@ -402,7 +404,7 @@ def _format_row_for_error(row: dict[str, Any], max_fields: int = 10) -> str:
         return "{" + ", ".join(shown_items) + f", ... +{remaining} more fields" + "}"
 
 
-def _get_row_identifier(row: dict[str, Any]) -> str:
+def _get_row_identifier(row: Dict[str, Any]) -> str:
     """Extract a meaningful identifier from a row for error messages."""
     # Try common ID fields first
     for id_field in ["id", "pk", "primary_key", "key"]:
@@ -429,7 +431,7 @@ class SnapshotDiff:
         self,
         before: DatabaseSnapshot,
         after: DatabaseSnapshot,
-        ignore_config: IgnoreConfig | None = None,
+        ignore_config: Optional[IgnoreConfig] = None,
     ):
         from .sql_differ import SQLiteDiffer  # local import to avoid circularity
 
@@ -437,14 +439,14 @@ class SnapshotDiff:
         self.after = after
         self.ignore_config = ignore_config or IgnoreConfig()
         self._differ = SQLiteDiffer(before.db_path, after.db_path)
-        self._cached: dict[str, Any] | None = None
+        self._cached: Optional[Dict[str, Any]] = None
 
     # ------------------------------------------------------------------
     def _collect(self):
         if self._cached is not None:
             return self._cached
         all_tables = set(self.before.tables()) | set(self.after.tables())
-        diff: dict[str, dict[str, Any]] = {}
+        diff: Dict[str, Dict[str, Any]] = {}
         for tbl in all_tables:
             if self.ignore_config.should_ignore_table(tbl):
                 continue
@@ -453,12 +455,12 @@ class SnapshotDiff:
         return diff
 
     # ------------------------------------------------------------------
-    def expect_only(self, allowed_changes: list[dict[str, Any]]):
+    def expect_only(self, allowed_changes: List[Dict[str, Any]]):
         """Allowed changes is a list of {table, pk, field, after} (before optional)."""
         diff = self._collect()
 
         def _is_change_allowed(
-            table: str, row_id: str, field: str | None, after_value: Any
+            table: str, row_id: str, field: Optional[str], after_value: Any
         ) -> bool:
             """Check if a change is in the allowed list using semantic comparison."""
             for allowed in allowed_changes:
@@ -596,7 +598,10 @@ class SnapshotDiff:
         return self
 
     def expect(
-        self, *, allow: list[dict[str, Any]] = None, forbid: list[dict[str, Any]] = None
+        self,
+        *,
+        allow: Optional[List[Dict[str, Any]]] = None,
+        forbid: Optional[List[Dict[str, Any]]] = None,
     ):
         """More granular: allow / forbid per‑table and per‑field."""
         allow = allow or []
@@ -629,7 +634,7 @@ class SnapshotDiff:
 class DatabaseSnapshot:
     """Represents a snapshot of an SQLite DB with DSL entrypoints."""
 
-    def __init__(self, db_path: str, *, name: str | None = None):
+    def __init__(self, db_path: str, *, name: Optional[str] = None):
         self.db_path = db_path
         self.name = name or f"snapshot_{datetime.utcnow().isoformat()}"
         self.created_at = datetime.utcnow()
@@ -639,7 +644,7 @@ class DatabaseSnapshot:
         return QueryBuilder(self, table)
 
     # Metadata -------------------------------------------------------------
-    def tables(self) -> list[str]:
+    def tables(self) -> List[str]:
         conn = sqlite3.connect(self.db_path)
         cur = conn.cursor()
         cur.execute(
@@ -654,7 +659,7 @@ class DatabaseSnapshot:
     def diff(
         self,
         other: "DatabaseSnapshot",  # noqa: UP037
-        ignore_config: IgnoreConfig | None = None,
+        ignore_config: Optional[IgnoreConfig] = None,
     ) -> SnapshotDiff:
         return SnapshotDiff(self, other, ignore_config)
 
@@ -663,7 +668,7 @@ class DatabaseSnapshot:
     ############################################################################
 
     def expect_row(
-        self, table: str, where: dict[str, SQLValue], expect: dict[str, SQLValue]
+        self, table: str, where: Dict[str, SQLValue], expect: Dict[str, SQLValue]
     ):
         qb = self.table(table)
         for k, v in where.items():
@@ -676,10 +681,10 @@ class DatabaseSnapshot:
     def expect_rows(
         self,
         table: str,
-        where: dict[str, SQLValue],
+        where: Dict[str, SQLValue],
         *,
-        count: int | None = None,
-        contains: list[dict[str, SQLValue]] | None = None,
+        count: Optional[int] = None,
+        contains: Optional[List[Dict[str, SQLValue]]] = None,
     ):
         qb = self.table(table)
         for k, v in where.items():
@@ -694,7 +699,7 @@ class DatabaseSnapshot:
                     raise AssertionError(f"Expected a row matching {cond} in {table}")
         return self
 
-    def expect_absent_row(self, table: str, where: dict[str, SQLValue]):
+    def expect_absent_row(self, table: str, where: Dict[str, SQLValue]):
         qb = self.table(table)
         for k, v in where.items():
             qb = qb.eq(k, v)

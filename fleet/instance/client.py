@@ -63,9 +63,7 @@ class InstanceClient:
     def load(self) -> None:
         self._load_resources()
 
-    def reset(
-        self, reset_request: Optional[ResetRequest] = None
-    ) -> ResetResponse:
+    def reset(self, reset_request: Optional[ResetRequest] = None) -> ResetResponse:
         response = self.client.request(
             "POST", "/reset", json=reset_request.model_dump() if reset_request else None
         )
@@ -108,7 +106,7 @@ class InstanceClient:
         return self.verify_raw(function_code, function_name)
 
     def verify_raw(
-        self, function_code: str, function_name: str | None = None
+        self, function_code: str, function_name: Optional[str] = None
     ) -> ExecuteFunctionResponse:
         try:
             function_code = convert_verifier_string(function_code)

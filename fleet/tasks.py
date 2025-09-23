@@ -47,7 +47,7 @@ class Task(BaseModel):
     @property
     def env_key(self) -> str:
         """Get the environment key combining env_id and version."""
-        if self.version and self.version != "None":
+        if self.version and self.version != "None" and ":" not in self.env_id:
             return f"{self.env_id}:{self.version}"
         return self.env_id
 
@@ -70,17 +70,13 @@ class Task(BaseModel):
             import inspect
 
             # Check if verifier has remote method (for decorated verifiers)
-            if hasattr(self.verifier, "remote"):
-                result = self.verifier.remote(env, *args, **kwargs)
-            else:
-                # For verifiers created from string, call directly
-                result = self.verifier(env, *args, **kwargs)
+            result = self.verifier.remote(env, *args, **kwargs)
 
             # If the result is a coroutine, we need to run it
             if inspect.iscoroutine(result):
                 # Check if we're already in an event loop
                 try:
-                    loop = asyncio.get_running_loop()
+                    asyncio.get_running_loop()
                     # We're in an async context, can't use asyncio.run()
                     raise RuntimeError(
                         "Cannot run async verifier in sync mode while event loop is running. "
@@ -141,7 +137,7 @@ def verifier_from_string(
     """
     try:
         import inspect
-        from .verifiers import verifier, SyncVerifierFunction
+        from .verifiers import SyncVerifierFunction
         from .verifiers.code import TASK_SUCCESSFUL_SCORE, TASK_FAILED_SCORE
         from .verifiers.db import IgnoreConfig
 
@@ -172,36 +168,13 @@ def verifier_from_string(
         if func_obj is None:
             raise ValueError("No function found in verifier code")
 
-        # Create a wrapper function that provides the necessary globals
-        def wrapped_verifier(env, *args, **kwargs):
-            # Set up globals for the function execution
-            func_globals = (
-                func_obj.__globals__.copy() if hasattr(func_obj, "__globals__") else {}
-            )
-            func_globals.update(
-                {
-                    "TASK_SUCCESSFUL_SCORE": TASK_SUCCESSFUL_SCORE,
-                    "TASK_FAILED_SCORE": TASK_FAILED_SCORE,
-                    "IgnoreConfig": IgnoreConfig,
-                }
-            )
-
-            # Create a new function with the updated globals
-            import types
-
-            new_func = types.FunctionType(
-                func_obj.__code__,
-                func_globals,
-                func_obj.__name__,
-                func_obj.__defaults__,
-                func_obj.__closure__,
-            )
-
-            return new_func(env, *args, **kwargs)
-
-        # Create an AsyncVerifierFunction instance with the wrapped function
+        # Create an SyncVerifierFunction instance with raw code
         verifier_instance = SyncVerifierFunction(
-            wrapped_verifier, verifier_key, verifier_id
+            func=func_obj,
+            key=verifier_key,
+            verifier_id=verifier_id,
+            sha256=sha256,
+            raw_code=verifier_func,
         )
 
         # Store additional metadata
@@ -212,6 +185,18 @@ def verifier_from_string(
 
     except Exception as e:
         raise ValueError(f"Failed to create verifier from string: {e}")
+
+
+def load_tasks_from_file(filename: str) -> List[Task]:
+    """Load tasks from a JSON file.
+
+    Example:
+        tasks = fleet.load_tasks_from_file("my_tasks.json")
+    """
+    from .global_client import get_client
+
+    client = get_client()
+    return client.load_tasks_from_file(filename)
 
 
 def load_tasks(

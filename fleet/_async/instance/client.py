@@ -108,7 +108,7 @@ class AsyncInstanceClient:
         return await self.verify_raw(function_code, function_name)
 
     async def verify_raw(
-        self, function_code: str, function_name: str | None = None
+        self, function_code: str, function_name: Optional[str] = None
     ) -> ExecuteFunctionResponse:
         try:
             function_code = convert_verifier_string(function_code)

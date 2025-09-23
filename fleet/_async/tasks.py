@@ -44,7 +44,7 @@ class Task(BaseModel):
     @property
     def env_key(self) -> str:
         """Get the environment key combining env_id and version."""
-        if self.version and self.version != "None":
+        if self.version and self.version != "None" and ":" not in self.env_id:
             return f"{self.env_id}:{self.version}"
         return self.env_id
 
@@ -172,6 +172,18 @@ def verifier_from_string(
 
     except Exception as e:
         raise ValueError(f"Failed to create verifier from string: {e}")
+
+
+async def load_tasks_from_file(filename: str) -> List[Task]:
+    """Load tasks from a JSON file.
+
+    Example:
+        tasks = await fleet.load_tasks_from_file("my_tasks.json")
+    """
+    from .global_client import get_client
+
+    client = get_client()
+    return await client.load_tasks_from_file(filename)
 
 
 async def load_tasks(

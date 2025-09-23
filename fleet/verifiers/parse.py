@@ -1,7 +1,10 @@
 import re
 
 
-def extract_function_name(function_code: str) -> str | None:
+from typing import Optional
+
+
+def extract_function_name(function_code: str) -> Optional[str]:
     """
     Extract function name from Python function code.
 

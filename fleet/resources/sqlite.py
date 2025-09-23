@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Dict, Tuple
 from ..instance.models import Resource as ResourceModel
 from ..instance.models import DescribeResponse, QueryRequest, QueryResponse
 from .base import Resource
@@ -25,12 +25,12 @@ from fleet.verifiers.db import (
 class SyncDatabaseSnapshot:
     """Async database snapshot that fetches data through API and stores locally for diffing."""
 
-    def __init__(self, resource: "SQLiteResource", name: str | None = None):
+    def __init__(self, resource: "SQLiteResource", name: Optional[str] = None):
         self.resource = resource
         self.name = name or f"snapshot_{datetime.utcnow().isoformat()}"
         self.created_at = datetime.utcnow()
-        self._data: dict[str, list[dict[str, Any]]] = {}
-        self._schemas: dict[str, list[str]] = {}
+        self._data: Dict[str, List[Dict[str, Any]]] = {}
+        self._schemas: Dict[str, List[str]] = {}
         self._fetched = False
 
     def _ensure_fetched(self):
@@ -69,7 +69,7 @@ class SyncDatabaseSnapshot:
 
         self._fetched = True
 
-    def tables(self) -> list[str]:
+    def tables(self) -> List[str]:
         """Get list of all tables in the snapshot."""
         self._ensure_fetched()
         return list(self._data.keys())
@@ -81,7 +81,7 @@ class SyncDatabaseSnapshot:
     def diff(
         self,
         other: "SyncDatabaseSnapshot",
-        ignore_config: IgnoreConfig | None = None,
+        ignore_config: Optional[IgnoreConfig] = None,
     ) -> "SyncSnapshotDiff":
         """Compare this snapshot with another."""
         self._ensure_fetched()
@@ -95,13 +95,13 @@ class SyncSnapshotQueryBuilder:
     def __init__(self, snapshot: SyncDatabaseSnapshot, table: str):
         self._snapshot = snapshot
         self._table = table
-        self._select_cols: list[str] = ["*"]
-        self._conditions: list[tuple[str, str, Any]] = []
-        self._limit: int | None = None
-        self._order_by: str | None = None
+        self._select_cols: List[str] = ["*"]
+        self._conditions: List[Tuple[str, str, Any]] = []
+        self._limit: Optional[int] = None
+        self._order_by: Optional[str] = None
         self._order_desc: bool = False
 
-    def _get_data(self) -> list[dict[str, Any]]:
+    def _get_data(self) -> List[Dict[str, Any]]:
         """Get table data from snapshot."""
         self._snapshot._ensure_fetched()
         return self._snapshot._data.get(self._table, [])
@@ -122,11 +122,11 @@ class SyncSnapshotQueryBuilder:
         qb._order_desc = desc
         return qb
 
-    def first(self) -> dict[str, Any] | None:
+    def first(self) -> Optional[Dict[str, Any]]:
         rows = self.all()
         return rows[0] if rows else None
 
-    def all(self) -> list[dict[str, Any]]:
+    def all(self) -> List[Dict[str, Any]]:
         data = self._get_data()
 
         # Apply filters
@@ -185,14 +185,14 @@ class SyncSnapshotDiff:
         self,
         before: SyncDatabaseSnapshot,
         after: SyncDatabaseSnapshot,
-        ignore_config: IgnoreConfig | None = None,
+        ignore_config: Optional[IgnoreConfig] = None,
     ):
         self.before = before
         self.after = after
         self.ignore_config = ignore_config or IgnoreConfig()
-        self._cached: dict[str, Any] | None = None
+        self._cached: Optional[Dict[str, Any]] = None
 
-    def _get_primary_key_columns(self, table: str) -> list[str]:
+    def _get_primary_key_columns(self, table: str) -> List[str]:
         """Get primary key columns for a table."""
         # Try to get from schema
         schema_response = self.after.resource.query(f"PRAGMA table_info({table})")
@@ -222,7 +222,7 @@ class SyncSnapshotDiff:
             return self._cached
 
         all_tables = set(self.before.tables()) | set(self.after.tables())
-        diff: dict[str, dict[str, Any]] = {}
+        diff: Dict[str, Dict[str, Any]] = {}
 
         for tbl in all_tables:
             if self.ignore_config.should_ignore_table(tbl):
@@ -236,7 +236,7 @@ class SyncSnapshotDiff:
             after_data = self.after._data.get(tbl, [])
 
             # Create indexes by primary key
-            def make_key(row: dict, pk_cols: list[str]) -> Any:
+            def make_key(row: dict, pk_cols: List[str]) -> Any:
                 if len(pk_cols) == 1:
                     return row.get(pk_cols[0])
                 return tuple(row.get(col) for col in pk_cols)
@@ -304,12 +304,12 @@ class SyncSnapshotDiff:
         self._cached = diff
         return diff
 
-    def expect_only(self, allowed_changes: list[dict[str, Any]]):
+    def expect_only(self, allowed_changes: List[Dict[str, Any]]):
         """Ensure only specified changes occurred."""
         diff = self._collect()
 
         def _is_change_allowed(
-            table: str, row_id: Any, field: str | None, after_value: Any
+            table: str, row_id: Any, field: Optional[str], after_value: Any
         ) -> bool:
             """Check if a change is in the allowed list using semantic comparison."""
             for allowed in allowed_changes:
@@ -440,11 +440,11 @@ class SyncQueryBuilder:
     def __init__(self, resource: "SQLiteResource", table: str):
         self._resource = resource
         self._table = table
-        self._select_cols: list[str] = ["*"]
-        self._conditions: list[tuple[str, str, Any]] = []
-        self._joins: list[tuple[str, dict[str, str]]] = []
-        self._limit: int | None = None
-        self._order_by: str | None = None
+        self._select_cols: List[str] = ["*"]
+        self._conditions: List[Tuple[str, str, Any]] = []
+        self._joins: List[Tuple[str, Dict[str, str]]] = []
+        self._limit: Optional[int] = None
+        self._order_by: Optional[str] = None
 
     # Column projection / limiting / ordering
     def select(self, *columns: str) -> "SyncQueryBuilder":
@@ -486,12 +486,12 @@ class SyncQueryBuilder:
     def lte(self, column: str, value: Any) -> "SyncQueryBuilder":
         return self._add_condition(column, "<=", value)
 
-    def in_(self, column: str, values: list[Any]) -> "SyncQueryBuilder":
+    def in_(self, column: str, values: List[Any]) -> "SyncQueryBuilder":
         qb = self._clone()
         qb._conditions.append((column, "IN", tuple(values)))
         return qb
 
-    def not_in(self, column: str, values: list[Any]) -> "SyncQueryBuilder":
+    def not_in(self, column: str, values: List[Any]) -> "SyncQueryBuilder":
         qb = self._clone()
         qb._conditions.append((column, "NOT IN", tuple(values)))
         return qb
@@ -508,16 +508,16 @@ class SyncQueryBuilder:
         return qb
 
     # JOIN
-    def join(self, other_table: str, on: dict[str, str]) -> "SyncQueryBuilder":
+    def join(self, other_table: str, on: Dict[str, str]) -> "SyncQueryBuilder":
         qb = self._clone()
         qb._joins.append((other_table, on))
         return qb
 
     # Compile to SQL
-    def _compile(self) -> tuple[str, list[Any]]:
+    def _compile(self) -> Tuple[str, List[Any]]:
         cols = ", ".join(self._select_cols)
         sql = [f"SELECT {cols} FROM {self._table}"]
-        params: list[Any] = []
+        params: List[Any] = []
 
         # Joins
         for tbl, onmap in self._joins:
@@ -558,11 +558,11 @@ class SyncQueryBuilder:
             return row_dict.get("__cnt__", 0)
         return 0
 
-    def first(self) -> dict[str, Any] | None:
+    def first(self) -> Optional[Dict[str, Any]]:
         rows = self.limit(1).all()
         return rows[0] if rows else None
 
-    def all(self) -> list[dict[str, Any]]:
+    def all(self) -> List[Dict[str, Any]]:
         sql, params = self._compile()
         response = self._resource.query(sql, params)
         if not response.rows:
@@ -651,9 +651,7 @@ class SQLiteResource(Resource):
         )
         return DescribeResponse(**response.json())
 
-    def query(
-        self, query: str, args: Optional[List[Any]] = None
-    ) -> QueryResponse:
+    def query(self, query: str, args: Optional[List[Any]] = None) -> QueryResponse:
         return self._query(query, args, read_only=True)
 
     def exec(self, query: str, args: Optional[List[Any]] = None) -> QueryResponse:
@@ -674,7 +672,7 @@ class SQLiteResource(Resource):
         """Create a query builder for the specified table."""
         return SyncQueryBuilder(self, table_name)
 
-    def snapshot(self, name: str | None = None) -> SyncDatabaseSnapshot:
+    def snapshot(self, name: Optional[str] = None) -> SyncDatabaseSnapshot:
         """Create a snapshot of the current database state."""
         snapshot = SyncDatabaseSnapshot(self, name)
         snapshot._ensure_fetched()
@@ -683,7 +681,7 @@ class SQLiteResource(Resource):
     def diff(
         self,
         other: "SQLiteResource",
-        ignore_config: IgnoreConfig | None = None,
+        ignore_config: Optional[IgnoreConfig] = None,
     ) -> SyncSnapshotDiff:
         """Compare this database with another AsyncSQLiteResource.
 
@@ -695,12 +693,8 @@ class SQLiteResource(Resource):
             AsyncSnapshotDiff: Object containing the differences between the two databases
         """
         # Create snapshots of both databases
-        before_snapshot = self.snapshot(
-            name=f"before_{datetime.utcnow().isoformat()}"
-        )
-        after_snapshot = other.snapshot(
-            name=f"after_{datetime.utcnow().isoformat()}"
-        )
+        before_snapshot = self.snapshot(name=f"before_{datetime.utcnow().isoformat()}")
+        after_snapshot = other.snapshot(name=f"after_{datetime.utcnow().isoformat()}")
 
         # Return the diff between the snapshots
         return before_snapshot.diff(after_snapshot, ignore_config)

@@ -130,7 +130,7 @@ class AsyncEnv(EnvironmentBase):
         return await self.instance.verify(validator)
 
     async def verify_raw(
-        self, function_code: str, function_name: str | None = None
+        self, function_code: str, function_name: Optional[str] = None
     ) -> ExecuteFunctionResponse:
         return await self.instance.verify_raw(function_code, function_name)
 
@@ -304,12 +304,19 @@ class AsyncFleet:
 
         return await self.load_task_array_from_string(tasks_data)
 
-    async def load_task_array_from_string(
-        self, serialized_tasks: List[Dict]
-    ) -> List[Task]:
+    async def load_task_array_from_string(self, serialized_tasks: str) -> List[Task]:
         tasks = []
 
-        json_tasks = json.loads(serialized_tasks)
+        parsed_data = json.loads(serialized_tasks)
+        if isinstance(parsed_data, list):
+            json_tasks = parsed_data
+        elif isinstance(parsed_data, dict) and "tasks" in parsed_data:
+            json_tasks = parsed_data["tasks"]
+        else:
+            raise ValueError(
+                "Invalid JSON structure: expected array or object with 'tasks' key"
+            )
+
         for json_task in json_tasks:
             parsed_task = await self.load_task_from_json(json_task)
             tasks.append(parsed_task)
@@ -321,25 +328,46 @@ class AsyncFleet:
 
     async def load_task_from_json(self, task_json: Dict) -> Task:
         verifier = None
+        verifier_code = task_json.get("verifier_func") or task_json.get("verifier_code")
+
+        # Try to find verifier_id in multiple locations
+        verifier_id = task_json.get("verifier_id")
+        if (
+            not verifier_id
+            and "metadata" in task_json
+            and isinstance(task_json["metadata"], dict)
+        ):
+            verifier_metadata = task_json["metadata"].get("verifier", {})
+            if isinstance(verifier_metadata, dict):
+                verifier_id = verifier_metadata.get("verifier_id")
+
+        # If no verifier_id found, use the task key/id as fallback
+        if not verifier_id:
+            verifier_id = task_json.get("key", task_json.get("id"))
+
         try:
-            if "verifier_id" in task_json and task_json["verifier_id"]:
+            if verifier_id and verifier_code:
                 verifier = await self._create_verifier_from_data(
-                    verifier_id=task_json["verifier_id"],
-                    verifier_key=task_json["key"],
-                    verifier_code=task_json["verifier_func"],
+                    verifier_id=verifier_id,
+                    verifier_key=task_json.get("key", task_json.get("id")),
+                    verifier_code=verifier_code,
                     verifier_sha=task_json.get("verifier_sha", ""),
                 )
         except Exception as e:
-            logger.warning(f"Failed to create verifier {task_json['key']}: {e}")
+            logger.warning(
+                f"Failed to create verifier {task_json.get('key', task_json.get('id'))}: {e}"
+            )
 
         task = Task(
-            key=task_json["key"],
+            key=task_json.get("key", task_json.get("id")),
             prompt=task_json["prompt"],
-            env_id=task_json["env_id"],  # Use env_id from the data
-            created_at=task_json["created_at"],
+            env_id=task_json.get(
+                "env_id", task_json.get("env_key")
+            ),  # Use env_id or fallback to env_key
+            created_at=task_json.get("created_at"),
             version=task_json.get("version"),
             env_variables=task_json.get("env_variables", {}),
-            verifier_func=task_json.get("verifier_func"),  # Set verifier code
+            verifier_func=verifier_code,  # Set verifier code
             verifier=verifier,  # Use created verifier or None
             metadata=task_json.get("metadata", {}),  # Default empty metadata
         )

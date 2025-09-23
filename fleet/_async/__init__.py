@@ -73,17 +73,17 @@ __all__ = [
     "reset_client",
     # Module-level functions
     "load_tasks",
-    "list_envs", 
+    "list_envs",
     "list_regions",
     "environment",
     "make",
     "make_for_task",
     "instances",
-    "instance", 
+    "instance",
     "delete",
     "load_tasks_from_file",
     "load_task_array_from_string",
-    "load_task_from_string", 
+    "load_task_from_string",
     "load_task_from_json",
     "export_tasks",
     "import_tasks",
@@ -108,9 +108,13 @@ async def environment(env_key: str) -> Environment:
     return await _async_global_client.get_client().environment(env_key)
 
 
-async def make(env_key: str, region: Optional[str] = None, env_variables: Optional[Dict[str, Any]] = None) -> AsyncEnv:
+async def make(
+    env_key: str,
+    region: Optional[str] = None,
+    env_variables: Optional[Dict[str, Any]] = None,
+) -> AsyncEnv:
     """Create a new environment instance.
-    
+
     Example:
         env = await fleet.make("fira")
         env_with_vars = await fleet.make("fira", env_variables={"LOGGED_IN_NAME": "Alice"})
@@ -123,7 +127,9 @@ async def make_for_task(task: Task) -> AsyncEnv:
     return await _async_global_client.get_client().make_for_task(task)
 
 
-async def instances(status: Optional[str] = None, region: Optional[str] = None) -> List[AsyncEnv]:
+async def instances(
+    status: Optional[str] = None, region: Optional[str] = None
+) -> List[AsyncEnv]:
     """List existing environment instances."""
     return await _async_global_client.get_client().instances(status, region)
 
@@ -140,7 +146,7 @@ async def delete(instance_id: str) -> InstanceResponse:
 
 async def load_tasks_from_file(filename: str) -> List[Task]:
     """Load tasks from a JSON file.
-    
+
     Example:
         tasks = await fleet.load_tasks_from_file("my_tasks.json")
     """
@@ -149,16 +155,18 @@ async def load_tasks_from_file(filename: str) -> List[Task]:
 
 async def load_task_array_from_string(serialized_tasks: str) -> List[Task]:
     """Load tasks from a JSON string containing an array of tasks.
-    
+
     Example:
         tasks = await fleet.load_task_array_from_string(json_string)
     """
-    return await _async_global_client.get_client().load_task_array_from_string(serialized_tasks)
+    return await _async_global_client.get_client().load_task_array_from_string(
+        serialized_tasks
+    )
 
 
 async def load_task_from_string(task_string: str) -> Task:
     """Load a single task from a JSON string.
-    
+
     Example:
         task = await fleet.load_task_from_string(task_json_string)
     """
@@ -167,16 +175,18 @@ async def load_task_from_string(task_string: str) -> Task:
 
 async def load_task_from_json(task_json: dict) -> Task:
     """Load a single task from a dictionary.
-    
+
     Example:
         task = await fleet.load_task_from_json(task_dict)
     """
     return await _async_global_client.get_client().load_task_from_json(task_json)
 
 
-async def export_tasks(env_key: Optional[str] = None, filename: Optional[str] = None) -> Optional[str]:
+async def export_tasks(
+    env_key: Optional[str] = None, filename: Optional[str] = None
+) -> Optional[str]:
     """Export tasks to a JSON file.
-    
+
     Example:
         await fleet.export_tasks("fira", "fira_tasks.json")
     """
@@ -185,7 +195,7 @@ async def export_tasks(env_key: Optional[str] = None, filename: Optional[str] = 
 
 async def import_tasks(filename: str):
     """Import tasks from a JSON file.
-    
+
     Example:
         await fleet.import_tasks("tasks.json")
     """
@@ -200,8 +210,8 @@ async def account() -> AccountResponse:
 def configure(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
-    max_retries: int | None = None,
-    timeout: float | None = None,
+    max_retries: Optional[int] = None,
+    timeout: Optional[float] = None,
 ):
     """Configure global async client once per process.
 
@@ -213,9 +223,11 @@ def configure(
     """
     if max_retries is None:
         from ..config import DEFAULT_MAX_RETRIES as _MR
+
         max_retries = _MR
     if timeout is None:
         from ..config import DEFAULT_TIMEOUT as _TO
+
         timeout = _TO
     _async_global_client.configure(
         api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout

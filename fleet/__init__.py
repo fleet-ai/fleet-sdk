@@ -46,11 +46,15 @@ from ._async.verifiers import (
     AsyncVerifierFunction,
 )
 
-# Import async tasks (default tasks are async for modern usage)  
-from ._async.tasks import Task, load_tasks as load_tasks_async
+# Import async tasks (default tasks are async for modern usage)
+from ._async.tasks import (
+    Task,
+    load_tasks as load_tasks_async,
+    load_tasks_from_file as load_tasks_from_file_async,
+)
 
 # Import sync load_tasks function
-from .tasks import load_tasks
+from .tasks import load_tasks, load_tasks_from_file
 
 # Import shared types
 from .types import VerifierFunction
@@ -105,13 +109,11 @@ __all__ = [
 ]
 
 
-
-
 def configure(
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
-    max_retries: int | None = None,
-    timeout: float | None = None,
+    max_retries: Optional[int] = None,
+    timeout: Optional[float] = None,
 ):
     """Configure global clients (sync and async) once per process.
 

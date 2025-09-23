@@ -2,7 +2,7 @@
 
 from .db import DatabaseSnapshot, IgnoreConfig, SnapshotDiff
 from .code import TASK_SUCCESSFUL_SCORE, TASK_FAILED_SCORE
-from .decorator import (
+from .verifier import (
     verifier,
     SyncVerifierFunction,
 )
