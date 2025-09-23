@@ -207,24 +207,39 @@ class Fleet:
     def make(
         self,
         env_key: str,
+        data_key: Optional[str] = None,
         region: Optional[str] = None,
         env_variables: Optional[Dict[str, Any]] = None,
     ) -> SyncEnv:
         if ":" in env_key:
-            env_key_part, version = env_key.split(":", 1)
+            env_key_part, env_version = env_key.split(":", 1)
             if (
-                not version.startswith("v")
-                and len(version) != 0
-                and version[0].isdigit()
+                not env_version.startswith("v")
+                and len(env_version) != 0
+                and env_version[0].isdigit()
             ):
-                version = f"v{version}"
+                env_version = f"v{env_version}"
         else:
             env_key_part = env_key
-            version = None
+            env_version = None
+
+        if data_key is not None and ":" in data_key:
+            data_key_part, data_version = data_key.split(":", 1)
+            if (
+                not data_version.startswith("v")
+                and len(data_version) != 0
+                and data_version[0].isdigit()
+            ):
+                data_version = f"v{data_version}"
+        else:
+            data_key_part = data_key
+            data_version = None
 
         request = InstanceRequest(
             env_key=env_key_part,
-            version=version,
+            env_version=env_version,
+            data_key=data_key_part,
+            data_version=data_version,
             region=region,
             env_variables=env_variables,
             created_from="sdk",
