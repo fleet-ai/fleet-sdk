@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import re
 from datetime import datetime
 from typing import Any, Dict, Optional, List
-from uuid import UUID
 
 from pydantic import BaseModel, Field, validator
 
@@ -46,7 +44,7 @@ class Task(BaseModel):
     @property
     def env_key(self) -> str:
         """Get the environment key combining env_id and version."""
-        if self.version:
+        if self.version and self.version != "None":
             return f"{self.env_id}:{self.version}"
         return self.env_id
 
@@ -75,7 +73,7 @@ class Task(BaseModel):
             if inspect.iscoroutine(result):
                 # Check if we're already in an event loop
                 try:
-                    loop = asyncio.get_running_loop()
+                    asyncio.get_running_loop()
                     # We're in an async context, can't use asyncio.run()
                     raise RuntimeError(
                         "Cannot run async verifier in sync mode while event loop is running. "
@@ -121,58 +119,57 @@ class Task(BaseModel):
 
 
 def verifier_from_string(
-    verifier_func: str,
-    verifier_id: str,
-    verifier_key: str,
-    sha256: str = ""
-) -> 'VerifierFunction':
+    verifier_func: str, verifier_id: str, verifier_key: str, sha256: str = ""
+) -> "VerifierFunction":
     """Create a verifier function from string code.
-    
+
     Args:
         verifier_func: The verifier function code as a string
         verifier_id: Unique identifier for the verifier
         verifier_key: Key/name for the verifier
         sha256: SHA256 hash of the verifier code
-        
+
     Returns:
         VerifierFunction instance that can be used to verify tasks
     """
     try:
         import inspect
-        from .verifiers import verifier, AsyncVerifierFunction
+        from .verifiers.verifier import AsyncVerifierFunction
         from fleet.verifiers.code import TASK_SUCCESSFUL_SCORE, TASK_FAILED_SCORE
         from fleet.verifiers.db import IgnoreConfig
-        
+
         # Create a local namespace for executing the code
         local_namespace = {
-            'TASK_SUCCESSFUL_SCORE': TASK_SUCCESSFUL_SCORE,
-            'TASK_FAILED_SCORE': TASK_FAILED_SCORE,
-            'IgnoreConfig': IgnoreConfig,
-            'Environment': object  # Add Environment type if needed
+            "TASK_SUCCESSFUL_SCORE": TASK_SUCCESSFUL_SCORE,
+            "TASK_FAILED_SCORE": TASK_FAILED_SCORE,
+            "IgnoreConfig": IgnoreConfig,
+            "Environment": object,  # Add Environment type if needed
         }
-        
+
         # Execute the verifier code in the namespace
         exec(verifier_func, globals(), local_namespace)
-        
+
         # Find the function that was defined
         func_obj = None
         for name, obj in local_namespace.items():
             if inspect.isfunction(obj):
                 func_obj = obj
                 break
-        
+
         if func_obj is None:
             raise ValueError("No function found in verifier code")
-        
-        # Create an AsyncVerifierFunction instance
-        verifier_instance = AsyncVerifierFunction(func_obj, verifier_key, verifier_id)
-        
-        # Store additional metadata
-        verifier_instance._verifier_code = verifier_func
-        verifier_instance._sha256 = sha256
-        
+
+        # Create an AsyncVerifierFunction instance with raw code
+        verifier_instance = AsyncVerifierFunction(
+            func_obj,
+            verifier_key,
+            verifier_id=verifier_id,
+            sha256=sha256,
+            raw_code=verifier_func,
+        )
+
         return verifier_instance
-        
+
     except Exception as e:
         raise ValueError(f"Failed to create verifier from string: {e}")
 
@@ -181,7 +178,7 @@ async def load_tasks(
     env_key: Optional[str] = None,
     keys: Optional[List[str]] = None,
     version: Optional[str] = None,
-    team_id: Optional[str] = None
+    team_id: Optional[str] = None,
 ) -> List[Task]:
     """Convenience function to load tasks with optional filtering.
 
@@ -201,17 +198,12 @@ async def load_tasks(
 
     client = get_client()
     return await client.load_tasks(
-        env_key=env_key,
-        keys=keys,
-        version=version,
-        team_id=team_id
+        env_key=env_key, keys=keys, version=version, team_id=team_id
     )
 
 
 async def update_task(
-    task_key: str,
-    prompt: Optional[str] = None,
-    verifier_code: Optional[str] = None
+    task_key: str, prompt: Optional[str] = None, verifier_code: Optional[str] = None
 ):
     """Convenience function to update an existing task.
 
@@ -228,11 +220,8 @@ async def update_task(
         response = await fleet.update_task("my-task", verifier_code="def verify(env): return True")
     """
     from .global_client import get_client
-    from ..models import TaskResponse
 
     client = get_client()
     return await client.update_task(
-        task_key=task_key,
-        prompt=prompt,
-        verifier_code=verifier_code
+        task_key=task_key, prompt=prompt, verifier_code=verifier_code
     )
