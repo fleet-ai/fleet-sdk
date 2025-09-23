@@ -359,9 +359,10 @@ class AsyncFleet:
         response = await self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
 
-        # Prepare verifier loading coroutines
+        # Prepare verifier loading coroutines with concurrency limit
         verifier_coroutines = []
         task_responses_with_indices = []
+        semaphore = asyncio.Semaphore(10)  # Limit to 10 concurrent operations
 
         for idx, task_response in enumerate(task_list_response.tasks):
             if task_response.verifier:
@@ -372,34 +373,35 @@ class AsyncFleet:
 
                 async def create_verifier_with_fallback(tr, emb_code, is_error):
                     """Create verifier with fallback logic."""
-                    if not is_error:
-                        # Try to create from embedded data
-                        try:
-                            return await self._create_verifier_from_data(
-                                verifier_id=tr.verifier.verifier_id,
-                                verifier_key=tr.verifier.key,
-                                verifier_code=emb_code,
-                                verifier_sha=tr.verifier.sha256,
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to create verifier {tr.verifier.key}: {e}"
-                            )
-                            return None
-                    else:
-                        # Fallback: try fetching by ID
-                        try:
-                            logger.warning(
-                                f"Embedded verifier code missing for {tr.verifier.key} (NoSuchKey). "
-                                f"Attempting to refetch by id {tr.verifier.verifier_id}"
-                            )
-                            return await self._load_verifier(tr.verifier.verifier_id)
-                        except Exception as e:
-                            logger.warning(
-                                f"Refetch by verifier id failed for {tr.verifier.key}: {e}. "
-                                "Leaving verifier unset."
-                            )
-                            return None
+                    async with semaphore:  # Acquire semaphore before operation
+                        if not is_error:
+                            # Try to create from embedded data
+                            try:
+                                return await self._create_verifier_from_data(
+                                    verifier_id=tr.verifier.verifier_id,
+                                    verifier_key=tr.verifier.key,
+                                    verifier_code=emb_code,
+                                    verifier_sha=tr.verifier.sha256,
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to create verifier {tr.verifier.key}: {e}"
+                                )
+                                return None
+                        else:
+                            # Fallback: try fetching by ID
+                            try:
+                                logger.warning(
+                                    f"Embedded verifier code missing for {tr.verifier.key} (NoSuchKey). "
+                                    f"Attempting to refetch by id {tr.verifier.verifier_id}"
+                                )
+                                return await self._load_verifier(tr.verifier.verifier_id)
+                            except Exception as e:
+                                logger.warning(
+                                    f"Refetch by verifier id failed for {tr.verifier.key}: {e}. "
+                                    "Leaving verifier unset."
+                                )
+                                return None
 
                 # Add the coroutine for parallel execution
                 verifier_coroutines.append(
