@@ -70,7 +70,7 @@ class Task(BaseModel):
             import inspect
 
             # Check if verifier has remote method (for decorated verifiers)
-            if hasattr(self.verifier, 'remote'):
+            if hasattr(self.verifier, "remote"):
                 result = self.verifier.remote(env, *args, **kwargs)
             else:
                 # For verifiers created from string, call directly
@@ -126,19 +126,16 @@ class Task(BaseModel):
 
 
 def verifier_from_string(
-    verifier_func: str,
-    verifier_id: str,
-    verifier_key: str,
-    sha256: str = ""
-) -> 'VerifierFunction':
+    verifier_func: str, verifier_id: str, verifier_key: str, sha256: str = ""
+) -> "VerifierFunction":
     """Create a verifier function from string code.
-    
+
     Args:
         verifier_func: The verifier function code as a string
         verifier_id: Unique identifier for the verifier
         verifier_key: Key/name for the verifier
         sha256: SHA256 hash of the verifier code
-        
+
     Returns:
         VerifierFunction instance that can be used to verify tasks
     """
@@ -147,63 +144,72 @@ def verifier_from_string(
         from .verifiers import verifier, SyncVerifierFunction
         from .verifiers.code import TASK_SUCCESSFUL_SCORE, TASK_FAILED_SCORE
         from .verifiers.db import IgnoreConfig
-        
+
         # Create a globals namespace with all required imports
         exec_globals = globals().copy()
-        exec_globals.update({
-            'TASK_SUCCESSFUL_SCORE': TASK_SUCCESSFUL_SCORE,
-            'TASK_FAILED_SCORE': TASK_FAILED_SCORE,
-            'IgnoreConfig': IgnoreConfig,
-            'Environment': object  # Add Environment type if needed
-        })
-        
+        exec_globals.update(
+            {
+                "TASK_SUCCESSFUL_SCORE": TASK_SUCCESSFUL_SCORE,
+                "TASK_FAILED_SCORE": TASK_FAILED_SCORE,
+                "IgnoreConfig": IgnoreConfig,
+                "Environment": object,  # Add Environment type if needed
+            }
+        )
+
         # Create a local namespace for executing the code
         local_namespace = {}
-        
+
         # Execute the verifier code in the namespace
         exec(verifier_func, exec_globals, local_namespace)
-        
+
         # Find the function that was defined
         func_obj = None
         for name, obj in local_namespace.items():
             if inspect.isfunction(obj):
                 func_obj = obj
                 break
-        
+
         if func_obj is None:
             raise ValueError("No function found in verifier code")
-        
+
         # Create a wrapper function that provides the necessary globals
         def wrapped_verifier(env, *args, **kwargs):
             # Set up globals for the function execution
-            func_globals = func_obj.__globals__.copy() if hasattr(func_obj, '__globals__') else {}
-            func_globals.update({
-                'TASK_SUCCESSFUL_SCORE': TASK_SUCCESSFUL_SCORE,
-                'TASK_FAILED_SCORE': TASK_FAILED_SCORE,
-                'IgnoreConfig': IgnoreConfig
-            })
-            
+            func_globals = (
+                func_obj.__globals__.copy() if hasattr(func_obj, "__globals__") else {}
+            )
+            func_globals.update(
+                {
+                    "TASK_SUCCESSFUL_SCORE": TASK_SUCCESSFUL_SCORE,
+                    "TASK_FAILED_SCORE": TASK_FAILED_SCORE,
+                    "IgnoreConfig": IgnoreConfig,
+                }
+            )
+
             # Create a new function with the updated globals
             import types
+
             new_func = types.FunctionType(
                 func_obj.__code__,
                 func_globals,
                 func_obj.__name__,
                 func_obj.__defaults__,
-                func_obj.__closure__
+                func_obj.__closure__,
             )
-            
+
             return new_func(env, *args, **kwargs)
-        
+
         # Create an AsyncVerifierFunction instance with the wrapped function
-        verifier_instance = SyncVerifierFunction(wrapped_verifier, verifier_key, verifier_id)
-        
+        verifier_instance = SyncVerifierFunction(
+            wrapped_verifier, verifier_key, verifier_id
+        )
+
         # Store additional metadata
         verifier_instance._verifier_code = verifier_func
         verifier_instance._sha256 = sha256
-        
+
         return verifier_instance
-        
+
     except Exception as e:
         raise ValueError(f"Failed to create verifier from string: {e}")
 
@@ -212,7 +218,7 @@ def load_tasks(
     env_key: Optional[str] = None,
     keys: Optional[List[str]] = None,
     version: Optional[str] = None,
-    team_id: Optional[str] = None
+    team_id: Optional[str] = None,
 ) -> List[Task]:
     """Convenience function to load tasks with optional filtering.
 
@@ -232,17 +238,12 @@ def load_tasks(
 
     client = get_client()
     return client.load_tasks(
-        env_key=env_key,
-        keys=keys,
-        version=version,
-        team_id=team_id
+        env_key=env_key, keys=keys, version=version, team_id=team_id
     )
 
 
 def update_task(
-    task_key: str,
-    prompt: Optional[str] = None,
-    verifier_code: Optional[str] = None
+    task_key: str, prompt: Optional[str] = None, verifier_code: Optional[str] = None
 ):
     """Convenience function to update an existing task.
 
@@ -263,7 +264,5 @@ def update_task(
 
     client = get_client()
     return client.update_task(
-        task_key=task_key,
-        prompt=prompt,
-        verifier_code=verifier_code
+        task_key=task_key, prompt=prompt, verifier_code=verifier_code
     )
