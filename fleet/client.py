@@ -579,6 +579,8 @@ class Fleet:
             task = Task(**task_data)
             tasks.append(task)
 
+        responses = []
+
         for task in tasks:
             payload = TaskRequest(
                 key=task.key,
@@ -592,9 +594,12 @@ class Fleet:
                 response = self.client.request(
                     "POST", "/v1/tasks", json=payload.model_dump()
                 )
+                responses.append(response)
             except Exception as e:
                 logger.error(f"Failed to import task {task.key}: {e}")
                 continue
+
+        return responses
 
     def account(self) -> AccountResponse:
         """Get account information including instance limits and usage.
