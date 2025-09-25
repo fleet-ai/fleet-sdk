@@ -12,7 +12,7 @@ import uuid
 import logging
 import hashlib
 import asyncio
-from typing import Any, Callable, Dict, Optional, List, TypeVar, Set, Tuple
+from typing import Any, Callable, Dict, Optional, List, TypeVar, Tuple
 
 from .bundler import FunctionBundler
 from ..client import AsyncEnv
@@ -21,8 +21,7 @@ logger = logging.getLogger(__name__)
 
 F = TypeVar("F", bound=Callable[..., Any])
 
-# Global cache to track which bundle SHAs have been uploaded to S3
-_uploaded_bundle_shas: Set[str] = set()
+# Removed global cache - always check server for bundle status
 
 
 @functools.lru_cache(maxsize=128)
@@ -107,25 +106,16 @@ class AsyncVerifierFunction:
             logger.debug(f"Using server-side bundle {bundle_sha[:8]}...")
             return bundle_sha, False  # No upload needed, server has it
 
-        # 1. Check local process cache first
-        if bundle_sha in _uploaded_bundle_shas:
-            logger.debug(f"Bundle {bundle_sha[:8]}... found in local cache")
-            return bundle_sha, False  # Already uploaded, no upload needed
-
-        # 2. Check if bundle exists on server (pseudocode)
-        # TODO: Add endpoint to check if bundle SHA exists in S3
+        # Always check if bundle exists on server
         try:
             exists = await env.check_bundle_exists(bundle_sha)
             if exists.success:
-                logger.info(
-                    f"Bundle {bundle_sha[:8]}... found on server, updating cache"
-                )
-                _uploaded_bundle_shas.add(bundle_sha)
+                logger.info(f"Bundle {bundle_sha[:8]}... found on server")
                 return bundle_sha, False  # Found on server, no upload needed
         except Exception as e:
             logger.warning(f"Failed to check bundle existence: {e}")
 
-        # 3. Bundle not found locally or on server - upload needed
+        # Bundle not found on server - upload needed
         logger.info(f"Bundle {bundle_sha[:8]}... needs to be uploaded")
         return bundle_sha, True  # Upload needed
 
@@ -194,9 +184,7 @@ class AsyncVerifierFunction:
                     needs_upload=True,
                 )
 
-                # Mark as uploaded after successful execution
-                _uploaded_bundle_shas.add(bundle_sha)
-                logger.debug(f"Registered bundle {bundle_sha[:8]}... as uploaded")
+                logger.debug(f"Bundle {bundle_sha[:8]}... uploaded successfully")
 
             else:
                 # Bundle already available - execute without upload
