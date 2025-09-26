@@ -651,7 +651,9 @@ class SQLiteResource(Resource):
         )
         return DescribeResponse(**response.json())
 
-    def query(self, query: str, args: Optional[List[Any]] = None) -> QueryResponse:
+    def query(
+        self, query: str, args: Optional[List[Any]] = None
+    ) -> QueryResponse:
         return self._query(query, args, read_only=True)
 
     def exec(self, query: str, args: Optional[List[Any]] = None) -> QueryResponse:
@@ -693,8 +695,12 @@ class SQLiteResource(Resource):
             AsyncSnapshotDiff: Object containing the differences between the two databases
         """
         # Create snapshots of both databases
-        before_snapshot = self.snapshot(name=f"before_{datetime.utcnow().isoformat()}")
-        after_snapshot = other.snapshot(name=f"after_{datetime.utcnow().isoformat()}")
+        before_snapshot = self.snapshot(
+            name=f"before_{datetime.utcnow().isoformat()}"
+        )
+        after_snapshot = other.snapshot(
+            name=f"after_{datetime.utcnow().isoformat()}"
+        )
 
         # Return the diff between the snapshots
         return before_snapshot.diff(after_snapshot, ignore_config)

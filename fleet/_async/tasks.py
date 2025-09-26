@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
 
@@ -11,7 +12,7 @@ from pydantic import BaseModel, Field, validator
 from fleet.types import VerifierFunction
 
 if TYPE_CHECKING:
-    from fleet._async.models import VerifiersExecuteResponse
+    from fleet.models import VerifiersExecuteResponse
 
 
 class Task(BaseModel):

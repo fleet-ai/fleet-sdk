@@ -12,16 +12,7 @@ import uuid
 import logging
 import hashlib
 import inspect
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Optional,
-    List,
-    TypeVar,
-    TYPE_CHECKING,
-    Tuple,
-)
+from typing import Any, Callable, Dict, Optional, List, TypeVar, TYPE_CHECKING, Tuple
 
 from .bundler import FunctionBundler
 
@@ -264,7 +255,6 @@ Remote traceback:
                 )
 
                 logger.debug(f"Bundle {bundle_sha[:8]}... uploaded successfully")
-                return response
 
             else:
                 # Bundle already available - execute without upload
@@ -279,7 +269,8 @@ Remote traceback:
                     kwargs=kwargs,
                     needs_upload=False,
                 )
-                return response
+
+            return response
 
         except Exception as e:
             # Check if error indicates bundle not found and retry with upload
