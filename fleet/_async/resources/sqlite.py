@@ -111,6 +111,21 @@ class AsyncSnapshotQueryBuilder:
         qb._conditions.append((column, "=", value))
         return qb
 
+    def where(
+        self,
+        conditions: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> "AsyncSnapshotQueryBuilder":
+        qb = self._clone()
+        merged: Dict[str, Any] = {}
+        if conditions:
+            merged.update(conditions)
+        if kwargs:
+            merged.update(kwargs)
+        for column, value in merged.items():
+            qb._conditions.append((column, "=", value))
+        return qb
+
     def limit(self, n: int) -> "AsyncSnapshotQueryBuilder":
         qb = self._clone()
         qb._limit = n
@@ -304,6 +319,15 @@ class AsyncSnapshotDiff:
         self._cached = diff
         return diff
 
+    @property
+    def changes(self) -> Dict[str, Dict[str, Any]]:
+        """Expose cached changes; ensure callers awaited a diff-producing method first."""
+        if self._cached is None:
+            raise RuntimeError(
+                "Diff not collected yet; await an operation like expect_only() first."
+            )
+        return self._cached
+
     async def expect_only(self, allowed_changes: List[Dict[str, Any]]):
         """Ensure only specified changes occurred."""
         diff = await self._collect()
@@ -470,6 +494,21 @@ class AsyncQueryBuilder:
 
     def eq(self, column: str, value: Any) -> "AsyncQueryBuilder":
         return self._add_condition(column, "=", value)
+
+    def where(
+        self,
+        conditions: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> "AsyncQueryBuilder":
+        qb = self._clone()
+        merged: Dict[str, Any] = {}
+        if conditions:
+            merged.update(conditions)
+        if kwargs:
+            merged.update(kwargs)
+        for column, value in merged.items():
+            qb._conditions.append((column, "=", value))
+        return qb
 
     def neq(self, column: str, value: Any) -> "AsyncQueryBuilder":
         return self._add_condition(column, "!=", value)
