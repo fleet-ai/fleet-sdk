@@ -68,7 +68,7 @@ unasync:
 		'httpx.SyncHTTPTransport': 'httpx.HTTPTransport', \
 		'from ..config import': 'from .config import', \
 	}); \
-	files = [os.path.join(root, f) for root, dirs, files in os.walk('fleet/_async/') for f in files if f.endswith('.py') and f != '__init__.py']; \
+	files = [os.path.join(root, f) for root, dirs, files in os.walk('fleet/_async/') for f in files if f.endswith('.py') and f != '__init__.py' and 'client.py' not in f]; \
 	print('Files to process:', files); \
 	unasync.unasync_files(files, [rule])"
 	@$(PYTHON) scripts/fix_sync_imports.py

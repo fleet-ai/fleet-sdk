@@ -74,6 +74,30 @@ def fix_file(filepath: Path) -> bool:
         content = content.replace(
             "from ...instance.models import", "from ..instance.models import"
         )
+    elif "fleet/verifiers" in str(filepath):
+        # Files in fleet/verifiers/ should use .. for fleet level imports
+        content = content.replace("from ...models import", "from ..models import")
+        # Remove the direct import of SyncEnv to avoid circular imports
+        content = re.sub(r"^from \.\.client import SyncEnv.*\n", "", content, flags=re.MULTILINE)
+        # Use TYPE_CHECKING to avoid circular imports
+        if "from ..client import SyncEnv" in content or "SyncEnv" in content:
+            # Add TYPE_CHECKING import if not present
+            if "TYPE_CHECKING" not in content:
+                content = content.replace(
+                    "from typing import",
+                    "from typing import TYPE_CHECKING, "
+                )
+            # Move SyncEnv import to TYPE_CHECKING block
+            if "if TYPE_CHECKING:" not in content:
+                # Add TYPE_CHECKING block before the class definition
+                content = re.sub(
+                    r"(logger = logging\.getLogger.*\n)",
+                    r"\1\nif TYPE_CHECKING:\n    from ..client import SyncEnv\n",
+                    content
+                )
+            # Quote SyncEnv type annotations
+            content = re.sub(r'(\s+)env: SyncEnv', r'\1env: "SyncEnv"', content)
+            content = re.sub(r'def (\w+)\(self, env: SyncEnv', r'def \1(self, env: "SyncEnv"', content)
 
     # Fix imports in top-level fleet files
     if rel_path.parts[0] in ["base.py", "client.py", "global_client.py"] and len(rel_path.parts) == 1:
