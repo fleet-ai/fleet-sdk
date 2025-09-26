@@ -273,6 +273,12 @@ class VerifiersExecuteResponse(BaseModel):
     result: Optional[Any] = Field(
         None, description="The return value of the function", title="Result"
     )
+    verifier_id: Optional[str] = Field(
+        None, description="ID of the verifier", title="Verifier Id"
+    )
+    execution_id: Optional[str] = Field(
+        None, description="ID of the execution record", title="Execution Id"
+    )
     error: Optional[Dict[str, Any]] = Field(
         None, description="Error details if verification failed", title="Error"
     )

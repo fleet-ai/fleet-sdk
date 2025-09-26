@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, TYPE_CHECKING
 
 from pydantic import BaseModel, Field, validator
 
 # Import the shared VerifierFunction type that works for both async and sync
 from fleet.types import VerifierFunction
+
+if TYPE_CHECKING:
+    from fleet._async.models import VerifiersExecuteResponse
 
 
 class Task(BaseModel):
@@ -24,9 +27,9 @@ class Task(BaseModel):
     version: Optional[str] = Field(None, description="Task version")
     verifier_func: Optional[str] = Field(None, description="Verifier function code")
     verifier: Optional[Any] = Field(
-        None, 
+        None,
         description="Verifier function with decorator (async or sync)",
-        exclude=True  # Exclude from JSON serialization
+        exclude=True,  # Exclude from JSON serialization
     )
     verifier_id: Optional[str] = Field(None, description="Verifier identifier")
     verifier_sha: Optional[str] = Field(None, description="Verifier SHA256 hash")
@@ -68,7 +71,7 @@ class Task(BaseModel):
         # If verifier doesn't exist but verifier_func does, rebuild it
         if not self.verifier and self.verifier_func:
             self._rebuild_verifier()
-            
+
         if self.verifier:
             import asyncio
             import inspect
@@ -102,7 +105,7 @@ class Task(BaseModel):
         # If verifier doesn't exist but verifier_func does, rebuild it
         if not self.verifier and self.verifier_func:
             self._rebuild_verifier()
-            
+
         if self.verifier:
             result = self.verifier.remote(*args, **kwargs)
             # If it's a coroutine, await it
@@ -110,6 +113,65 @@ class Task(BaseModel):
 
             if inspect.iscoroutine(result):
                 return await result
+            else:
+                return result
+        else:
+            raise ValueError("No verifier function found for this task")
+
+    async def verify_detailed_async(
+        self, *args, **kwargs
+    ) -> "VerifiersExecuteResponse":
+        """Verify the task and return the full execute response model.
+
+        For async environments, awaits the async verifier.
+        Works with both sync and async verifiers in async contexts.
+        """
+        # If verifier doesn't exist but verifier_func does, rebuild it
+        if not self.verifier and self.verifier_func:
+            self._rebuild_verifier()
+
+        if self.verifier:
+            result = self.verifier.remote_with_response(*args, **kwargs)
+            # If it's a coroutine, await it
+            import inspect
+
+            if inspect.iscoroutine(result):
+                return await result
+            else:
+                return result
+        else:
+            raise ValueError("No verifier function found for this task")
+
+    def verify_detailed(self, env, *args, **kwargs) -> "VerifiersExecuteResponse":
+        """Verify the task and return the full execute response model (sync version).
+
+        For sync environments, calls the sync verifier directly.
+        For async verifiers, automatically runs them with asyncio.run().
+        """
+        # If verifier doesn't exist but verifier_func does, rebuild it
+        if not self.verifier and self.verifier_func:
+            self._rebuild_verifier()
+
+        if self.verifier:
+            import asyncio
+            import inspect
+
+            # Check if verifier has remote_with_response method (for decorated verifiers)
+            result = self.verifier.remote_with_response(env, *args, **kwargs)
+
+            # If the result is a coroutine, we need to run it
+            if inspect.iscoroutine(result):
+                # Check if we're already in an event loop
+                try:
+                    asyncio.get_running_loop()
+                    # We're in an async context, can't use asyncio.run()
+                    raise RuntimeError(
+                        "Cannot run async verifier in sync mode while event loop is running. "
+                        "Use await task.verify_detailed_async() instead."
+                    )
+                except RuntimeError:
+                    # No event loop running, safe to use asyncio.run()
+                    return asyncio.run(result)
             else:
                 return result
         else:
@@ -127,7 +189,7 @@ class Task(BaseModel):
                 sha256=self.verifier_sha or "",
             )
             self.verifier = verifier
-    
+
     async def make_env(self, region: Optional[str] = None):
         """Create an environment instance for this task's environment.
 

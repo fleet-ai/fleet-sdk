@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, Optional, List, TypeVar, Tuple
 
 from .bundler import FunctionBundler
 from ..client import AsyncEnv
+from ...models import VerifiersExecuteResponse
 
 logger = logging.getLogger(__name__)
 
@@ -152,72 +153,15 @@ class AsyncVerifierFunction:
 
     async def remote(self, env: AsyncEnv, *args, **kwargs) -> float:
         """Remote execution of the verifier function with SHA-based bundle caching."""
-        # Async verifiers are now supported by the backend
-        # if self._is_async:
-        #     raise NotImplementedError(
-        #         f"Async verifier '{self.key}' cannot be executed remotely. "
-        #         "The remote execution environment only supports synchronous functions. "
-        #         "Please provide a synchronous version of your verifier."
-        #     )
+        response = await self.remote_with_response(env, *args, **kwargs)
 
-        args_array = list(args)
-        args_array.append({"env": env.instance_id})
-        args = tuple(args_array)
-
-        try:
-            # Check if bundle needs to be uploaded
-            bundle_sha, needs_upload = await self._check_bundle_status(env)
-
-            if needs_upload:
-                # Need to upload bundle to S3
-                logger.info(f"Uploading bundle {bundle_sha[:8]}... for {self.key}")
-                bundle_data, _ = self._get_or_create_bundle()
-
-                response = await env.execute_verifier_remote(
-                    bundle_data=bundle_data,
-                    bundle_sha=bundle_sha,
-                    key=self.key,
-                    function_name=self.func.__name__,
-                    args=args,
-                    args_array=args_array,
-                    kwargs=kwargs,
-                    needs_upload=True,
-                )
-
-                logger.debug(f"Bundle {bundle_sha[:8]}... uploaded successfully")
-
-            else:
-                # Bundle already available - execute without upload
-                logger.info(
-                    f"Executing cached bundle {bundle_sha[:8]}... for {self.key}"
-                )
-                bundle_data, _ = self._get_or_create_bundle()
-
-                response = await env.execute_verifier_remote(
-                    bundle_data=bundle_data or b"",  # Empty if using server-side bundle
-                    bundle_sha=bundle_sha,
-                    key=self.key,
-                    function_name=self.func.__name__,
-                    args=args,
-                    args_array=args_array,
-                    kwargs=kwargs,
-                    needs_upload=False,  # Don't upload, just execute
-                )
-
-            # Handle response
-            if response.stdout:
-                print(response.stdout)
-            if response.success:
-                return self._process_result(response.result)
-            else:
-                self._raise_remote_error(response.error)
-
-        except Exception as e:
-            logger.error(f"Remote execution failed for {self.key}: {e}")
-            # If it's an HTTP error, try to get more details
-            if hasattr(e, "response") and hasattr(e.response, "text"):
-                logger.error(f"Server response: {e.response.text}")
-            raise
+        # Handle response
+        if response.stdout:
+            print(response.stdout)
+        if response.success:
+            return self._process_result(response.result)
+        else:
+            self._raise_remote_error(response.error)
 
     def _process_result(self, result: Any) -> float:
         """Process remote execution result, handling different return types."""
@@ -257,7 +201,7 @@ Remote traceback:
         try:
             exception_class = getattr(__builtins__, error_type, RuntimeError)
             raise exception_class(full_message)
-        except:
+        except Exception:
             raise RuntimeError(full_message)
 
     def _get_env_id(self, env: AsyncEnv) -> str:
@@ -279,6 +223,74 @@ Remote traceback:
             or "404" in error_msg
             or "not found" in error_msg
         )
+
+    async def remote_with_response(
+        self, env: "AsyncEnv", *args, **kwargs
+    ) -> "VerifiersExecuteResponse":
+        """Remote execution of the verifier function that returns the full response model."""
+        args_array = list(args)
+        args_array.append({"env": env.instance_id})
+        args = tuple(args_array)
+
+        try:
+            # Check if bundle needs to be uploaded
+            bundle_sha, needs_upload = await self._check_bundle_status(env)
+
+            if needs_upload:
+                # Need to upload bundle to S3
+                logger.info(f"Uploading bundle {bundle_sha[:8]}... for {self.key}")
+                bundle_data, _ = self._get_or_create_bundle()
+
+                response = await env.execute_verifier_remote(
+                    bundle_data=bundle_data,
+                    bundle_sha=bundle_sha,
+                    key=self.key,
+                    function_name=self.func.__name__,
+                    args=args,
+                    args_array=args_array,
+                    kwargs=kwargs,
+                    needs_upload=True,
+                )
+
+                logger.debug(f"Bundle {bundle_sha[:8]}... uploaded successfully")
+
+            else:
+                # Bundle already available - execute without upload
+                logger.info(f"Bundle {bundle_sha[:8]}... already cached for {self.key}")
+                response = await env.execute_verifier_remote(
+                    bundle_data=b"",  # Empty bundle since it's cached
+                    bundle_sha=bundle_sha,
+                    key=self.key,
+                    function_name=self.func.__name__,
+                    args=args,
+                    args_array=args_array,
+                    kwargs=kwargs,
+                    needs_upload=False,
+                )
+
+            return response
+
+        except Exception as e:
+            # Check if error indicates bundle not found and retry with upload
+            if self._is_bundle_not_found_error(e) and not needs_upload:
+                logger.info(
+                    f"Bundle {bundle_sha[:8]}... not found on server, uploading..."
+                )
+                bundle_data, _ = self._get_or_create_bundle()
+                response = await env.execute_verifier_remote(
+                    bundle_data=bundle_data,
+                    bundle_sha=bundle_sha,
+                    key=self.key,
+                    function_name=self.func.__name__,
+                    args=args,
+                    args_array=args_array,
+                    kwargs=kwargs,
+                    needs_upload=True,
+                )
+                return response
+            else:
+                logger.error(f"Error in remote execution of {self.key}: {e}")
+                raise
 
 
 def verifier(
