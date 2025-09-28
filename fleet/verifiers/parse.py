@@ -67,7 +67,7 @@ def convert_verifier_string(verifier_str: str) -> str:
 
         if not match:
             raise ValueError(
-                "Could not parse verifier function. Expected format: def function_name(env: Environment, final_answer: str | None = None) -> float/int:"
+                "Could not parse verifier function. Expected format: def function_name(env: Environment, final_answer: Optional[str] = None) -> float/int:"
             )
 
     func_name = match.group(1)
@@ -82,7 +82,7 @@ def convert_verifier_string(verifier_str: str) -> str:
 
     # Build the new function
     new_func = f"""def {func_name}(
-    before: DatabaseSnapshot, after: DatabaseSnapshot, transcript: str | None = None
+    before: DatabaseSnapshot, after: DatabaseSnapshot, transcript: Optional[str] = None
 ) -> int:
     class Environment:
         def db(self, name: str) -> DatabaseSnapshot:"""
@@ -128,7 +128,7 @@ def convert_verifier_string(verifier_str: str) -> str:
         def load(self):
             pass
 
-    def verifier(env: Environment, final_answer: str | None = None) -> float:"""
+    def verifier(env: Environment, final_answer: Optional[str] = None) -> float:"""
 
     if docstring:
         new_func += f"\n        {docstring}"
