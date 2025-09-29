@@ -16,7 +16,6 @@
 
 import base64
 import cloudpickle
-import concurrent.futures
 import httpx
 import json
 import logging
@@ -291,7 +290,9 @@ class Fleet:
     def execute_verifier_remote(
         self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
     ) -> VerifiersExecuteResponse:
-        return _execute_verifier_remote(self.client, bundle_data, args, kwargs, timeout)
+        return _execute_verifier_remote(
+            self.client, bundle_data, args, kwargs, timeout
+        )
 
     def delete(self, instance_id: str) -> InstanceResponse:
         return _delete_instance(self.client, instance_id)
@@ -377,6 +378,7 @@ class Fleet:
         keys: Optional[List[str]] = None,
         version: Optional[str] = None,
         team_id: Optional[str] = None,
+        project_key: Optional[str] = None,
     ) -> List[Task]:
         """Load tasks for the authenticated team, with optional filtering.
 
@@ -396,13 +398,16 @@ class Fleet:
             params["task_keys"] = keys
         if team_id is not None:
             params["team_id"] = team_id
+        if project_key is not None:
+            params["project_key"] = project_key
 
         response = self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
 
-        # Prepare verifier loading tasks
-        verifier_tasks = []
+        # Prepare verifier loading coroutines with concurrency limit
+        verifier_coroutines = []
         task_responses_with_indices = []
+        semaphore = asyncio.Semaphore(100)  # Limit to 10 concurrent operations
 
         for idx, task_response in enumerate(task_list_response.tasks):
             if task_response.verifier:
@@ -413,74 +418,61 @@ class Fleet:
 
                 def create_verifier_with_fallback(tr, emb_code, is_error):
                     """Create verifier with fallback logic."""
-                    if not is_error:
-                        # Try to create from embedded data
-                        try:
-                            return self._create_verifier_from_data(
-                                verifier_id=tr.verifier.verifier_id,
-                                verifier_key=tr.verifier.key,
-                                verifier_code=emb_code,
-                                verifier_sha=tr.verifier.sha256,
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to create verifier {tr.verifier.key}: {e}"
-                            )
-                            return None
-                    else:
-                        # Fallback: try fetching by ID
-                        try:
-                            logger.warning(
-                                f"Embedded verifier code missing for {tr.verifier.key} (NoSuchKey). "
-                                f"Attempting to refetch by id {tr.verifier.verifier_id}"
-                            )
-                            return self._load_verifier(tr.verifier.verifier_id)
-                        except Exception as e:
-                            logger.warning(
-                                f"Refetch by verifier id failed for {tr.verifier.key}: {e}. "
-                                "Leaving verifier unset."
-                            )
-                            return None
+                    with semaphore:  # Acquire semaphore before operation
+                        if not is_error:
+                            # Try to create from embedded data
+                            try:
+                                return self._create_verifier_from_data(
+                                    verifier_id=tr.verifier.verifier_id,
+                                    verifier_key=tr.verifier.key,
+                                    verifier_code=emb_code,
+                                    verifier_sha=tr.verifier.sha256,
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    f"Failed to create verifier {tr.verifier.key}: {e}"
+                                )
+                                return None
+                        else:
+                            # Fallback: try fetching by ID
+                            try:
+                                logger.warning(
+                                    f"Embedded verifier code missing for {tr.verifier.key} (NoSuchKey). "
+                                    f"Attempting to refetch by id {tr.verifier.verifier_id}"
+                                )
+                                return self._load_verifier(
+                                    tr.verifier.verifier_id
+                                )
+                            except Exception as e:
+                                logger.warning(
+                                    f"Refetch by verifier id failed for {tr.verifier.key}: {e}. "
+                                    "Leaving verifier unset."
+                                )
+                                return None
 
-                # Add the task for parallel execution
-                verifier_tasks.append(
-                    (
-                        create_verifier_with_fallback,
-                        task_response,
-                        embedded_code,
-                        is_embedded_error,
+                # Add the coroutine for parallel execution
+                verifier_coroutines.append(
+                    create_verifier_with_fallback(
+                        task_response, embedded_code, is_embedded_error
                     )
                 )
                 task_responses_with_indices.append((idx, task_response))
             else:
                 # No verifier needed
-                verifier_tasks.append(None)
+                verifier_coroutines.append(None)
                 task_responses_with_indices.append((idx, task_response))
 
-        # Execute all verifier loading in parallel using ThreadPoolExecutor
-        verifier_results = []
-        if verifier_tasks:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                futures = []
-                for task in verifier_tasks:
-                    if task is not None:
-                        func, tr, emb_code, is_error = task
-                        future = executor.submit(func, tr, emb_code, is_error)
-                        futures.append(future)
-                    else:
-                        futures.append(None)
-
-                # Collect results
-                for future in futures:
-                    if future is None:
-                        verifier_results.append(None)
-                    else:
-                        try:
-                            result = future.result()
-                            verifier_results.append(result)
-                        except Exception as e:
-                            logger.warning(f"Verifier loading failed: {e}")
-                            verifier_results.append(None)
+        # Execute all verifier loading in parallel
+        if verifier_coroutines:
+            verifier_results = asyncio.gather(
+                *[
+                    coro if coro is not None else time.sleep(0)
+                    for coro in verifier_coroutines
+                ],
+                return_exceptions=True,
+            )
+        else:
+            verifier_results = []
 
         # Build tasks with results
         tasks = []
@@ -493,7 +485,11 @@ class Fleet:
 
             if task_response.verifier:
                 # Process verifier result
-                if verifier_result is not None:
+                if isinstance(verifier_result, Exception):
+                    logger.warning(
+                        f"Verifier loading failed for {task_response.key}: {verifier_result}"
+                    )
+                elif verifier_result is not None:
                     verifier = verifier_result
                     embedded_code = task_response.verifier.code or ""
                     is_embedded_error = embedded_code.strip().startswith(
@@ -579,8 +575,6 @@ class Fleet:
             task = Task(**task_data)
             tasks.append(task)
 
-        responses = []
-
         for task in tasks:
             payload = TaskRequest(
                 key=task.key,
@@ -594,12 +588,9 @@ class Fleet:
                 response = self.client.request(
                     "POST", "/v1/tasks", json=payload.model_dump()
                 )
-                responses.append(response)
             except Exception as e:
                 logger.error(f"Failed to import task {task.key}: {e}")
                 continue
-
-        return responses
 
     def account(self) -> AccountResponse:
         """Get account information including instance limits and usage.
@@ -647,7 +638,6 @@ class Fleet:
             AsyncVerifierFunction created from the verifier code
         """
         from .tasks import verifier_from_string
-        from .verifiers import SyncVerifierFunction
 
         # Use verifier_from_string to create the verifier
         verifier_func = verifier_from_string(

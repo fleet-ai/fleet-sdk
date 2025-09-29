@@ -63,7 +63,9 @@ class InstanceClient:
     def load(self) -> None:
         self._load_resources()
 
-    def reset(self, reset_request: Optional[ResetRequest] = None) -> ResetResponse:
+    def reset(
+        self, reset_request: Optional[ResetRequest] = None
+    ) -> ResetResponse:
         response = self.client.request(
             "POST", "/reset", json=reset_request.model_dump() if reset_request else None
         )

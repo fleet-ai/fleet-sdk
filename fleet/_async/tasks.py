@@ -276,6 +276,7 @@ async def load_tasks(
     keys: Optional[List[str]] = None,
     version: Optional[str] = None,
     team_id: Optional[str] = None,
+    project_key: Optional[str] = None,
 ) -> List[Task]:
     """Convenience function to load tasks with optional filtering.
 
@@ -295,7 +296,7 @@ async def load_tasks(
 
     client = get_client()
     return await client.load_tasks(
-        env_key=env_key, keys=keys, version=version, team_id=team_id
+        env_key=env_key, keys=keys, version=version, team_id=team_id, project_key=project_key
     )
 
 

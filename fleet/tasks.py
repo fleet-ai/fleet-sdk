@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
 
@@ -12,7 +11,7 @@ from pydantic import BaseModel, Field, validator
 from fleet.types import VerifierFunction
 
 if TYPE_CHECKING:
-    from fleet.models import VerifiersExecuteResponse
+    from fleet._async.models import VerifiersExecuteResponse
 
 
 class Task(BaseModel):
@@ -30,7 +29,7 @@ class Task(BaseModel):
     verifier: Optional[Any] = Field(
         None,
         description="Verifier function with decorator (async or sync)",
-        exclude=True,
+        exclude=True,  # Exclude from JSON serialization
     )
     verifier_id: Optional[str] = Field(None, description="Verifier identifier")
     verifier_sha: Optional[str] = Field(None, description="Verifier SHA256 hash")
@@ -76,7 +75,6 @@ class Task(BaseModel):
         if self.verifier:
             import inspect
 
-            # Check if verifier has remote method (for decorated verifiers)
             result = self.verifier.remote(env, *args, **kwargs)
 
             # If the result is a coroutine, we need to run it
@@ -119,8 +117,32 @@ class Task(BaseModel):
         else:
             raise ValueError("No verifier function found for this task")
 
-    def verify_detailed(self, env, *args, **kwargs) -> "VerifiersExecuteResponse":
+    def verify_detailed_async(
+        self, *args, **kwargs
+    ) -> "VerifiersExecuteResponse":
         """Verify the task and return the full execute response model.
+
+        For async environments, awaits the async verifier.
+        Works with both sync and async verifiers in async contexts.
+        """
+        # If verifier doesn't exist but verifier_func does, rebuild it
+        if not self.verifier and self.verifier_func:
+            self._rebuild_verifier()
+
+        if self.verifier:
+            result = self.verifier.remote_with_response(*args, **kwargs)
+            # If it's a coroutine, await it
+            import inspect
+
+            if inspect.iscoroutine(result):
+                return result
+            else:
+                return result
+        else:
+            raise ValueError("No verifier function found for this task")
+
+    def verify_detailed(self, env, *args, **kwargs) -> "VerifiersExecuteResponse":
+        """Verify the task and return the full execute response model (sync version).
 
         For sync environments, calls the sync verifier directly.
         For async verifiers, automatically runs them with asyncio.run().
@@ -150,23 +172,6 @@ class Task(BaseModel):
                     return asyncio.run(result)
             else:
                 return result
-        else:
-            raise ValueError("No verifier function found for this task")
-
-    def verify_detailed_async(self, *args, **kwargs) -> "VerifiersExecuteResponse":
-        """Verify the task and return the full execute response model (async version).
-
-        For async environments, returns a coroutine that when awaited returns the response.
-        Works with both sync and async verifiers in async contexts.
-        """
-        # If verifier doesn't exist but verifier_func does, rebuild it
-        if not self.verifier and self.verifier_func:
-            self._rebuild_verifier()
-
-        if self.verifier:
-            result = self.verifier.remote_with_response(*args, **kwargs)
-            # Return the result (could be a coroutine or a value)
-            return result
         else:
             raise ValueError("No verifier function found for this task")
 
@@ -212,26 +217,20 @@ def verifier_from_string(
     """
     try:
         import inspect
-        from .verifiers import SyncVerifierFunction
-        from .verifiers.code import TASK_SUCCESSFUL_SCORE, TASK_FAILED_SCORE
-        from .verifiers.db import IgnoreConfig
-
-        # Create a globals namespace with all required imports
-        exec_globals = globals().copy()
-        exec_globals.update(
-            {
-                "TASK_SUCCESSFUL_SCORE": TASK_SUCCESSFUL_SCORE,
-                "TASK_FAILED_SCORE": TASK_FAILED_SCORE,
-                "IgnoreConfig": IgnoreConfig,
-                "Environment": object,  # Add Environment type if needed
-            }
-        )
+        from .verifiers.verifier import SyncVerifierFunction
+        from fleet.verifiers.code import TASK_SUCCESSFUL_SCORE, TASK_FAILED_SCORE
+        from fleet.verifiers.db import IgnoreConfig
 
         # Create a local namespace for executing the code
-        local_namespace = {}
+        local_namespace = {
+            "TASK_SUCCESSFUL_SCORE": TASK_SUCCESSFUL_SCORE,
+            "TASK_FAILED_SCORE": TASK_FAILED_SCORE,
+            "IgnoreConfig": IgnoreConfig,
+            "Environment": object,  # Add Environment type if needed
+        }
 
         # Execute the verifier code in the namespace
-        exec(verifier_func, exec_globals, local_namespace)
+        exec(verifier_func, globals(), local_namespace)
 
         # Find the function that was defined
         func_obj = None
@@ -243,18 +242,14 @@ def verifier_from_string(
         if func_obj is None:
             raise ValueError("No function found in verifier code")
 
-        # Create an SyncVerifierFunction instance with raw code
+        # Create an AsyncVerifierFunction instance with raw code
         verifier_instance = SyncVerifierFunction(
-            func=func_obj,
-            key=verifier_key,
+            func_obj,
+            verifier_key,
             verifier_id=verifier_id,
             sha256=sha256,
             raw_code=verifier_func,
         )
-
-        # Store additional metadata
-        verifier_instance._verifier_code = verifier_func
-        verifier_instance._sha256 = sha256
 
         return verifier_instance
 
@@ -266,7 +261,7 @@ def load_tasks_from_file(filename: str) -> List[Task]:
     """Load tasks from a JSON file.
 
     Example:
-        tasks = fleet.load_tasks_from_file("my_tasks.json")
+        tasks = await fleet.load_tasks_from_file("my_tasks.json")
     """
     from .global_client import get_client
 
@@ -279,6 +274,7 @@ def load_tasks(
     keys: Optional[List[str]] = None,
     version: Optional[str] = None,
     team_id: Optional[str] = None,
+    project_key: Optional[str] = None,
 ) -> List[Task]:
     """Convenience function to load tasks with optional filtering.
 
@@ -298,7 +294,7 @@ def load_tasks(
 
     client = get_client()
     return client.load_tasks(
-        env_key=env_key, keys=keys, version=version, team_id=team_id
+        env_key=env_key, keys=keys, version=version, team_id=team_id, project_key=project_key
     )
 
 
@@ -316,8 +312,8 @@ def update_task(
         TaskResponse containing the updated task details
 
     Examples:
-        response = fleet.update_task("my-task", prompt="New prompt text")
-        response = fleet.update_task("my-task", verifier_code="def verify(env): return True")
+        response = await fleet.update_task("my-task", prompt="New prompt text")
+        response = await fleet.update_task("my-task", verifier_code="def verify(env): return True")
     """
     from .global_client import get_client
 
