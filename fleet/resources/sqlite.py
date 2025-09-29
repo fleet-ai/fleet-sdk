@@ -111,6 +111,21 @@ class SyncSnapshotQueryBuilder:
         qb._conditions.append((column, "=", value))
         return qb
 
+    def where(
+        self,
+        conditions: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> "SyncSnapshotQueryBuilder":
+        qb = self._clone()
+        merged: Dict[str, Any] = {}
+        if conditions:
+            merged.update(conditions)
+        if kwargs:
+            merged.update(kwargs)
+        for column, value in merged.items():
+            qb._conditions.append((column, "=", value))
+        return qb
+
     def limit(self, n: int) -> "SyncSnapshotQueryBuilder":
         qb = self._clone()
         qb._limit = n
@@ -304,6 +319,11 @@ class SyncSnapshotDiff:
         self._cached = diff
         return diff
 
+    @property
+    def changes(self) -> Dict[str, Dict[str, Any]]:
+        """Expose the computed diff so callers can introspect like the legacy API."""
+        return self._collect()
+
     def expect_only(self, allowed_changes: List[Dict[str, Any]]):
         """Ensure only specified changes occurred."""
         diff = self._collect()
@@ -470,6 +490,21 @@ class SyncQueryBuilder:
 
     def eq(self, column: str, value: Any) -> "SyncQueryBuilder":
         return self._add_condition(column, "=", value)
+
+    def where(
+        self,
+        conditions: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> "SyncQueryBuilder":
+        qb = self._clone()
+        merged: Dict[str, Any] = {}
+        if conditions:
+            merged.update(conditions)
+        if kwargs:
+            merged.update(kwargs)
+        for column, value in merged.items():
+            qb._conditions.append((column, "=", value))
+        return qb
 
     def neq(self, column: str, value: Any) -> "SyncQueryBuilder":
         return self._add_condition(column, "!=", value)
