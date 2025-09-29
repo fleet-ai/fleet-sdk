@@ -379,6 +379,7 @@ class Fleet:
         keys: Optional[List[str]] = None,
         version: Optional[str] = None,
         team_id: Optional[str] = None,
+        project_key: Optional[str] = None,
     ) -> List[Task]:
         """Load tasks for the authenticated team, with optional filtering.
 
@@ -398,6 +399,8 @@ class Fleet:
             params["task_keys"] = keys
         if team_id is not None:
             params["team_id"] = team_id
+        if project_key is not None:
+            params["project_key"] = project_key
 
         response = self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
