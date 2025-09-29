@@ -55,7 +55,7 @@ class Instance(BaseModel):
 
 class InstanceRequest(BaseModel):
     env_key: str = Field(..., title="Env Key")
-    env_version: Optional[str] = Field(None, title="Version")
+    env_version: Optional[str] = Field(None, title="Env Version")
     data_key: Optional[str] = Field(None, title="Data Key")
     data_version: Optional[str] = Field(None, title="Data Version")
     region: Optional[str] = Field("us-west-1", title="Region")
@@ -67,6 +67,7 @@ class InstanceRequest(BaseModel):
     task_id: Optional[str] = Field(None, title="Task Id")
     force_pull: Optional[bool] = Field(None, title="Force Pull")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
+    image_type: Optional[str] = Field(None, title="Image Type")
     created_from: Optional[str] = Field(None, title="Created From")
 
 

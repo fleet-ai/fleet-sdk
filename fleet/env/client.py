@@ -8,9 +8,14 @@ def make(
     data_key: Optional[str] = None,
     region: Optional[str] = None,
     env_variables: Optional[Dict[str, Any]] = None,
+    image_type: Optional[str] = None,
 ) -> SyncEnv:
     return Fleet().make(
-        env_key, data_key=data_key, region=region, env_variables=env_variables
+        env_key,
+        data_key=data_key,
+        region=region,
+        env_variables=env_variables,
+        image_type=image_type,
     )
 
 
