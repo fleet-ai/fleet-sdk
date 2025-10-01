@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime
 from typing import Any, Dict, Optional, List, TYPE_CHECKING
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, field_serializer
 
 # Import the shared VerifierFunction type that works for both async and sync
 from fleet.types import VerifierFunction
@@ -46,6 +46,11 @@ class Task(BaseModel):
     def set_created_at(cls, v):
         """Set created_at to current time if not provided."""
         return v or datetime.now()
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, dt: Optional[datetime], _info):
+        """Serialize datetime to ISO format string."""
+        return dt.isoformat() if dt else None
 
     @property
     def env_key(self) -> str:

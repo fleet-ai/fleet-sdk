@@ -5,26 +5,19 @@ load_dotenv()
 
 
 def main():
-    env = fleet.env.make("fira")
+    account = fleet.env.account()
+    print(account)
 
-    tasks = fleet.load_tasks(env_key="fira")
+    tasks = fleet.load_tasks(team_id="5ca40f9f-9899-4bee-b194-6974138a4f12")
     print(f"Loaded {len(tasks)} tasks")
 
-    for i, task in enumerate(tasks):
-        print(f"\nTask {i + 1}:")
-        print(f"  Key: {task.key}")
-        print(f"  Prompt: {task.prompt[:80]}...")
-        print(f"  Verifier: {task.verifier_func[:80]}...")
+    # Save tasks to JSON file
+    import json
 
-        print(f"  Verifier: {task.verifier.key}")
-        print("  Running verifier...")
-        try:
-            score = task.verify(env)
-            print(f"  ✓ Score: {score}")
-        except Exception as e:
-            print(f"  ✗ Error: {type(e).__name__}: {e}")
+    with open(f"{account.team_id}.json", "w") as f:
+        json.dump([task.model_dump() for task in tasks], f, indent=2)
 
-        print("-" * 60)
+    print(f"Saved {len(tasks)} tasks to saved_tasks.json")
 
 
 if __name__ == "__main__":
