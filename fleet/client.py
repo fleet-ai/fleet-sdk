@@ -587,17 +587,9 @@ class Fleet:
         responses = []
 
         for task in tasks:
-            payload = TaskRequest(
-                key=task.key,
-                prompt=task.prompt,
-                environment_id=task.env_id,
-                verifier_func=task.verifier_func,
-                version=task.version or None,
-                env_variables=task.env_variables or {},
-            )
             try:
                 response = self.client.request(
-                    "POST", "/v1/tasks", json=payload.model_dump()
+                    "POST", "/v1/tasks", json=task.model_dump()
                 )
                 responses.append(response)
             except Exception as e:
