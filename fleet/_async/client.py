@@ -560,6 +560,24 @@ class AsyncFleet:
             logger.info("No tasks found to export")
             return None
 
+    async def import_single_task(self, task: Task):
+        """Import a single task.
+
+        Args:
+            task: Task object to import
+
+        Returns:
+            Response from the API, or None if the import failed
+        """
+        try:
+            response = await self.client.request(
+                "POST", "/v1/tasks", json=task.model_dump()
+            )
+            return response
+        except Exception as e:
+            logger.error(f"Failed to import task {task.key}: {e}")
+            return None
+
     async def import_tasks(self, filename: str):
         """Import tasks from a JSON file.
 
@@ -578,14 +596,20 @@ class AsyncFleet:
             task = Task(**task_data)
             tasks.append(task)
 
-        for task in tasks:
-            try:
-                response = await self.client.request(
-                    "POST", "/v1/tasks", json=task.model_dump()
-                )
-            except Exception as e:
-                logger.error(f"Failed to import task {task.key}: {e}")
-                continue
+        # Use semaphore to limit concurrency to 20
+        semaphore = asyncio.Semaphore(20)
+
+        async def import_with_semaphore(task):
+            async with semaphore:
+                return await self.import_single_task(task)
+
+        # Use asyncio.gather to parallelize the imports
+        responses = await asyncio.gather(
+            *[import_with_semaphore(task) for task in tasks]
+        )
+
+        # Filter out None values (failed imports)
+        return [r for r in responses if r is not None]
 
     async def account(self) -> AccountResponse:
         """Get account information including instance limits and usage.

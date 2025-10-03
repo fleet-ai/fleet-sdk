@@ -566,6 +566,22 @@ class Fleet:
             logger.info("No tasks found to export")
             return None
 
+    def import_single_task(self, task: Task):
+        """Import a single task.
+
+        Args:
+            task: Task object to import
+
+        Returns:
+            Response from the API, or None if the import failed
+        """
+        try:
+            response = self.client.request("POST", "/v1/tasks", json=task.model_dump())
+            return response
+        except Exception as e:
+            logger.error(f"Failed to import task {task.key}: {e}")
+            return None
+
     def import_tasks(self, filename: str):
         """Import tasks from a JSON file.
 
@@ -584,19 +600,12 @@ class Fleet:
             task = Task(**task_data)
             tasks.append(task)
 
-        responses = []
+        # Use ThreadPoolExecutor to parallelize the imports with max 20 workers
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            responses = list(executor.map(self.import_single_task, tasks))
 
-        for task in tasks:
-            try:
-                response = self.client.request(
-                    "POST", "/v1/tasks", json=task.model_dump()
-                )
-                responses.append(response)
-            except Exception as e:
-                logger.error(f"Failed to import task {task.key}: {e}")
-                continue
-
-        return responses
+        # Filter out None values (failed imports)
+        return [r for r in responses if r is not None]
 
     def account(self) -> AccountResponse:
         """Get account information including instance limits and usage.
