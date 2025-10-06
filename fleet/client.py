@@ -566,27 +566,32 @@ class Fleet:
             logger.info("No tasks found to export")
             return None
 
-    def import_single_task(self, task: Task):
+    def import_single_task(self, task: Task, project_key: Optional[str] = None):
         """Import a single task.
 
         Args:
             task: Task object to import
+            project_key: Optional project key to associate with the task
 
         Returns:
             Response from the API, or None if the import failed
         """
         try:
-            response = self.client.request("POST", "/v1/tasks", json=task.model_dump())
+            params = {}
+            if project_key:
+                params["project_key"] = project_key
+            response = self.client.request("POST", "/v1/tasks", json=task.model_dump(), params=params)
             return response
         except Exception as e:
             logger.error(f"Failed to import task {task.key}: {e}")
             return None
 
-    def import_tasks(self, filename: str):
+    def import_tasks(self, filename: str, project_key: Optional[str] = None):
         """Import tasks from a JSON file.
 
         Args:
             filename: Path to the JSON file of Task objects to import
+            project_key: Optional project key to associate with the tasks
 
         Returns:
             List[Task] containing imported Task objects
@@ -602,7 +607,7 @@ class Fleet:
 
         # Use ThreadPoolExecutor to parallelize the imports with max 20 workers
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-            responses = list(executor.map(self.import_single_task, tasks))
+            responses = list(executor.map(lambda t: self.import_single_task(t, project_key), tasks))
 
         # Filter out None values (failed imports)
         return [r for r in responses if r is not None]

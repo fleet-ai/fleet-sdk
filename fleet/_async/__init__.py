@@ -193,13 +193,18 @@ async def export_tasks(
     return await _async_global_client.get_client().export_tasks(env_key, filename)
 
 
-async def import_tasks(filename: str):
+async def import_tasks(filename: str, project_key: Optional[str] = None):
     """Import tasks from a JSON file.
+
+    Args:
+        filename: Path to the JSON file of Task objects to import
+        project_key: Optional project key to associate with the tasks
 
     Example:
         await fleet.import_tasks("tasks.json")
+        await fleet.import_tasks("tasks.json", project_key="my-project")
     """
-    return await _async_global_client.get_client().import_tasks(filename)
+    return await _async_global_client.get_client().import_tasks(filename, project_key)
 
 
 async def account() -> AccountResponse:
