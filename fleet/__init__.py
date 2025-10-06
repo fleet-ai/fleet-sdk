@@ -51,10 +51,17 @@ from ._async.tasks import (
     Task,
     load_tasks as load_tasks_async,
     load_tasks_from_file as load_tasks_from_file_async,
+    import_task as import_task_async,
+    import_tasks as import_tasks_async,
 )
 
-# Import sync load_tasks function
-from .tasks import load_tasks, load_tasks_from_file
+# Import sync task functions
+from .tasks import (
+    load_tasks,
+    load_tasks_from_file,
+    import_task,
+    import_tasks,
+)
 
 # Import shared types
 from .types import VerifierFunction
@@ -104,6 +111,12 @@ __all__ = [
     # Module-level functions (async is default)
     "load_tasks",
     "load_tasks_async",
+    "load_tasks_from_file",
+    "load_tasks_from_file_async",
+    "import_task",
+    "import_task_async",
+    "import_tasks",
+    "import_tasks_async",
     # Version
     "__version__",
 ]

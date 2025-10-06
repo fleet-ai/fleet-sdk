@@ -86,6 +86,7 @@ __all__ = [
     "load_task_from_string",
     "load_task_from_json",
     "export_tasks",
+    "import_task",
     "import_tasks",
     "account",
     # Version
@@ -191,6 +192,21 @@ async def export_tasks(
         await fleet.export_tasks("fira", "fira_tasks.json")
     """
     return await _async_global_client.get_client().export_tasks(env_key, filename)
+
+
+async def import_task(task, project_key: Optional[str] = None):
+    """Import a single task.
+
+    Args:
+        task: Task object to import
+        project_key: Optional project key to associate with the task
+
+    Example:
+        task = fleet.Task(key="my-task", prompt="Do something", env_id="my-env")
+        await fleet.import_task(task)
+        await fleet.import_task(task, project_key="my-project")
+    """
+    return await _async_global_client.get_client().import_single_task(task, project_key)
 
 
 async def import_tasks(filename: str, project_key: Optional[str] = None):

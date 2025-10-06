@@ -335,3 +335,44 @@ def update_task(
     return client.update_task(
         task_key=task_key, prompt=prompt, verifier_code=verifier_code
     )
+
+
+def import_task(task: Task, project_key: Optional[str] = None):
+    """Convenience function to import a single task.
+
+    Args:
+        task: Task object to import
+        project_key: Optional project key to associate with the task
+
+    Returns:
+        Response from the API, or None if the import failed
+
+    Examples:
+        task = fleet.Task(key="my-task", prompt="Do something", env_id="my-env")
+        response = fleet.import_task(task)
+        response = fleet.import_task(task, project_key="my-project")
+    """
+    from .global_client import get_client
+
+    client = get_client()
+    return client.import_single_task(task, project_key=project_key)
+
+
+def import_tasks(filename: str, project_key: Optional[str] = None):
+    """Convenience function to import tasks from a JSON file.
+
+    Args:
+        filename: Path to the JSON file of Task objects to import
+        project_key: Optional project key to associate with the tasks
+
+    Returns:
+        List of responses from the API for successfully imported tasks
+
+    Examples:
+        responses = fleet.import_tasks("tasks.json")
+        responses = fleet.import_tasks("tasks.json", project_key="my-project")
+    """
+    from .global_client import get_client
+
+    client = get_client()
+    return client.import_tasks(filename, project_key=project_key)
