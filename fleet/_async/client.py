@@ -328,7 +328,9 @@ class AsyncFleet:
         task_json = json.loads(task_string)
         return await self.load_task_from_json(task_json)
 
-    async def load_task_from_json(self, task_json: Dict) -> Task:
+    async def load_task_from_json(
+        self, task_json: Dict, raise_on_verifier_error: bool = False
+    ) -> Task:
         verifier = None
         verifier_code = task_json.get("verifier_func") or task_json.get("verifier_code")
 
@@ -356,9 +358,11 @@ class AsyncFleet:
                     verifier_sha=task_json.get("verifier_sha", ""),
                 )
         except Exception as e:
-            logger.warning(
-                f"Failed to create verifier {task_json.get('key', task_json.get('id'))}: {e}"
-            )
+            error_msg = f"Failed to create verifier {task_json.get('key', task_json.get('id'))}: {e}"
+            if raise_on_verifier_error:
+                raise ValueError(error_msg) from e
+            else:
+                logger.warning(error_msg)
 
         task = Task(
             key=task_json.get("key", task_json.get("id")),
@@ -571,6 +575,13 @@ class AsyncFleet:
             Response from the API, or None if the import failed
         """
         try:
+            # Validate that verifier_func exists
+            if not task.verifier_func:
+                raise ValueError(
+                    f"Task {task.key} is missing verifier_func. "
+                    "All tasks must have a verifier_func to be imported."
+                )
+
             params = {}
             if project_key:
                 params["project_key"] = project_key
@@ -591,14 +602,33 @@ class AsyncFleet:
 
         Returns:
             List[Task] containing imported Task objects
+
+        Raises:
+            ValueError: If any task is missing verifier_func or has invalid verifier code
         """
         with open(filename, "r", encoding="utf-8") as f:
             tasks_data = json.load(f)
 
-        # Create tasks from the loaded data
+        # Create tasks from the loaded data using load_task_from_json
+        # This will validate and create verifiers properly
         tasks = []
         for task_data in tasks_data:
-            task = Task(**task_data)
+            # Validate that verifier_func exists
+            verifier_code = task_data.get("verifier_func") or task_data.get(
+                "verifier_code"
+            )
+            if not verifier_code:
+                task_key = task_data.get("key", task_data.get("id", "unknown"))
+                raise ValueError(
+                    f"Task {task_key} is missing verifier_func. "
+                    "All tasks must have a verifier_func to be imported."
+                )
+
+            # Use load_task_from_json to properly create and validate the task
+            # Pass raise_on_verifier_error=True to fail fast on invalid verifier code
+            task = await self.load_task_from_json(
+                task_data, raise_on_verifier_error=True
+            )
             tasks.append(task)
 
         # Use semaphore to limit concurrency to 20
