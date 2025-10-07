@@ -36,6 +36,26 @@ def main():
         tasks = fleet.load_tasks()
 
     print(f"\nFound {len(tasks)} task(s)")
+
+    # Validate that all tasks have verifier_func
+    print("Validating tasks have verifier_func...")
+    missing_verifier = []
+    for task in tasks:
+        if not task.verifier_func:
+            missing_verifier.append(task.key)
+
+    if missing_verifier:
+        print(f"\n✗ Error: {len(missing_verifier)} task(s) missing verifier_func:")
+        for key in missing_verifier[:10]:  # Show first 10
+            print(f"  - {key}")
+        if len(missing_verifier) > 10:
+            print(f"  ... and {len(missing_verifier) - 10} more")
+        raise ValueError(
+            "All tasks must have a verifier_func. Cannot export tasks without verifiers."
+        )
+
+    print("✓ All tasks have verifier_func")
+
     # Determine output filename
     output_file = args.output or f"{account.team_id}.json"
 

@@ -37,15 +37,31 @@ async def main():
         print(f"Error: Invalid JSON in '{args.json_file}': {e}")
         sys.exit(1)
 
-    # Extract task information
+    # Extract task information and validate verifier_func
     task_count = len(tasks_data)
     task_keys = []
+    missing_verifier = []
     for task_data in tasks_data:
-        task_key = task_data.get("key")
+        task_key = task_data.get("key") or task_data.get("id")
         if task_key:
             task_keys.append(task_key)
         else:
             task_keys.append("(no key)")
+        
+        # Check for verifier_func
+        verifier_code = task_data.get("verifier_func") or task_data.get("verifier_code")
+        if not verifier_code:
+            missing_verifier.append(task_key or "(no key)")
+
+    # Validate all tasks have verifier_func
+    if missing_verifier:
+        print(f"✗ Error: {len(missing_verifier)} task(s) missing verifier_func:")
+        for key in missing_verifier[:10]:  # Show first 10
+            print(f"  - {key}")
+        if len(missing_verifier) > 10:
+            print(f"  ... and {len(missing_verifier) - 10} more")
+        print("\nAll tasks must have a verifier_func to be imported.")
+        sys.exit(1)
 
     # Get account info
     account = await fleet.env.account_async()
