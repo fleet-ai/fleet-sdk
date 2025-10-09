@@ -218,6 +218,42 @@ class Task(BaseModel):
 
         return await AsyncFleet().make(env_key=self.env_key, region=region)
 
+    async def make(
+        self, region: Optional[str] = None, image_type: Optional[str] = None
+    ):
+        """Create an environment instance with task's configuration.
+
+        Auto-populates environment creation with:
+        - env_key (env_id + version)
+        - data_key (data_id + data_version, if present)
+        - env_variables (if present)
+
+        Args:
+            region: Optional AWS region for the environment
+            image_type: Optional image type for the environment
+
+        Returns:
+            Environment instance configured for this task
+
+        Example:
+            task = fleet.Task(key="my-task", prompt="...", env_id="my-env",
+                            data_id="my-data", data_version="v1.0")
+            env = await task.make(region="us-west-2")
+        """
+        if not self.env_id:
+            raise ValueError("Task has no env_id defined")
+
+        # Deferred import to avoid circular dependencies
+        from fleet.env import make_async
+
+        return await make_async(
+            env_key=self.env_key,
+            data_key=self.data_key,
+            region=region,
+            env_variables=self.env_variables if self.env_variables else None,
+            image_type=image_type,
+        )
+
 
 def verifier_from_string(
     verifier_func: str, verifier_id: str, verifier_key: str, sha256: str = ""
