@@ -15,6 +15,13 @@ def main():
         default=None,
     )
     parser.add_argument(
+        "--task-keys",
+        "-t",
+        nargs="+",
+        help="Optional list of task keys to export (space-separated)",
+        default=None,
+    )
+    parser.add_argument(
         "--output",
         "-o",
         help="Output JSON filename (defaults to {team_id}.json)",
@@ -22,6 +29,12 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Validate that only one filter is specified
+    if args.project_key and args.task_keys:
+        parser.error(
+            "Cannot specify both --project-key and --task-keys. Use one or neither."
+        )
 
     # Get account info
     account = fleet.env.account()
@@ -31,6 +44,11 @@ def main():
     if args.project_key:
         print(f"Loading tasks from project: {args.project_key}")
         tasks = fleet.load_tasks(project_key=args.project_key)
+    elif args.task_keys:
+        print(
+            f"Loading {len(args.task_keys)} specific task(s): {', '.join(args.task_keys)}"
+        )
+        tasks = fleet.load_tasks(keys=args.task_keys)
     else:
         print("Loading all tasks")
         tasks = fleet.load_tasks()
