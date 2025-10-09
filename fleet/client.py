@@ -370,6 +370,8 @@ class Fleet:
             ),  # Use env_id or fallback to env_key
             created_at=task_json.get("created_at"),
             version=task_json.get("version"),
+            data_id=task_json.get("data_id"),
+            data_version=task_json.get("data_version"),
             env_variables=task_json.get("env_variables", {}),
             verifier_func=verifier_code,  # Set verifier code
             verifier=verifier,  # Use created verifier or None
@@ -384,6 +386,8 @@ class Fleet:
         version: Optional[str] = None,
         team_id: Optional[str] = None,
         project_key: Optional[str] = None,
+        data_id: Optional[str] = None,
+        data_version: Optional[str] = None,
     ) -> List[Task]:
         """Load tasks for the authenticated team, with optional filtering.
 
@@ -392,6 +396,9 @@ class Fleet:
             keys: Optional list of task keys to filter by
             version: Optional version to filter tasks by (client-side filter)
             team_id: Optional team_id to filter by (admin only)
+            project_key: Optional project key to filter tasks by
+            data_id: Optional data identifier to filter tasks by
+            data_version: Optional data version to filter tasks by
 
         Returns:
             List[Task] containing Task objects
@@ -405,6 +412,10 @@ class Fleet:
             params["team_id"] = team_id
         if project_key is not None:
             params["project_key"] = project_key
+        if data_id is not None:
+            params["data_id"] = data_id
+        if data_version is not None:
+            params["data_version"] = data_version
 
         response = self.client.request("GET", "/v1/tasks", params=params)
         task_list_response = TaskListResponse(**response.json())
@@ -517,6 +528,8 @@ class Fleet:
                 env_id=task_response.environment_id,  # Map environment_id -> env_id
                 created_at=task_response.created_at,
                 version=task_response.version,
+                data_id=getattr(task_response, "data_id", None),  # Get data_id if available
+                data_version=getattr(task_response, "data_version", None),  # Get data_version if available
                 env_variables=task_response.env_variables or {},
                 verifier_func=verifier_func,  # Set verifier code
                 verifier=verifier,  # Use created verifier or None
@@ -527,6 +540,14 @@ class Fleet:
         # Apply client-side filtering for version if specified
         if version is not None:
             tasks = [task for task in tasks if task.version == version]
+        
+        # Apply client-side filtering for data_id if specified
+        if data_id is not None:
+            tasks = [task for task in tasks if task.data_id == data_id]
+        
+        # Apply client-side filtering for data_version if specified
+        if data_version is not None:
+            tasks = [task for task in tasks if task.data_version == data_version]
 
         return tasks
 

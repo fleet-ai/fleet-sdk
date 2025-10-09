@@ -25,6 +25,8 @@ class Task(BaseModel):
     )
     created_at: Optional[datetime] = Field(None, description="Task creation timestamp")
     version: Optional[str] = Field(None, description="Task version")
+    data_id: Optional[str] = Field(None, description="Data identifier")
+    data_version: Optional[str] = Field(None, description="Data version")
     verifier_func: Optional[str] = Field(None, description="Verifier function code")
     verifier: Optional[Any] = Field(
         None,
@@ -57,6 +59,15 @@ class Task(BaseModel):
         if self.version and self.version != "None" and ":" not in self.env_id:
             return f"{self.env_id}:{self.version}"
         return self.env_id
+
+    @property
+    def data_key(self) -> Optional[str]:
+        """Get the data key combining data_id and data_version."""
+        if self.data_id and self.data_version:
+            return f"{self.data_id}:{self.data_version}"
+        elif self.data_id:
+            return self.data_id
+        return None
 
     class Config:
         """Pydantic model configuration."""
@@ -282,6 +293,8 @@ async def load_tasks(
     version: Optional[str] = None,
     team_id: Optional[str] = None,
     project_key: Optional[str] = None,
+    data_id: Optional[str] = None,
+    data_version: Optional[str] = None,
 ) -> List[Task]:
     """Convenience function to load tasks with optional filtering.
 
@@ -290,11 +303,15 @@ async def load_tasks(
         keys: Optional list of task keys to filter by
         version: Optional version to filter tasks by
         team_id: Optional team_id to filter by (admin only)
+        project_key: Optional project key to filter tasks by
+        data_id: Optional data identifier to filter tasks by
+        data_version: Optional data version to filter tasks by
 
     Examples:
         tasks = await fleet.load_tasks(env_key="fira")
         tasks = await fleet.load_tasks(keys=["task1", "task2"])
         tasks = await fleet.load_tasks(env_key="fira", version="v1.0")
+        tasks = await fleet.load_tasks(data_id="my-data", data_version="v1.0")
     """
     # Use the global client by default so users can pre-configure it once
     from .global_client import get_client
@@ -306,6 +323,8 @@ async def load_tasks(
         version=version,
         team_id=team_id,
         project_key=project_key,
+        data_id=data_id,
+        data_version=data_version,
     )
 
 
