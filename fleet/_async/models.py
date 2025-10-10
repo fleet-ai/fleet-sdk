@@ -180,6 +180,8 @@ class TaskResponse(BaseModel):
     verifier_id: Optional[str] = Field(None, title="Verifier Id")
     verifier_func: Optional[str] = Field(None, title="Verifier Func")
     version: Optional[str] = Field(None, title="Version")
+    data_id: Optional[str] = Field(None, title="Data Id")
+    data_version: Optional[str] = Field(None, title="Data Version")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     verifier: Optional[VerifierData] = Field(None, title="Verifier")
 
