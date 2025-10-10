@@ -333,9 +333,26 @@ class AsyncFleet:
     ) -> Task:
         verifier = None
         verifier_code = task_json.get("verifier_func") or task_json.get("verifier_code")
+        verifier_sha = task_json.get("verifier_sha", "")
+
+        # Check if verifier is a nested object with code inside
+        if not verifier_code and "verifier" in task_json:
+            verifier_obj = task_json["verifier"]
+            if isinstance(verifier_obj, dict):
+                verifier_code = verifier_obj.get("code")
+                # Also extract sha256 from nested verifier if not found at top level
+                if not verifier_sha:
+                    verifier_sha = verifier_obj.get("sha256", "")
 
         # Try to find verifier_id in multiple locations
         verifier_id = task_json.get("verifier_id")
+        
+        # Check nested verifier object for verifier_id
+        if not verifier_id and "verifier" in task_json:
+            verifier_obj = task_json["verifier"]
+            if isinstance(verifier_obj, dict):
+                verifier_id = verifier_obj.get("verifier_id")
+        
         if (
             not verifier_id
             and "metadata" in task_json
@@ -355,7 +372,7 @@ class AsyncFleet:
                     verifier_id=verifier_id,
                     verifier_key=task_json.get("key", task_json.get("id")),
                     verifier_code=verifier_code,
-                    verifier_sha=task_json.get("verifier_sha", ""),
+                    verifier_sha=verifier_sha,
                 )
         except Exception as e:
             error_msg = f"Failed to create verifier {task_json.get('key', task_json.get('id'))}: {e}"
@@ -378,7 +395,7 @@ class AsyncFleet:
             verifier_func=verifier_code,  # Set verifier code
             verifier=verifier,  # Use created verifier or None
             verifier_id=verifier_id,  # Set verifier_id so _rebuild_verifier works
-            verifier_sha=task_json.get("verifier_sha", ""),  # Set verifier_sha
+            verifier_sha=verifier_sha,  # Set verifier_sha
             metadata=task_json.get("metadata", {}),  # Default empty metadata
         )
         return task
