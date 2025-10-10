@@ -715,6 +715,29 @@ class Fleet:
         )
         return TaskResponse(**response.json())
 
+    def get_task(
+        self,
+        task_key: str,
+        version_id: Optional[str] = None,
+    ) -> TaskResponse:
+        """Get a task by key and optional version.
+
+        Args:
+            task_key: The key of the task to retrieve
+            version_id: Optional version ID to filter by
+
+        Returns:
+            TaskResponse containing the task details
+        """
+        params = {}
+        if version_id is not None:
+            params["version_id"] = version_id
+
+        response = self.client.request(
+            "GET", f"/v1/tasks/{task_key}", params=params
+        )
+        return TaskResponse(**response.json())
+
     def _create_verifier_from_data(
         self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str
     ) -> "SyncVerifierFunction":

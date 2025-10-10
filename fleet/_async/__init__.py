@@ -89,6 +89,7 @@ __all__ = [
     "import_task",
     "import_tasks",
     "account",
+    "get_task",
     # Version
     "__version__",
 ]
@@ -226,6 +227,22 @@ async def import_tasks(filename: str, project_key: Optional[str] = None):
 async def account() -> AccountResponse:
     """Get account information including instance limits and usage."""
     return await _async_global_client.get_client().account()
+
+
+async def get_task(task_key: str, version_id: Optional[str] = None):
+    """Get a task by key and optional version.
+
+    Args:
+        task_key: The key of the task to retrieve
+        version_id: Optional version ID to filter by
+
+    Example:
+        task = await fleet.get_task("my-task")
+        task = await fleet.get_task("my-task", version_id="v1")
+    """
+    return await _async_global_client.get_client().get_task(
+        task_key=task_key, version_id=version_id
+    )
 
 
 def configure(
