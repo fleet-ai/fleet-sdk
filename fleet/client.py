@@ -719,12 +719,14 @@ class Fleet:
         self,
         task_key: str,
         version_id: Optional[str] = None,
+        team_id: Optional[str] = None,
     ) -> TaskResponse:
         """Get a task by key and optional version.
 
         Args:
             task_key: The key of the task to retrieve
             version_id: Optional version ID to filter by
+            team_id: Optional team_id to filter by (admin only)
 
         Returns:
             TaskResponse containing the task details
@@ -732,6 +734,8 @@ class Fleet:
         params = {}
         if version_id is not None:
             params["version_id"] = version_id
+        if team_id is not None:
+            params["team_id"] = team_id
 
         response = self.client.request(
             "GET", f"/v1/tasks/{task_key}", params=params
