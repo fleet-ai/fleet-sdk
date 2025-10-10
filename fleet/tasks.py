@@ -330,6 +330,7 @@ def load_tasks(
     version: Optional[str] = None,
     team_id: Optional[str] = None,
     project_key: Optional[str] = None,
+    task_project_key: Optional[str] = None,
     data_id: Optional[str] = None,
     data_version: Optional[str] = None,
 ) -> List[Task]:
@@ -341,6 +342,7 @@ def load_tasks(
         version: Optional version to filter tasks by
         team_id: Optional team_id to filter by (admin only)
         project_key: Optional project key to filter tasks by
+        task_project_key: Optional task project key to filter tasks by
         data_id: Optional data identifier to filter tasks by
         data_version: Optional data version to filter tasks by
 
@@ -360,6 +362,7 @@ def load_tasks(
         version=version,
         team_id=team_id,
         project_key=project_key,
+        task_project_key=task_project_key,
         data_id=data_id,
         data_version=data_version,
     )

@@ -407,6 +407,7 @@ class AsyncFleet:
         version: Optional[str] = None,
         team_id: Optional[str] = None,
         project_key: Optional[str] = None,
+        task_project_key: Optional[str] = None,
         data_id: Optional[str] = None,
         data_version: Optional[str] = None,
     ) -> List[Task]:
@@ -418,6 +419,7 @@ class AsyncFleet:
             version: Optional version to filter tasks by (client-side filter)
             team_id: Optional team_id to filter by (admin only)
             project_key: Optional project key to filter tasks by
+            task_project_key: Optional task project key to filter tasks by
             data_id: Optional data identifier to filter tasks by
             data_version: Optional data version to filter tasks by
 
@@ -433,6 +435,8 @@ class AsyncFleet:
             params["team_id"] = team_id
         if project_key is not None:
             params["project_key"] = project_key
+        if task_project_key is not None:
+            params["task_project_key"] = task_project_key
         if data_id is not None:
             params["data_id"] = data_id
         if data_version is not None:
