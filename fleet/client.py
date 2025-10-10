@@ -375,6 +375,8 @@ class Fleet:
             env_variables=task_json.get("env_variables", {}),
             verifier_func=verifier_code,  # Set verifier code
             verifier=verifier,  # Use created verifier or None
+            verifier_id=verifier_id,  # Set verifier_id so _rebuild_verifier works
+            verifier_sha=task_json.get("verifier_sha", ""),  # Set verifier_sha
             metadata=task_json.get("metadata", {}),  # Default empty metadata
         )
         return task
