@@ -22,6 +22,12 @@ def main():
         default=None,
     )
     parser.add_argument(
+        "--task-project-key",
+        "-tpk",
+        help="Optional task project key to filter tasks",
+        default=None,
+    )
+    parser.add_argument(
         "--output",
         "-o",
         help="Output JSON filename (defaults to {team_id}.json)",
@@ -31,9 +37,17 @@ def main():
     args = parser.parse_args()
 
     # Validate that only one filter is specified
-    if args.project_key and args.task_keys:
+    filters_specified = sum(
+        [
+            args.project_key is not None,
+            args.task_keys is not None,
+            args.task_project_key is not None,
+        ]
+    )
+
+    if filters_specified > 1:
         parser.error(
-            "Cannot specify both --project-key and --task-keys. Use one or neither."
+            "Cannot specify multiple filters. Use only one of --project-key, --task-keys, or --task-project-key."
         )
 
     # Get account info
@@ -49,6 +63,9 @@ def main():
             f"Loading {len(args.task_keys)} specific task(s): {', '.join(args.task_keys)}"
         )
         tasks = fleet.load_tasks(keys=args.task_keys)
+    elif args.task_project_key:
+        print(f"Loading tasks from task project: {args.task_project_key}")
+        tasks = fleet.load_tasks(task_project_key=args.task_project_key)
     else:
         print("Loading all tasks")
         tasks = fleet.load_tasks()
