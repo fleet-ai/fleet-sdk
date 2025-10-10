@@ -53,6 +53,7 @@ from ._async.tasks import (
     load_tasks_from_file as load_tasks_from_file_async,
     import_task as import_task_async,
     import_tasks as import_tasks_async,
+    get_task as get_task_async,
 )
 
 # Import sync task functions
@@ -61,6 +62,7 @@ from .tasks import (
     load_tasks_from_file,
     import_task,
     import_tasks,
+    get_task,
 )
 
 # Import shared types
@@ -117,6 +119,8 @@ __all__ = [
     "import_task_async",
     "import_tasks",
     "import_tasks_async",
+    "get_task",
+    "get_task_async",
     # Version
     "__version__",
 ]
