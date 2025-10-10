@@ -390,12 +390,13 @@ def update_task(
     )
 
 
-def get_task(task_key: str, version_id: Optional[str] = None):
+def get_task(task_key: str, version_id: Optional[str] = None, team_id: Optional[str] = None):
     """Convenience function to get a task by key and optional version.
 
     Args:
         task_key: The key of the task to retrieve
         version_id: Optional version ID to filter by
+        team_id: Optional team_id to filter by (admin only)
 
     Returns:
         TaskResponse containing the task details
@@ -403,11 +404,12 @@ def get_task(task_key: str, version_id: Optional[str] = None):
     Examples:
         response = fleet.get_task("my-task")
         response = fleet.get_task("my-task", version_id="v1")
+        response = fleet.get_task("my-task", team_id="team-123")
     """
     from .global_client import get_client
 
     client = get_client()
-    return client.get_task(task_key=task_key, version_id=version_id)
+    return client.get_task(task_key=task_key, version_id=version_id, team_id=team_id)
 
 
 def import_task(task: Task, project_key: Optional[str] = None):
