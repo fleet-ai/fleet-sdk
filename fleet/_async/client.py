@@ -552,6 +552,7 @@ class AsyncFleet:
                 verifier_func=verifier_func,  # Set verifier code
                 verifier=verifier,  # Use created verifier or None
                 metadata={},  # Default empty metadata
+                output_json_schema=getattr(task_response, "output_json_schema", None),  # Get output_json_schema if available
             )
             tasks.append(task)
 

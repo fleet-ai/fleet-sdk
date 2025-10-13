@@ -157,6 +157,9 @@ class TaskRequest(BaseModel):
     verifier_id: Optional[str] = Field(None, title="Verifier Id")
     version: Optional[str] = Field(None, title="Version")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
+    output_json_schema: Optional[Dict[str, Any]] = Field(
+        None, title="Output Json Schema"
+    )
 
 
 class TaskUpdateRequest(BaseModel):
@@ -187,6 +190,9 @@ class TaskResponse(BaseModel):
     data_version: Optional[str] = Field(None, title="Data Version")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     verifier: Optional[VerifierData] = Field(None, title="Verifier")
+    output_json_schema: Optional[Dict[str, Any]] = Field(
+        None, title="Output Json Schema"
+    )
 
 
 class ValidationError(BaseModel):
