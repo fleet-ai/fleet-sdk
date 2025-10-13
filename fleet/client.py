@@ -395,6 +395,7 @@ class Fleet:
             verifier_id=verifier_id,  # Set verifier_id so _rebuild_verifier works
             verifier_sha=verifier_sha,  # Set verifier_sha
             metadata=task_json.get("metadata", {}),  # Default empty metadata
+            output_json_schema=task_json.get("output_json_schema"),  # JSON schema for output
         )
         return task
 

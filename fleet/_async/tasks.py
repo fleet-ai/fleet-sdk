@@ -38,6 +38,9 @@ class Task(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(
         default_factory=dict, description="Additional task metadata"
     )
+    output_json_schema: Optional[Dict[str, Any]] = Field(
+        None, description="JSON schema for expected output format"
+    )
 
     @validator("key")
     def validate_key_format(cls, v):
