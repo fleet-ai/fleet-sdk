@@ -289,10 +289,12 @@ def verifier_from_string(
         # Execute the verifier code in the namespace
         exec(verifier_func, globals(), local_namespace)
 
-        # Find the function that was defined
+        # Find the function that was defined (not imported)
+        # Functions defined via exec have co_filename == '<string>'
+        # Imported functions have their actual module file path
         func_obj = None
         for name, obj in local_namespace.items():
-            if inspect.isfunction(obj):
+            if inspect.isfunction(obj) and obj.__code__.co_filename == "<string>":
                 func_obj = obj
                 break
 
