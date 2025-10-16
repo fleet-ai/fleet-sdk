@@ -863,7 +863,8 @@ def test_bug_field_specs_ignored_with_whole_row_spec():
     BUG: When both field-level specs AND whole-row spec exist for same row,
     the old implementation only checks the whole-row spec and ignores field values.
 
-    This means you can specify expected field values, but they're not validated!
+    This test SHOULD FAIL (on buggy code) because we specify wrong field values
+    that should be caught but aren't.
     """
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -893,28 +894,29 @@ def test_bug_field_specs_ignored_with_whole_row_spec():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # OLD BUG: This PASSES even though field values are WRONG!
-        # We say price should be 50.0 but it's actually 999.99
-        # The whole-row spec makes it pass, ignoring the field specs
-        before.diff(after).expect_only(
-            [
-                {"table": "products", "pk": 2, "field": None, "after": "__added__"},
-                # These are ignored in old implementation! ⚠️
-                {
-                    "table": "products",
-                    "pk": 2,
-                    "field": "price",
-                    "after": 50.0,
-                },  # WRONG VALUE!
-                {
-                    "table": "products",
-                    "pk": 2,
-                    "field": "stock",
-                    "after": 500,
-                },  # WRONG VALUE!
-            ]
-        )
-        # This passes but shouldn't - the field specs are completely ignored!
+        # This SHOULD fail because we're specifying wrong values
+        # We say price=50.0 (actual: 999.99) and stock=500 (actual: 1)
+        # With the buggy implementation, this wrongly passes
+        # With the fix, this should raise AssertionError
+        with pytest.raises(AssertionError, match="Unexpected database changes"):
+            before.diff(after).expect_only(
+                [
+                    {"table": "products", "pk": 2, "field": None, "after": "__added__"},
+                    # These specify WRONG values - should be caught!
+                    {
+                        "table": "products",
+                        "pk": 2,
+                        "field": "price",
+                        "after": 50.0,
+                    },  # WRONG! Actually 999.99
+                    {
+                        "table": "products",
+                        "pk": 2,
+                        "field": "stock",
+                        "after": 500,
+                    },  # WRONG! Actually 1
+                ]
+            )
 
     finally:
         os.unlink(before_db)
@@ -926,7 +928,8 @@ def test_bug_wrong_values_pass_with_whole_row_spec():
     BUG: You can specify any values in field specs alongside a whole-row spec,
     even completely wrong ones, and validation passes.
 
-    This is dangerous because it gives false confidence that values are being checked.
+    This test SHOULD FAIL to catch the dangerous security issue where role=admin
+    and balance=1000000 are allowed even though we specified role=user and balance=0.
     """
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -956,26 +959,27 @@ def test_bug_wrong_values_pass_with_whole_row_spec():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # This PASSES in old implementation even with completely wrong field values!
-        before.diff(after).expect_only(
-            [
-                {"table": "accounts", "pk": 2, "field": None, "after": "__added__"},
-                # These specifications are COMPLETELY WRONG but are ignored:
-                {
-                    "table": "accounts",
-                    "pk": 2,
-                    "field": "role",
-                    "after": "user",
-                },  # Actually "admin"!
-                {
-                    "table": "accounts",
-                    "pk": 2,
-                    "field": "balance",
-                    "after": 0.0,
-                },  # Actually 1000000.0!
-            ]
-        )
-        # Gives false sense of security - looks like we're validating but we're not!
+        # Should fail because field values don't match!
+        # We say role=user (actual: admin) and balance=0.0 (actual: 1000000.0)
+        with pytest.raises(AssertionError, match="Unexpected database changes"):
+            before.diff(after).expect_only(
+                [
+                    {"table": "accounts", "pk": 2, "field": None, "after": "__added__"},
+                    # These specifications are COMPLETELY WRONG - should be caught:
+                    {
+                        "table": "accounts",
+                        "pk": 2,
+                        "field": "role",
+                        "after": "user",
+                    },  # Actually "admin"!
+                    {
+                        "table": "accounts",
+                        "pk": 2,
+                        "field": "balance",
+                        "after": 0.0,
+                    },  # Actually 1000000.0!
+                ]
+            )
 
     finally:
         os.unlink(before_db)
@@ -987,7 +991,7 @@ def test_bug_conflicting_specs_pass_silently():
     BUG: You can have conflicting specs (field-level AND whole-row) and
     the old implementation silently ignores the conflict, using only whole-row.
 
-    This can mask errors in test specifications.
+    This test SHOULD FAIL because we specify is_public=0 but it's actually 1.
     """
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -1017,22 +1021,19 @@ def test_bug_conflicting_specs_pass_silently():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # This PASSES but has conflicting intent:
-        # - Whole-row spec says "allow any values"
-        # - Field-level spec says "is_public must be 0 (private)"
-        # Old implementation ignores the field spec, allowing the dangerous is_public=1
-        before.diff(after).expect_only(
-            [
-                {"table": "settings", "pk": 1, "field": None, "after": "__added__"},
-                {
-                    "table": "settings",
-                    "pk": 1,
-                    "field": "is_public",
-                    "after": 0,
-                },  # Says private, but actually public!
-            ]
-        )
-        # This passes, creating a security hole!
+        # Should fail - we say is_public=0 but it's actually 1 (security issue!)
+        with pytest.raises(AssertionError, match="Unexpected database changes"):
+            before.diff(after).expect_only(
+                [
+                    {"table": "settings", "pk": 1, "field": None, "after": "__added__"},
+                    {
+                        "table": "settings",
+                        "pk": 1,
+                        "field": "is_public",
+                        "after": 0,
+                    },  # Says private, but actually public!
+                ]
+            )
 
     finally:
         os.unlink(before_db)
@@ -1044,7 +1045,8 @@ def test_bug_field_specs_dont_work_for_deletions():
     BUG: Field-level specs with 'before' values don't work for validating deletions.
     Only whole-row deletion specs (field=None) are checked.
 
-    This means you can't validate what was in a deleted row.
+    This test SHOULD FAIL because we're deleting an admin session when we said
+    we should only delete non-admin sessions (admin_session=0).
     """
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -1074,20 +1076,25 @@ def test_bug_field_specs_dont_work_for_deletions():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # This PASSES even though we're saying admin_session=0 but it's actually 1
-        before.diff(after).expect_only(
-            [
-                {"table": "sessions", "pk": 2, "field": None, "after": "__removed__"},
-                {
-                    "table": "sessions",
-                    "pk": 2,
-                    "field": "admin_session",
-                    "before": 0,
-                },  # WRONG! Actually 1
-            ]
-        )
-        # We wanted to verify we're only deleting non-admin sessions,
-        # but the field spec is ignored, allowing admin session deletion!
+        # Should fail - we say admin_session=0 but it's actually 1!
+        # We're deleting an admin session when we shouldn't be
+        with pytest.raises(AssertionError, match="Unexpected database changes"):
+            before.diff(after).expect_only(
+                [
+                    {
+                        "table": "sessions",
+                        "pk": 2,
+                        "field": None,
+                        "after": "__removed__",
+                    },
+                    {
+                        "table": "sessions",
+                        "pk": 2,
+                        "field": "admin_session",
+                        "before": 0,
+                    },  # WRONG! Actually 1
+                ]
+            )
 
     finally:
         os.unlink(before_db)
