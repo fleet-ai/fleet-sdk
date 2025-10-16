@@ -274,9 +274,17 @@ def verifier_from_string(
     """
     try:
         import inspect
+        import re
         from .verifiers.verifier import AsyncVerifierFunction
         from fleet.verifiers.code import TASK_SUCCESSFUL_SCORE, TASK_FAILED_SCORE
         from fleet.verifiers.db import IgnoreConfig
+
+        # Strip @verifier decorator if present to avoid double-wrapping
+        # Remove lines like: @verifier(key="...")
+        cleaned_code = re.sub(r'@verifier\([^)]*\)\s*\n', '', verifier_func)
+        # Also remove the verifier import if present
+        cleaned_code = re.sub(r'from fleet import.*verifier.*\n', '', cleaned_code)
+        cleaned_code = re.sub(r'import.*verifier.*\n', '', cleaned_code)
 
         # Create a local namespace for executing the code
         local_namespace = {
@@ -286,8 +294,8 @@ def verifier_from_string(
             "Environment": object,  # Add Environment type if needed
         }
 
-        # Execute the verifier code in the namespace
-        exec(verifier_func, globals(), local_namespace)
+        # Execute the cleaned verifier code in the namespace
+        exec(cleaned_code, globals(), local_namespace)
 
         # Find the function that was defined (not imported)
         # Functions defined via exec have co_filename == '<string>'

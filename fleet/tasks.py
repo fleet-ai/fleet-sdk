@@ -265,9 +265,17 @@ def verifier_from_string(
     """
     try:
         import inspect
+        import re
         from .verifiers import SyncVerifierFunction
         from .verifiers.code import TASK_SUCCESSFUL_SCORE, TASK_FAILED_SCORE
         from .verifiers.db import IgnoreConfig
+
+        # Strip @verifier decorator if present to avoid double-wrapping
+        # Remove lines like: @verifier(key="...")
+        cleaned_code = re.sub(r'@verifier\([^)]*\)\s*\n', '', verifier_func)
+        # Also remove the verifier import if present
+        cleaned_code = re.sub(r'from fleet import.*verifier.*\n', '', cleaned_code)
+        cleaned_code = re.sub(r'import.*verifier.*\n', '', cleaned_code)
 
         # Create a globals namespace with all required imports
         exec_globals = globals().copy()
@@ -283,8 +291,8 @@ def verifier_from_string(
         # Create a local namespace for executing the code
         local_namespace = {}
 
-        # Execute the verifier code in the namespace
-        exec(verifier_func, exec_globals, local_namespace)
+        # Execute the cleaned verifier code in the namespace
+        exec(cleaned_code, exec_globals, local_namespace)
 
         # Find the function that was defined (not imported)
         # Functions defined via exec have co_filename == '<string>'
