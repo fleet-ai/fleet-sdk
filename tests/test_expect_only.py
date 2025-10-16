@@ -860,9 +860,6 @@ def test_security_data_injection_in_json_fields():
 
 def test_bug_field_specs_ignored_with_whole_row_spec():
     """
-    BUG: When both field-level specs AND whole-row spec exist for same row,
-    the old implementation only checks the whole-row spec and ignores field values.
-
     This test SHOULD FAIL (on buggy code) because we specify wrong field values
     that should be caught but aren't.
     """
