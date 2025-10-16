@@ -299,17 +299,14 @@ def verifier_from_string(
         # This is now safe because we validated it contains only declarative code
         exec(verifier_func, exec_globals, local_namespace)
 
-        # Find the function that was defined (not imported)
-        # Functions defined via exec have co_filename == '<string>'
-        # Imported functions have their actual module file path
-        func_obj = None
-        for name, obj in local_namespace.items():
-            if inspect.isfunction(obj) and obj.__code__.co_filename == "<string>":
-                func_obj = obj
-                break
+        # Get the function by the parsed function name
+        func_obj = local_namespace.get(func_name)
 
         if func_obj is None:
-            raise ValueError("No function found in verifier code")
+            raise ValueError(f"Function '{func_name}' not found in verifier code")
+
+        if not inspect.isfunction(func_obj):
+            raise ValueError(f"'{func_name}' is not a function")
 
         # Create an SyncVerifierFunction instance with raw code
         verifier_instance = SyncVerifierFunction(
