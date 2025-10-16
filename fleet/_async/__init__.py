@@ -112,8 +112,11 @@ async def environment(env_key: str) -> Environment:
 
 async def make(
     env_key: str,
+    data_key: Optional[str] = None,
     region: Optional[str] = None,
     env_variables: Optional[Dict[str, Any]] = None,
+    image_type: Optional[str] = None,
+    ttl_seconds: Optional[int] = None,
 ) -> AsyncEnv:
     """Create a new environment instance.
 
@@ -121,7 +124,14 @@ async def make(
         env = await fleet.make("fira")
         env_with_vars = await fleet.make("fira", env_variables={"LOGGED_IN_NAME": "Alice"})
     """
-    return await _async_global_client.get_client().make(env_key, region, env_variables)
+    return await _async_global_client.get_client().make(
+        env_key,
+        data_key=data_key,
+        region=region,
+        env_variables=env_variables,
+        image_type=image_type,
+        ttl_seconds=ttl_seconds,
+    )
 
 
 async def make_for_task(task: Task) -> AsyncEnv:

@@ -66,6 +66,7 @@ class InstanceRequest(BaseModel):
     force_pull: Optional[bool] = Field(None, title="Force Pull")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     created_from: Optional[str] = Field(None, title="Created From")
+    ttl_seconds: Optional[int] = Field(None, title="TTL Seconds")
 
 
 class InstanceStatus(Enum):

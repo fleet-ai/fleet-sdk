@@ -9,6 +9,7 @@ async def make_async(
     region: Optional[str] = None,
     env_variables: Optional[Dict[str, Any]] = None,
     image_type: Optional[str] = None,
+    ttl_seconds: Optional[int] = None,
 ) -> AsyncEnv:
     return await AsyncFleet().make(
         env_key,
@@ -16,6 +17,7 @@ async def make_async(
         region=region,
         env_variables=env_variables,
         image_type=image_type,
+        ttl_seconds=ttl_seconds,
     )
 
 

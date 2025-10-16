@@ -222,7 +222,10 @@ class Task(BaseModel):
         return await AsyncFleet().make(env_key=self.env_key, region=region)
 
     async def make(
-        self, region: Optional[str] = None, image_type: Optional[str] = None
+        self,
+        region: Optional[str] = None,
+        image_type: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
     ):
         """Create an environment instance with task's configuration.
 
@@ -234,6 +237,7 @@ class Task(BaseModel):
         Args:
             region: Optional AWS region for the environment
             image_type: Optional image type for the environment
+            ttl_seconds: Optional TTL in seconds for the instance
 
         Returns:
             Environment instance configured for this task
@@ -255,6 +259,7 @@ class Task(BaseModel):
             region=region,
             env_variables=self.env_variables if self.env_variables else None,
             image_type=image_type,
+            ttl_seconds=ttl_seconds,
         )
 
 

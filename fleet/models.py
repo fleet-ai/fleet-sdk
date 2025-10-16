@@ -69,6 +69,7 @@ class InstanceRequest(BaseModel):
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     image_type: Optional[str] = Field(None, title="Image Type")
     created_from: Optional[str] = Field(None, title="Created From")
+    ttl_seconds: Optional[int] = Field(None, title="TTL Seconds")
 
 
 class InstanceStatus(Enum):

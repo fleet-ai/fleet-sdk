@@ -211,6 +211,7 @@ class Fleet:
         region: Optional[str] = None,
         env_variables: Optional[Dict[str, Any]] = None,
         image_type: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
     ) -> SyncEnv:
         if ":" in env_key:
             env_key_part, env_version = env_key.split(":", 1)
@@ -245,6 +246,7 @@ class Fleet:
             env_variables=env_variables,
             image_type=image_type,
             created_from="sdk",
+            ttl_seconds=ttl_seconds,
         )
 
         # Only use region-specific base URL if no custom base URL is set
