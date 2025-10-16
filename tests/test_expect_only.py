@@ -537,3 +537,558 @@ def test_ignore_config_with_field_specs():
     finally:
         os.unlink(before_db)
         os.unlink(after_db)
+
+
+# ============================================================================
+# Tests demonstrating OLD implementation's security issues
+# These tests show cases that PASS with the old whole-row approach but
+# represent security vulnerabilities that SHOULD have been caught.
+# ============================================================================
+
+
+def test_security_whole_row_spec_allows_malicious_values():
+    """
+    SECURITY ISSUE: Whole-row specs allow ANY field values, even malicious ones.
+
+    This test demonstrates the danger of using field=None (whole-row spec).
+    With the old implementation, this was the ONLY way to allow additions,
+    but it's too permissive and allows unauthorized data through.
+
+    This test PASSES (showing backward compatibility) but highlights why you
+    should migrate to field-level specs for better security.
+    """
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, role TEXT, active INTEGER)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'user', 1)")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, role TEXT, active INTEGER)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'user', 1)")
+        # Malicious: user added with admin role!
+        conn.execute("INSERT INTO users VALUES (2, 'Hacker', 'admin', 1)")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # This PASSES but is insecure - we're allowing a user with admin role!
+        # The old implementation would only support this approach
+        before.diff(after).expect_only(
+            [{"table": "users", "pk": 2, "field": None, "after": "__added__"}]
+        )
+
+        # What we SHOULD do (secure): specify exact values
+        # This would catch if role was 'admin' instead of 'user'
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_security_field_level_specs_catch_malicious_role():
+    """
+    SECURITY: Field-level specs properly catch unauthorized values.
+
+    This demonstrates the NEW, secure way to validate additions.
+    If someone tries to add a user with 'admin' role when we expected 'user',
+    it will be caught.
+    """
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, role TEXT, active INTEGER)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'user', 1)")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, role TEXT, active INTEGER)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'user', 1)")
+        # Attempted malicious addition with admin role
+        conn.execute("INSERT INTO users VALUES (2, 'Bob', 'admin', 1)")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # This correctly FAILS because role is 'admin' not 'user'
+        with pytest.raises(AssertionError, match="Unexpected database changes"):
+            before.diff(after).expect_only(
+                [
+                    {"table": "users", "pk": 2, "field": "id", "after": 2},
+                    {"table": "users", "pk": 2, "field": "name", "after": "Bob"},
+                    {
+                        "table": "users",
+                        "pk": 2,
+                        "field": "role",
+                        "after": "user",
+                    },  # Expected 'user'
+                    {"table": "users", "pk": 2, "field": "active", "after": 1},
+                ]
+            )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_security_sensitive_financial_data():
+    """
+    SECURITY: Whole-row spec could allow price manipulation in e-commerce.
+
+    Demonstrates a real-world security scenario where whole-row specs are dangerous.
+    """
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL, discount REAL)"
+        )
+        conn.execute("INSERT INTO orders VALUES (1, 100, 50.00, 0.0)")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL, discount REAL)"
+        )
+        conn.execute("INSERT INTO orders VALUES (1, 100, 50.00, 0.0)")
+        # Malicious: order with 100% discount!
+        conn.execute("INSERT INTO orders VALUES (2, 200, 1000.00, 1000.00)")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # OLD WAY (insecure): This PASSES even with suspicious 100% discount
+        before.diff(after).expect_only(
+            [{"table": "orders", "pk": 2, "field": None, "after": "__added__"}]
+        )
+
+        # NEW WAY (secure): Would catch the excessive discount
+        # If we specified expected values, this would fail:
+        with pytest.raises(AssertionError, match="Unexpected database changes"):
+            before.diff(after).expect_only(
+                [
+                    {"table": "orders", "pk": 2, "field": "id", "after": 2},
+                    {"table": "orders", "pk": 2, "field": "user_id", "after": 200},
+                    {"table": "orders", "pk": 2, "field": "amount", "after": 1000.00},
+                    {
+                        "table": "orders",
+                        "pk": 2,
+                        "field": "discount",
+                        "after": 0.0,
+                    },  # Expected no discount
+                ]
+            )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_security_privilege_escalation_in_permissions():
+    """
+    SECURITY: Demonstrates privilege escalation vulnerability with whole-row specs.
+
+    In a permissions system, whole-row specs could allow unauthorized permission grants.
+    """
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE permissions (id INTEGER PRIMARY KEY, user_id INTEGER, resource TEXT, can_read INTEGER, can_write INTEGER, can_delete INTEGER)"
+        )
+        conn.execute("INSERT INTO permissions VALUES (1, 100, 'documents', 1, 0, 0)")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE permissions (id INTEGER PRIMARY KEY, user_id INTEGER, resource TEXT, can_read INTEGER, can_write INTEGER, can_delete INTEGER)"
+        )
+        conn.execute("INSERT INTO permissions VALUES (1, 100, 'documents', 1, 0, 0)")
+        # Malicious: grant full permissions including delete!
+        conn.execute("INSERT INTO permissions VALUES (2, 200, 'admin_panel', 1, 1, 1)")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # INSECURE: Whole-row spec allows the dangerous permission grant
+        before.diff(after).expect_only(
+            [{"table": "permissions", "pk": 2, "field": None, "after": "__added__"}]
+        )
+
+        # SECURE: Field-level specs would catch unauthorized delete permission
+        with pytest.raises(AssertionError, match="Unexpected database changes"):
+            before.diff(after).expect_only(
+                [
+                    {"table": "permissions", "pk": 2, "field": "id", "after": 2},
+                    {"table": "permissions", "pk": 2, "field": "user_id", "after": 200},
+                    {
+                        "table": "permissions",
+                        "pk": 2,
+                        "field": "resource",
+                        "after": "admin_panel",
+                    },
+                    {"table": "permissions", "pk": 2, "field": "can_read", "after": 1},
+                    {"table": "permissions", "pk": 2, "field": "can_write", "after": 1},
+                    {
+                        "table": "permissions",
+                        "pk": 2,
+                        "field": "can_delete",
+                        "after": 0,
+                    },  # Expected NO delete
+                ]
+            )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_security_data_injection_in_json_fields():
+    """
+    SECURITY: Whole-row specs could allow malicious data in JSON/text fields.
+    """
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE configs (id INTEGER PRIMARY KEY, name TEXT, settings TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO configs VALUES (1, 'app_config', '{\"debug\": false}')"
+        )
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE configs (id INTEGER PRIMARY KEY, name TEXT, settings TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO configs VALUES (1, 'app_config', '{\"debug\": false}')"
+        )
+        # Malicious: config with debug enabled and backdoor URL
+        conn.execute(
+            'INSERT INTO configs VALUES (2, \'user_config\', \'{"debug": true, "backdoor": "https://evil.com"}\')'
+        )
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # INSECURE: Passes even with malicious settings
+        before.diff(after).expect_only(
+            [{"table": "configs", "pk": 2, "field": None, "after": "__added__"}]
+        )
+
+        # SECURE: Would catch the malicious settings
+        with pytest.raises(AssertionError, match="Unexpected database changes"):
+            before.diff(after).expect_only(
+                [
+                    {"table": "configs", "pk": 2, "field": "id", "after": 2},
+                    {
+                        "table": "configs",
+                        "pk": 2,
+                        "field": "name",
+                        "after": "user_config",
+                    },
+                    {
+                        "table": "configs",
+                        "pk": 2,
+                        "field": "settings",
+                        "after": '{"debug": false}',
+                    },
+                ]
+            )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+# ============================================================================
+# Tests showing field-level specs being IGNORED (not validated)
+# These demonstrate cases where you specify field values but they're not checked
+# ============================================================================
+
+
+def test_bug_field_specs_ignored_with_whole_row_spec():
+    """
+    BUG: When both field-level specs AND whole-row spec exist for same row,
+    the old implementation only checks the whole-row spec and ignores field values.
+
+    This means you can specify expected field values, but they're not validated!
+    """
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, price REAL, stock INTEGER)"
+        )
+        conn.execute("INSERT INTO products VALUES (1, 'Widget', 10.0, 100)")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, price REAL, stock INTEGER)"
+        )
+        conn.execute("INSERT INTO products VALUES (1, 'Widget', 10.0, 100)")
+        # Add product with price=999.99 and stock=1
+        conn.execute("INSERT INTO products VALUES (2, 'Gadget', 999.99, 1)")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # OLD BUG: This PASSES even though field values are WRONG!
+        # We say price should be 50.0 but it's actually 999.99
+        # The whole-row spec makes it pass, ignoring the field specs
+        before.diff(after).expect_only(
+            [
+                {"table": "products", "pk": 2, "field": None, "after": "__added__"},
+                # These are ignored in old implementation! ⚠️
+                {
+                    "table": "products",
+                    "pk": 2,
+                    "field": "price",
+                    "after": 50.0,
+                },  # WRONG VALUE!
+                {
+                    "table": "products",
+                    "pk": 2,
+                    "field": "stock",
+                    "after": 500,
+                },  # WRONG VALUE!
+            ]
+        )
+        # This passes but shouldn't - the field specs are completely ignored!
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_bug_wrong_values_pass_with_whole_row_spec():
+    """
+    BUG: You can specify any values in field specs alongside a whole-row spec,
+    even completely wrong ones, and validation passes.
+
+    This is dangerous because it gives false confidence that values are being checked.
+    """
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE accounts (id INTEGER PRIMARY KEY, username TEXT, role TEXT, balance REAL)"
+        )
+        conn.execute("INSERT INTO accounts VALUES (1, 'alice', 'user', 100.0)")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE accounts (id INTEGER PRIMARY KEY, username TEXT, role TEXT, balance REAL)"
+        )
+        conn.execute("INSERT INTO accounts VALUES (1, 'alice', 'user', 100.0)")
+        # Actual: role=admin, balance=1000000.0
+        conn.execute("INSERT INTO accounts VALUES (2, 'bob', 'admin', 1000000.0)")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # This PASSES in old implementation even with completely wrong field values!
+        before.diff(after).expect_only(
+            [
+                {"table": "accounts", "pk": 2, "field": None, "after": "__added__"},
+                # These specifications are COMPLETELY WRONG but are ignored:
+                {
+                    "table": "accounts",
+                    "pk": 2,
+                    "field": "role",
+                    "after": "user",
+                },  # Actually "admin"!
+                {
+                    "table": "accounts",
+                    "pk": 2,
+                    "field": "balance",
+                    "after": 0.0,
+                },  # Actually 1000000.0!
+            ]
+        )
+        # Gives false sense of security - looks like we're validating but we're not!
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_bug_conflicting_specs_pass_silently():
+    """
+    BUG: You can have conflicting specs (field-level AND whole-row) and
+    the old implementation silently ignores the conflict, using only whole-row.
+
+    This can mask errors in test specifications.
+    """
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE settings (id INTEGER PRIMARY KEY, key TEXT, value TEXT, is_public INTEGER)"
+        )
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE settings (id INTEGER PRIMARY KEY, key TEXT, value TEXT, is_public INTEGER)"
+        )
+        # Add a setting that should be private but isn't
+        conn.execute(
+            "INSERT INTO settings VALUES (1, 'api_key', 'secret123', 1)"
+        )  # is_public=1 (BAD!)
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # This PASSES but has conflicting intent:
+        # - Whole-row spec says "allow any values"
+        # - Field-level spec says "is_public must be 0 (private)"
+        # Old implementation ignores the field spec, allowing the dangerous is_public=1
+        before.diff(after).expect_only(
+            [
+                {"table": "settings", "pk": 1, "field": None, "after": "__added__"},
+                {
+                    "table": "settings",
+                    "pk": 1,
+                    "field": "is_public",
+                    "after": 0,
+                },  # Says private, but actually public!
+            ]
+        )
+        # This passes, creating a security hole!
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_bug_field_specs_dont_work_for_deletions():
+    """
+    BUG: Field-level specs with 'before' values don't work for validating deletions.
+    Only whole-row deletion specs (field=None) are checked.
+
+    This means you can't validate what was in a deleted row.
+    """
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE sessions (id INTEGER PRIMARY KEY, user_id INTEGER, active INTEGER, admin_session INTEGER)"
+        )
+        conn.execute("INSERT INTO sessions VALUES (1, 100, 1, 0)")
+        conn.execute("INSERT INTO sessions VALUES (2, 101, 1, 1)")  # Admin session!
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE sessions (id INTEGER PRIMARY KEY, user_id INTEGER, active INTEGER, admin_session INTEGER)"
+        )
+        conn.execute("INSERT INTO sessions VALUES (1, 100, 1, 0)")
+        # Session 2 (admin session) is deleted
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # This PASSES even though we're saying admin_session=0 but it's actually 1
+        before.diff(after).expect_only(
+            [
+                {"table": "sessions", "pk": 2, "field": None, "after": "__removed__"},
+                {
+                    "table": "sessions",
+                    "pk": 2,
+                    "field": "admin_session",
+                    "before": 0,
+                },  # WRONG! Actually 1
+            ]
+        )
+        # We wanted to verify we're only deleting non-admin sessions,
+        # but the field spec is ignored, allowing admin session deletion!
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
