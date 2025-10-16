@@ -349,6 +349,8 @@ class InstanceResponse(BaseModel):
     team_id: str = Field(..., title="Team Id")
     region: str = Field(..., title="Region")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
+    data_key: Optional[str] = Field(None, title="Data Key")
+    data_version: Optional[str] = Field(None, title="Data Version")
     urls: Optional[InstanceURLs] = Field(None, title="Urls")
     health: Optional[bool] = Field(None, title="Health")
 
