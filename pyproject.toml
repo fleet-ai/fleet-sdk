@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fleet-python"
-version = "0.2.64"
+version = "0.2.64-alpha1"
 description = "Python SDK for Fleet environments"
 authors = [
     {name = "Fleet AI", email = "nic@fleet.so"},
@@ -65,14 +65,14 @@ profile = "black"
 line_length = 88
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "0.2.64-alpha1"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "0.2.64-alpha1"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
