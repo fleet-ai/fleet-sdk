@@ -46,9 +46,11 @@ echo "Current version in pyproject.toml: $CURRENT_VERSION"
 echo "Updating version in pyproject.toml to $ALPHA_VERSION..."
 
 # Use Python to update the version
-python << EOF
-import tomllib
+python - "$ALPHA_VERSION" << 'EOF'
+import sys
 import re
+
+alpha_version = sys.argv[1]
 
 # Read the file
 with open('pyproject.toml', 'r') as f:
@@ -57,7 +59,7 @@ with open('pyproject.toml', 'r') as f:
 # Replace version using regex
 new_content = re.sub(
     r'(version\s*=\s*")[^"]+(")',
-    r'\g<1>$ALPHA_VERSION\g<2>',
+    rf'\g<1>{alpha_version}\g<2>',
     content
 )
 
@@ -65,7 +67,7 @@ new_content = re.sub(
 with open('pyproject.toml', 'w') as f:
     f.write(new_content)
 
-print(f"✅ Updated pyproject.toml version to $ALPHA_VERSION")
+print(f"✅ Updated pyproject.toml version to {alpha_version}")
 EOF
 
 # Verify the change
