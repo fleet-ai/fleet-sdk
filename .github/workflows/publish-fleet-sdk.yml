@@ -33,6 +33,7 @@ jobs:
   build-and-publish:
     needs: validate
     runs-on: ubuntu-latest
+    environment: pypi # Optional: use a dedicated environment for publishing
     permissions:
       id-token: write # Required for OIDC authentication
       contents: read # Required to checkout code
