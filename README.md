@@ -10,6 +10,20 @@ Install the Fleet SDK using pip:
 pip install fleet-python
 ```
 
+### Alpha/Pre-release Versions
+
+To install the latest alpha or pre-release version:
+
+```bash
+pip install --pre fleet-python
+```
+
+To install a specific alpha version:
+
+```bash
+pip install fleet-python==0.2.64-alpha1
+```
+
 ## API Key Setup
 
 Fleet requires an API key for authentication. You can obtain one from the [Fleet Platform](https://fleetai.com/dashboard/api-keys).

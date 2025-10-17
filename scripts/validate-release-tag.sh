@@ -14,9 +14,9 @@ fi
 
 echo "Validating release tag: $RELEASE_TAG"
 
-# Check tag format: fleet-python-v*.*.*
-if [[ ! $RELEASE_TAG =~ ^fleet-python-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Error: Invalid tag format. Expected: fleet-python-v*.*.*"
+# Check tag format: fleet-python-v*.*.* (with optional alpha/beta/rc suffix)
+if [[ ! $RELEASE_TAG =~ ^fleet-python-v[0-9]+\.[0-9]+\.[0-9]+(alpha[0-9]+|beta[0-9]+|rc[0-9]+|a[0-9]+|b[0-9]+)?$ ]]; then
+    echo "Error: Invalid tag format. Expected: fleet-python-v*.*.* (optionally with alpha/beta/rc suffix)"
     echo "Received: $RELEASE_TAG"
     exit 1
 fi
@@ -29,10 +29,15 @@ echo "Tag version: $TAG_VERSION"
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "HEAD" ]; then
     echo "Warning: Not on main branch. Current branch: $CURRENT_BRANCH"
-    # Check if the tag is reachable from main
-    if ! git merge-base --is-ancestor $(git rev-parse $RELEASE_TAG) $(git rev-parse origin/main) 2>/dev/null; then
-        echo "Error: Tag $RELEASE_TAG is not reachable from main branch"
-        exit 1
+    # For prerelease versions (alpha/beta/rc), skip the main branch check
+    if [[ $RELEASE_TAG =~ (alpha|beta|rc|a[0-9]+|b[0-9]+) ]]; then
+        echo "Info: Prerelease version detected. Skipping main branch check."
+    else
+        # Check if the tag is reachable from main
+        if ! git merge-base --is-ancestor $(git rev-parse $RELEASE_TAG) $(git rev-parse origin/main) 2>/dev/null; then
+            echo "Error: Tag $RELEASE_TAG is not reachable from main branch"
+            exit 1
+        fi
     fi
 fi
 

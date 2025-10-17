@@ -502,7 +502,50 @@ class SnapshotDiff:
                         )
 
             for row in report.get("added_rows", []):
-                if not _is_change_allowed(tbl, row["row_id"], None, "__added__"):
+                # Check if there are any field-level specs DEFINED for this row (not whether they match)
+                row_data = row.get("data", {})
+                has_field_specs = False
+                for allowed in allowed_changes:
+                    allowed_pk = allowed.get("pk")
+                    pk_match = (
+                        str(allowed_pk) == str(row["row_id"])
+                        if allowed_pk is not None
+                        else False
+                    )
+                    # Check if this is a field-level spec (not whole-row)
+                    if (
+                        allowed["table"] == tbl
+                        and pk_match
+                        and allowed.get("field")
+                        is not None  # field-level, not whole-row
+                    ):
+                        has_field_specs = True
+                        break
+
+                # If field-level specs exist, validate them (field-level takes precedence)
+                if has_field_specs:
+                    all_fields_allowed = True
+                    unmatched_fields = []
+
+                    for field_name, field_value in row_data.items():
+                        # Skip ignored fields
+                        if self.ignore_config.should_ignore_field(tbl, field_name):
+                            continue
+                        # Skip rowid as it's internal
+                        if field_name == "rowid":
+                            continue
+
+                        if not _is_change_allowed(
+                            tbl, row["row_id"], field_name, field_value
+                        ):
+                            all_fields_allowed = False
+                            unmatched_fields.append((field_name, field_value))
+
+                    # If all non-ignored fields match specs, allow the addition
+                    if all_fields_allowed:
+                        continue
+
+                    # Otherwise, it's an unexpected addition
                     unexpected_changes.append(
                         {
                             "type": "insertion",
@@ -511,11 +554,102 @@ class SnapshotDiff:
                             "field": None,
                             "after": "__added__",
                             "full_row": row,
+                            "unmatched_fields": unmatched_fields
+                            if unmatched_fields
+                            else None,
                         }
                     )
+                else:
+                    # No field-level specs, check for whole-row spec (backward compatible)
+                    whole_row_allowed = _is_change_allowed(
+                        tbl, row["row_id"], None, "__added__"
+                    )
+
+                    if not whole_row_allowed:
+                        # Neither field-level nor whole-row spec found
+                        unexpected_changes.append(
+                            {
+                                "type": "insertion",
+                                "table": tbl,
+                                "row_id": row["row_id"],
+                                "field": None,
+                                "after": "__added__",
+                                "full_row": row,
+                            }
+                        )
 
             for row in report.get("removed_rows", []):
-                if not _is_change_allowed(tbl, row["row_id"], None, "__removed__"):
+                # Check if there are any field-level specs with "before" values for this row
+                row_data = row.get("data", {})
+                has_field_specs = False
+                for field_name, field_value in row_data.items():
+                    if field_name == "rowid" or self.ignore_config.should_ignore_field(
+                        tbl, field_name
+                    ):
+                        continue
+                    # For deletions, look for specs with "before" key
+                    for allowed in allowed_changes:
+                        allowed_pk = allowed.get("pk")
+                        pk_match = (
+                            str(allowed_pk) == str(row["row_id"])
+                            if allowed_pk is not None
+                            else False
+                        )
+                        if (
+                            allowed["table"] == tbl
+                            and pk_match
+                            and allowed.get("field") == field_name
+                            and "before" in allowed
+                        ):
+                            has_field_specs = True
+                            break
+                    if has_field_specs:
+                        break
+
+                # If field-level specs exist, validate them (field-level takes precedence)
+                if has_field_specs:
+                    all_fields_allowed = True
+                    unmatched_fields = []
+
+                    for field_name, field_value in row_data.items():
+                        # Skip ignored fields
+                        if self.ignore_config.should_ignore_field(tbl, field_name):
+                            continue
+                        # Skip rowid as it's internal
+                        if field_name == "rowid":
+                            continue
+
+                        # For deletions, check if there's a field-level spec with matching "before" value
+                        field_spec_found = False
+                        for allowed in allowed_changes:
+                            allowed_pk = allowed.get("pk")
+                            pk_match = (
+                                str(allowed_pk) == str(row["row_id"])
+                                if allowed_pk is not None
+                                else False
+                            )
+
+                            if (
+                                allowed["table"] == tbl
+                                and pk_match
+                                and allowed.get("field") == field_name
+                                and "before" in allowed
+                                and _values_equivalent(
+                                    allowed.get("before"), field_value
+                                )
+                            ):
+                                field_spec_found = True
+                                break
+
+                        if not field_spec_found:
+                            all_fields_allowed = False
+                            unmatched_fields.append((field_name, field_value))
+
+                    # If all non-ignored fields match specs, allow the deletion
+                    if all_fields_allowed:
+                        continue
+
+                    # Otherwise, it's an unexpected deletion
                     unexpected_changes.append(
                         {
                             "type": "deletion",
@@ -524,8 +658,29 @@ class SnapshotDiff:
                             "field": None,
                             "after": "__removed__",
                             "full_row": row,
+                            "unmatched_fields": unmatched_fields
+                            if unmatched_fields
+                            else None,
                         }
                     )
+                else:
+                    # No field-level specs, check for whole-row spec (backward compatible)
+                    whole_row_allowed = _is_change_allowed(
+                        tbl, row["row_id"], None, "__removed__"
+                    )
+
+                    if not whole_row_allowed:
+                        # Neither field-level nor whole-row spec found
+                        unexpected_changes.append(
+                            {
+                                "type": "deletion",
+                                "table": tbl,
+                                "row_id": row["row_id"],
+                                "field": None,
+                                "after": "__removed__",
+                                "full_row": row,
+                            }
+                        )
 
         if unexpected_changes:
             # Build comprehensive error message
@@ -611,7 +766,7 @@ class SnapshotDiff:
         diff = self._collect()
         for tbl, report in diff.items():
             for row in report.get("modified_rows", []):
-                for f in row["changed"].keys():
+                for f in row["changes"].keys():
                     if self.ignore_config.should_ignore_field(tbl, f):
                         continue
                     key = (tbl, f)
