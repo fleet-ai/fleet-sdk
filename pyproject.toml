@@ -65,14 +65,14 @@ profile = "black"
 line_length = 88
 
 [tool.mypy]
-python_version = "0.2.64-alpha1"
+python_version = "0.2.65-alpha1"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
 
 [tool.ruff]
 line-length = 88
-target-version = "0.2.64-alpha1"
+target-version = "0.2.65-alpha1"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
