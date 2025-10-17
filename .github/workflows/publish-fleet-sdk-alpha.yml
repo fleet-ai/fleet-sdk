@@ -1,0 +1,149 @@
+#
+# This workflow is used to publish alpha versions of the Fleet Python SDK to PyPI.
+# It can be triggered by:
+# 1. Pushing a tag matching fleet-python-v*.*.*-alpha* or fleet-python-v*.*.*a*
+# 2. Manual workflow dispatch
+#
+# Alpha versions have relaxed validation:
+# - Can be published from any branch
+# - Version in pyproject.toml should match tag
+#
+
+name: Publish Fleet Python SDK (Alpha)
+
+on:
+  push:
+    tags:
+      - "fleet-python-v*.*.*-alpha*" # e.g., fleet-python-v0.2.64-alpha1
+      - "fleet-python-v*.*.*a*" # e.g., fleet-python-v0.2.64a1
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Alpha version to publish (e.g., 0.2.64-alpha1 or 0.2.64a1)"
+        required: true
+        type: string
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.set_release_tag.outputs.release_tag }}
+      version: ${{ steps.set_release_tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Set release tag and validate
+        id: set_release_tag
+        run: |
+          # Determine the tag/version based on trigger type
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            RELEASE_TAG="fleet-python-v${VERSION}"
+            echo "Manual dispatch with version: $VERSION"
+          else
+            RELEASE_TAG=${GITHUB_REF#refs/tags/}
+            VERSION=${RELEASE_TAG#fleet-python-v}
+            echo "Tag push with tag: $RELEASE_TAG"
+          fi
+
+          echo "Using tag: $RELEASE_TAG"
+          echo "Using version: $VERSION"
+
+          # Validate tag format (must contain alpha or a suffix)
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-?alpha[0-9]*|a[0-9]+)$ ]]; then
+            echo "Error: Invalid alpha version format"
+            echo "Expected format: X.Y.Z-alphaN, X.Y.Z-alpha, X.Y.ZaN"
+            echo "Received: $VERSION"
+            exit 1
+          fi
+
+          # Check if version in pyproject.toml matches
+          PYPROJECT_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+
+          echo "Tag version: $VERSION"
+          echo "pyproject.toml version: $PYPROJECT_VERSION"
+
+          if [ "$VERSION" != "$PYPROJECT_VERSION" ]; then
+            echo "Error: Tag version ($VERSION) does not match pyproject.toml version ($PYPROJECT_VERSION)"
+            echo "Please update pyproject.toml to version $VERSION before publishing"
+            exit 1
+          fi
+
+          # Get current branch
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "Current branch: $CURRENT_BRANCH"
+          echo "⚠️  Alpha release - branch check relaxed (not required to be on main)"
+
+          echo "✅ Alpha version validation passed"
+          echo "  - Format: ✅ $RELEASE_TAG"
+          echo "  - Version: ✅ $VERSION"
+          echo "  - Version match: ✅ $VERSION = $PYPROJECT_VERSION"
+
+          # Set outputs
+          echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  build-and-publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: pypi-alpha # Use a separate environment for alpha releases
+    permissions:
+      id-token: write # Required for OIDC authentication
+      contents: read # Required to checkout code
+
+    env:
+      RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+      VERSION: ${{ needs.validate.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+          pip install -e .
+
+      - name: Verify version
+        run: |
+          echo "Publishing alpha version: $VERSION"
+          python -c "import tomllib; v = tomllib.load(open('pyproject.toml', 'rb'))['project']['version']; print(f'Package version: {v}'); assert v == '$VERSION', f'Version mismatch: {v} != $VERSION'"
+
+      - name: Build package
+        run: |
+          python -m build
+
+      - name: Verify package
+        run: |
+          twine check dist/*
+          echo "Built packages:"
+          ls -lh dist/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fleet-python-sdk-alpha-${{ env.VERSION }}
+          path: dist/
+          retention-days: 30 # Keep alpha builds longer for testing
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          # Alpha versions will be published to PyPI
+          # Users can install with: pip install fleet-python==0.2.64a1
+          # Or get latest including alpha: pip install --pre fleet-python
