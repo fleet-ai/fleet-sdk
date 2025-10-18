@@ -202,17 +202,17 @@ class Task(BaseModel):
             )
             self.verifier = verifier
 
-    def make_env(self, region: Optional[str] = None):
+    def make_env(
+        self,
+        region: Optional[str] = None,
+        image_type: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+    ):
         """Create an environment instance for this task's environment.
 
-        Uses the task's env_id (and version if present) to create the env.
+        Alias for make() method. Uses the task's env_id (and version if present) to create the env.
         """
-        if not self.env_id:
-            raise ValueError("Task has no env_id defined")
-        # Deferred import to avoid circular dependencies
-        from .client import Fleet
-
-        return Fleet().make(env_key=self.env_key, region=region)
+        return self.make(region=region, image_type=image_type, ttl_seconds=ttl_seconds)
 
     def make(
         self,
@@ -279,10 +279,10 @@ def verifier_from_string(
 
         # Strip @verifier decorator if present to avoid double-wrapping
         # Remove lines like: @verifier(key="...")
-        cleaned_code = re.sub(r'@verifier\([^)]*\)\s*\n', '', verifier_func)
+        cleaned_code = re.sub(r"@verifier\([^)]*\)\s*\n", "", verifier_func)
         # Also remove the verifier import if present
-        cleaned_code = re.sub(r'from fleet import.*verifier.*\n', '', cleaned_code)
-        cleaned_code = re.sub(r'import.*verifier.*\n', '', cleaned_code)
+        cleaned_code = re.sub(r"from fleet import.*verifier.*\n", "", cleaned_code)
+        cleaned_code = re.sub(r"import.*verifier.*\n", "", cleaned_code)
 
         # Create a globals namespace with all required imports
         exec_globals = globals().copy()
@@ -413,7 +413,9 @@ def update_task(
     )
 
 
-def get_task(task_key: str, version_id: Optional[str] = None, team_id: Optional[str] = None):
+def get_task(
+    task_key: str, version_id: Optional[str] = None, team_id: Optional[str] = None
+):
     """Convenience function to get a task by key and optional version.
 
     Args:
