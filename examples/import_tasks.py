@@ -210,8 +210,17 @@ async def main():
         action="store_true",
         help="Skip the verifier sanity check (not recommended)",
     )
+    parser.add_argument(
+        "--sanity-check-only",
+        action="store_true",
+        help="Only run the sanity check without importing tasks",
+    )
 
     args = parser.parse_args()
+
+    # Validate conflicting flags
+    if args.skip_sanity_check and args.sanity_check_only:
+        parser.error("Cannot use --skip-sanity-check and --sanity-check-only together")
 
     # Load and parse the JSON file
     try:
@@ -286,6 +295,12 @@ async def main():
         success, errors = await run_verifier_sanity_check(tasks, client)
         if not success:
             sys.exit(1)
+
+        # If only doing sanity check, exit successfully here
+        if args.sanity_check_only:
+            print("\n✓ Sanity check complete! (--sanity-check-only)")
+            print("Tasks are ready to import.")
+            sys.exit(0)
     else:
         print("\n⚠️  Skipping sanity check (--skip-sanity-check)")
 
