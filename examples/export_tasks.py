@@ -28,6 +28,12 @@ def main():
         default=None,
     )
     parser.add_argument(
+        "--env-key",
+        "-e",
+        help="Optional environment key to filter tasks",
+        default=None,
+    )
+    parser.add_argument(
         "--output",
         "-o",
         help="Output JSON filename (defaults to {team_id}.json)",
@@ -42,12 +48,13 @@ def main():
             args.project_key is not None,
             args.task_keys is not None,
             args.task_project_key is not None,
+            args.env_key is not None,
         ]
     )
 
     if filters_specified > 1:
         parser.error(
-            "Cannot specify multiple filters. Use only one of --project-key, --task-keys, or --task-project-key."
+            "Cannot specify multiple filters. Use only one of --project-key, --task-keys, --task-project-key, or --env-key."
         )
 
     # Get account info
@@ -66,6 +73,9 @@ def main():
     elif args.task_project_key:
         print(f"Loading tasks from task project: {args.task_project_key}")
         tasks = fleet.load_tasks(task_project_key=args.task_project_key)
+    elif args.env_key:
+        print(f"Loading tasks from environment: {args.env_key}")
+        tasks = fleet.load_tasks(env_key=args.env_key)
     else:
         print("Loading all tasks")
         tasks = fleet.load_tasks()
