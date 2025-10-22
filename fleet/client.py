@@ -706,6 +706,7 @@ class Fleet:
         task_key: str,
         prompt: Optional[str] = None,
         verifier_code: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> TaskResponse:
         """Update an existing task.
 
@@ -713,11 +714,12 @@ class Fleet:
             task_key: The key of the task to update
             prompt: New prompt text for the task (optional)
             verifier_code: Python code for task verification (optional)
+            metadata: Additional metadata for the task (optional)
 
         Returns:
             TaskResponse containing the updated task details
         """
-        payload = TaskUpdateRequest(prompt=prompt, verifier_code=verifier_code)
+        payload = TaskUpdateRequest(prompt=prompt, verifier_code=verifier_code, metadata=metadata)
         response = self.client.request(
             "PUT", f"/v1/tasks/{task_key}", json=payload.model_dump(exclude_none=True)
         )

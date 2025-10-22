@@ -388,7 +388,7 @@ async def load_tasks(
 
 
 async def update_task(
-    task_key: str, prompt: Optional[str] = None, verifier_code: Optional[str] = None
+    task_key: str, prompt: Optional[str] = None, verifier_code: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None
 ):
     """Convenience function to update an existing task.
 
@@ -396,6 +396,7 @@ async def update_task(
         task_key: The key of the task to update
         prompt: New prompt text for the task (optional)
         verifier_code: Python code for task verification (optional)
+        metadata: Additional metadata for the task (optional)
 
     Returns:
         TaskResponse containing the updated task details
@@ -403,12 +404,13 @@ async def update_task(
     Examples:
         response = await fleet.update_task("my-task", prompt="New prompt text")
         response = await fleet.update_task("my-task", verifier_code="def verify(env): return True")
+        response = await fleet.update_task("my-task", metadata={"seed": 42, "story": "Updated story"})
     """
     from .global_client import get_client
 
     client = get_client()
     return await client.update_task(
-        task_key=task_key, prompt=prompt, verifier_code=verifier_code
+        task_key=task_key, prompt=prompt, verifier_code=verifier_code, metadata=metadata
     )
 
 
