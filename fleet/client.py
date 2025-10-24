@@ -212,6 +212,7 @@ class Fleet:
         env_variables: Optional[Dict[str, Any]] = None,
         image_type: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
+        run_id: Optional[str] = None,
     ) -> SyncEnv:
         if ":" in env_key:
             env_key_part, env_version = env_key.split(":", 1)
@@ -247,6 +248,7 @@ class Fleet:
             image_type=image_type,
             created_from="sdk",
             ttl_seconds=ttl_seconds,
+            run_id=run_id,
         )
 
         # Only use region-specific base URL if no custom base URL is set
@@ -269,13 +271,15 @@ class Fleet:
         return self.make(env_key=f"{task.env_id}:{task.version}")
 
     def instances(
-        self, status: Optional[str] = None, region: Optional[str] = None
+        self, status: Optional[str] = None, region: Optional[str] = None, run_id: Optional[str] = None
     ) -> List[SyncEnv]:
         params = {}
         if status:
             params["status"] = status
         if region:
             params["region"] = region
+        if run_id:
+            params["run_id"] = run_id
 
         response = self.client.request("GET", "/v1/env/instances", params=params)
         return [
@@ -299,6 +303,28 @@ class Fleet:
 
     def delete(self, instance_id: str) -> InstanceResponse:
         return _delete_instance(self.client, instance_id)
+
+    def close(self, instance_id: str) -> InstanceResponse:
+        """Close (delete) a specific instance by ID.
+        
+        Args:
+            instance_id: The instance ID to close
+            
+        Returns:
+            InstanceResponse containing the deleted instance details
+        """
+        return _delete_instance(self.client, instance_id)
+
+    def close_all(self, run_id: str) -> List[InstanceResponse]:
+        """Close (delete) all instances associated with a run_id.
+        
+        Args:
+            run_id: The run ID whose instances should be closed
+            
+        Returns:
+            List[InstanceResponse] containing the deleted instances
+        """
+        return _delete_instances_by_run_id(self.client, run_id)
 
     def load_tasks_from_file(self, filename: str) -> List[Task]:
         with open(filename, "r", encoding="utf-8") as f:
@@ -808,6 +834,11 @@ class Fleet:
 def _delete_instance(client: SyncWrapper, instance_id: str) -> InstanceResponse:
     response = client.request("DELETE", f"/v1/env/instances/{instance_id}")
     return InstanceResponse(**response.json())
+
+
+def _delete_instances_by_run_id(client: SyncWrapper, run_id: str) -> List[InstanceResponse]:
+    response = client.request("DELETE", f"/v1/env/instances/run/{run_id}")
+    return [InstanceResponse(**instance_data) for instance_data in response.json()]
 
 
 def _check_bundle_exists(

@@ -214,13 +214,14 @@ class Task(BaseModel):
         region: Optional[str] = None,
         image_type: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
+        run_id: Optional[str] = None,
     ):
         """Create an environment instance for this task's environment.
 
         Alias for make() method. Uses the task's env_id (and version if present) to create the env.
         """
         return await self.make(
-            region=region, image_type=image_type, ttl_seconds=ttl_seconds
+            region=region, image_type=image_type, ttl_seconds=ttl_seconds, run_id=run_id
         )
 
     async def make(
@@ -228,6 +229,7 @@ class Task(BaseModel):
         region: Optional[str] = None,
         image_type: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
+        run_id: Optional[str] = None,
     ):
         """Create an environment instance with task's configuration.
 
@@ -235,11 +237,13 @@ class Task(BaseModel):
         - env_key (env_id + version)
         - data_key (data_id + data_version, if present)
         - env_variables (if present)
+        - run_id (if present)
 
         Args:
             region: Optional AWS region for the environment
             image_type: Optional image type for the environment
             ttl_seconds: Optional TTL in seconds for the instance
+            run_id: Optional run ID to group instances
 
         Returns:
             Environment instance configured for this task
@@ -247,7 +251,7 @@ class Task(BaseModel):
         Example:
             task = fleet.Task(key="my-task", prompt="...", env_id="my-env",
                             data_id="my-data", data_version="v1.0")
-            env = await task.make(region="us-west-2")
+            env = await task.make(region="us-west-2", run_id="my-batch-123")
         """
         if not self.env_id:
             raise ValueError("Task has no env_id defined")
@@ -262,6 +266,7 @@ class Task(BaseModel):
             env_variables=self.env_variables if self.env_variables else None,
             image_type=image_type,
             ttl_seconds=ttl_seconds,
+            run_id=run_id,
         )
 
 
