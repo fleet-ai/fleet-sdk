@@ -23,7 +23,7 @@ build: clean unasync
 	$(PYTHON) -m build
 
 test:
-	$(PYTHON) -m pytest
+	.venv/bin/python -m pytest
 
 clean:
 	rm -rf build/
