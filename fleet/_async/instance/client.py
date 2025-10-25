@@ -85,9 +85,17 @@ class AsyncInstanceClient:
         Returns:
             An SQLite database resource for the given database name
         """
-        return AsyncSQLiteResource(
-            self._resources_state[ResourceType.db.value][name], self.client
-        )
+        resource_info = self._resources_state[ResourceType.db.value][name]
+        # Local mode - resource_info is a dict with creation parameters
+        if isinstance(resource_info, dict) and resource_info.get('type') == 'local':
+            # Create new instance each time (matching HTTP mode behavior)
+            return AsyncSQLiteResource(
+                resource_info['resource_model'],
+                client=None,
+                db_path=resource_info['db_path']
+            )
+        # HTTP mode - resource_info is a ResourceModel, create new wrapper
+        return AsyncSQLiteResource(resource_info, self.client)
 
     def browser(self, name: str) -> AsyncBrowserResource:
         return AsyncBrowserResource(
@@ -177,10 +185,17 @@ class AsyncInstanceClient:
         response = await self.client.request("GET", "/health")
         return HealthResponse(**response.json())
 
+    def close(self):
+        """Close anchor connections for in-memory databases."""
+        if hasattr(self, '_memory_anchors'):
+            for conn in self._memory_anchors.values():
+                conn.close()
+            self._memory_anchors.clear()
+
     async def __aenter__(self):
         """Async context manager entry."""
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
-        await self.close()
+        self.close()

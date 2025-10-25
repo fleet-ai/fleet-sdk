@@ -9,7 +9,7 @@ name: Publish Fleet Python SDK
 on:
   push:
     tags:
-      - "fleet-python-v*.*.*" # Trigger on version tags like fleet-python-v0.1.0, fleet-python-v1.2.3, etc.
+      - "fleet-python-v*.*.*" # Trigger on version tags like fleet-python-v0.1.0, fleet-python-v1.2.3, fleet-python-v0.2.66b1, etc.
 
 jobs:
   validate:
