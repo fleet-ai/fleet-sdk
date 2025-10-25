@@ -187,6 +187,32 @@ class TestFleetInstanceDispatch:
         check = db.query("SELECT value FROM test_current WHERE id = 2")
         assert check.rows[0][0] == "updated"
 
+    def test_local_mode_creates_new_instances(self, fleet_client, temp_db_files):
+        """Test that db() creates new SQLiteResource instances each time (not cached)."""
+        env = fleet_client.instance(temp_db_files)
+
+        db1 = env.db("current")
+        db2 = env.db("current")
+
+        # Should be different objects (new wrapper each time)
+        assert db1 is not db2
+
+        # But both should work identically
+        result1 = db1.query("SELECT * FROM test_current")
+        result2 = db2.query("SELECT * FROM test_current")
+        assert result1.rows == result2.rows
+
+    def test_local_mode_no_state_leakage(self, fleet_client, temp_db_files):
+        """Test that monkey-patching one db() instance doesn't affect another."""
+        env = fleet_client.instance(temp_db_files)
+
+        db1 = env.db("current")
+        db1._custom_attribute = "test_value"
+
+        db2 = env.db("current")
+        # db2 should be a fresh instance without the custom attribute
+        assert not hasattr(db2, "_custom_attribute")
+
 
 @pytest.mark.asyncio
 class TestAsyncFleetInstanceDispatch:
@@ -288,6 +314,32 @@ class TestAsyncFleetInstanceDispatch:
         # Verify insert
         check = await db.query("SELECT value FROM test_current WHERE id = 2")
         assert check.rows[0][0] == "async_data"
+
+    async def test_local_mode_async_creates_new_instances(self, async_fleet_client, temp_db_files):
+        """Test that db() creates new AsyncSQLiteResource instances each time (not cached)."""
+        env = await async_fleet_client.instance(temp_db_files)
+
+        db1 = env.db("current")
+        db2 = env.db("current")
+
+        # Should be different objects (new wrapper each time)
+        assert db1 is not db2
+
+        # But both should work identically
+        result1 = await db1.query("SELECT * FROM test_current")
+        result2 = await db2.query("SELECT * FROM test_current")
+        assert result1.rows == result2.rows
+
+    async def test_local_mode_async_no_state_leakage(self, async_fleet_client, temp_db_files):
+        """Test that monkey-patching one db() instance doesn't affect another in async."""
+        env = await async_fleet_client.instance(temp_db_files)
+
+        db1 = env.db("current")
+        db1._custom_attribute = "test_value"
+
+        db2 = env.db("current")
+        # db2 should be a fresh instance without the custom attribute
+        assert not hasattr(db2, "_custom_attribute")
 
 
 if __name__ == "__main__":

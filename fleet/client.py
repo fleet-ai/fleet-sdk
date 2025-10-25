@@ -367,7 +367,8 @@ class Fleet:
         instance_client = InstanceClient(url="local://", httpx_client=None)
         instance_client._resources = []  # Mark as loaded
 
-        # Pre-populate with local SQLiteResources
+        # Store creation parameters for local SQLiteResources
+        # This allows db() to create new instances each time (matching HTTP mode behavior)
         for name, path in dbs.items():
             resource_model = ResourceModel(
                 name=name,
@@ -375,8 +376,11 @@ class Fleet:
                 mode=ResourceMode.rw,
                 label=f"Local: {path}",
             )
-            instance_client._resources_state[ResourceType.db.value][name] = \
-                SQLiteResource(resource_model, client=None, db_path=path)
+            instance_client._resources_state[ResourceType.db.value][name] = {
+                'type': 'local',
+                'resource_model': resource_model,
+                'db_path': path
+            }
 
         # Create a minimal environment for local mode
         env = SyncEnv(

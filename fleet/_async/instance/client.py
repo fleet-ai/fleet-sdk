@@ -85,12 +85,17 @@ class AsyncInstanceClient:
         Returns:
             An SQLite database resource for the given database name
         """
-        resource = self._resources_state[ResourceType.db.value][name]
-        # If it's already an AsyncSQLiteResource (e.g., local mode), return it directly
-        if isinstance(resource, AsyncSQLiteResource):
-            return resource
-        # Otherwise, create a new one (for HTTP mode)
-        return AsyncSQLiteResource(resource, self.client)
+        resource_info = self._resources_state[ResourceType.db.value][name]
+        # Local mode - resource_info is a dict with creation parameters
+        if isinstance(resource_info, dict) and resource_info.get('type') == 'local':
+            # Create new instance each time (matching HTTP mode behavior)
+            return AsyncSQLiteResource(
+                resource_info['resource_model'],
+                client=None,
+                db_path=resource_info['db_path']
+            )
+        # HTTP mode - resource_info is a ResourceModel, create new wrapper
+        return AsyncSQLiteResource(resource_info, self.client)
 
     def browser(self, name: str) -> AsyncBrowserResource:
         return AsyncBrowserResource(
