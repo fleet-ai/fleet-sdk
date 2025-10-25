@@ -185,10 +185,17 @@ class AsyncInstanceClient:
         response = await self.client.request("GET", "/health")
         return HealthResponse(**response.json())
 
+    def close(self):
+        """Close anchor connections for in-memory databases."""
+        if hasattr(self, '_memory_anchors'):
+            for conn in self._memory_anchors.values():
+                conn.close()
+            self._memory_anchors.clear()
+
     async def __aenter__(self):
         """Async context manager entry."""
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
-        await self.close()
+        self.close()

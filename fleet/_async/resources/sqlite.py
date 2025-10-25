@@ -711,10 +711,12 @@ class AsyncSQLiteResource(Resource):
         return DescribeResponse(**response.json())
 
     async def _describe_direct(self) -> DescribeResponse:
-        """Describe database schema from local file."""
+        """Describe database schema from local file or in-memory database."""
         def _sync_describe():
             try:
-                conn = sqlite3.connect(self.db_path)
+                # Check if we need URI mode (for shared memory databases)
+                use_uri = 'mode=memory' in self.db_path
+                conn = sqlite3.connect(self.db_path, uri=use_uri)
                 cursor = conn.cursor()
 
                 # Get all tables
@@ -803,10 +805,12 @@ class AsyncSQLiteResource(Resource):
     async def _query_direct(
         self, query: str, args: Optional[List[Any]] = None, read_only: bool = True
     ) -> QueryResponse:
-        """Execute query directly on local SQLite file."""
+        """Execute query directly on local SQLite file or in-memory database."""
         def _sync_query():
             try:
-                conn = sqlite3.connect(self.db_path)
+                # Check if we need URI mode (for shared memory databases)
+                use_uri = 'mode=memory' in self.db_path
+                conn = sqlite3.connect(self.db_path, uri=use_uri)
                 cursor = conn.cursor()
 
                 # Execute the query

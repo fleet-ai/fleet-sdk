@@ -355,21 +355,66 @@ class AsyncFleet:
         env._instance = instance_client
         return env
 
-    def _create_local_instance(self, dbs: Dict[str, str]) -> AsyncEnv:
-        """Create instance with local file-based SQLite resources.
+    @staticmethod
+    def _normalize_db_path(path: str) -> tuple[str, bool]:
+        """Normalize database path and detect if it's in-memory.
 
         Args:
-            dbs: Map of resource names to file paths (e.g., {"current": "./data.db"})
+            path: Database path - can be:
+                  - File path: "./data.db"
+                  - Plain memory: ":memory:"
+                  - Named memory: ":memory:namespace"
+                  - URI: "file:name?mode=memory&cache=shared"
+
+        Returns:
+            Tuple of (normalized_path, is_memory)
+        """
+        import uuid
+        import sqlite3
+
+        if path == ":memory:":
+            # Plain :memory: - create unique namespace
+            name = f"mem_{uuid.uuid4().hex[:8]}"
+            return f"file:{name}?mode=memory&cache=shared", True
+        elif path.startswith(":memory:"):
+            # Named memory: :memory:current -> file:current?mode=memory&cache=shared
+            namespace = path[8:]  # Remove ":memory:" prefix
+            return f"file:{namespace}?mode=memory&cache=shared", True
+        elif "mode=memory" in path:
+            # Already a proper memory URI
+            return path, True
+        else:
+            # Regular file path
+            return path, False
+
+    def _create_local_instance(self, dbs: Dict[str, str]) -> AsyncEnv:
+        """Create instance with local file-based or in-memory SQLite resources.
+
+        Args:
+            dbs: Map of resource names to paths (e.g., {"current": "./data.db"} or
+                 {"current": ":memory:current"})
 
         Returns:
             AsyncEnv: Environment instance configured for local mode
         """
+        import sqlite3
+
         instance_client = AsyncInstanceClient(url="local://", httpx_client=None)
         instance_client._resources = []  # Mark as loaded
+        instance_client._memory_anchors = {}  # Store anchor connections for in-memory DBs
 
         # Store creation parameters for local AsyncSQLiteResources
         # This allows db() to create new instances each time (matching HTTP mode behavior)
         for name, path in dbs.items():
+            # Normalize path and detect if it's in-memory
+            normalized_path, is_memory = self._normalize_db_path(path)
+
+            # Create anchor connection for in-memory databases
+            # This keeps the database alive as long as the env exists
+            if is_memory:
+                anchor_conn = sqlite3.connect(normalized_path, uri=True)
+                instance_client._memory_anchors[name] = anchor_conn
+
             resource_model = ResourceModel(
                 name=name,
                 type=ResourceType.db,
@@ -379,7 +424,8 @@ class AsyncFleet:
             instance_client._resources_state[ResourceType.db.value][name] = {
                 'type': 'local',
                 'resource_model': resource_model,
-                'db_path': path
+                'db_path': normalized_path,
+                'is_memory': is_memory
             }
 
         # Create a minimal environment for local mode

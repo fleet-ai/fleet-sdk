@@ -213,6 +213,132 @@ class TestFleetInstanceDispatch:
         # db2 should be a fresh instance without the custom attribute
         assert not hasattr(db2, "_custom_attribute")
 
+    def test_memory_basic_syntax(self, fleet_client):
+        """Test that :memory: syntax works."""
+        env = fleet_client.instance({
+            "current": ":memory:"
+        })
+
+        db = env.db("current")
+        assert db.mode == "direct"
+
+        # Create table and insert data
+        result = db.exec("CREATE TABLE test (id INTEGER, value TEXT)")
+        assert result.success is True
+
+        result = db.exec("INSERT INTO test VALUES (1, 'hello')")
+        assert result.success is True
+
+        # Verify data exists
+        result = db.query("SELECT * FROM test")
+        assert result.success is True
+        assert result.rows == [[1, 'hello']]
+
+    def test_memory_namespace_syntax(self, fleet_client):
+        """Test that :memory:namespace syntax creates isolated databases."""
+        env = fleet_client.instance({
+            "current": ":memory:current",
+            "seed": ":memory:seed"
+        })
+
+        current = env.db("current")
+        seed = env.db("seed")
+
+        # Create table in current
+        current.exec("CREATE TABLE test_current (id INTEGER, value TEXT)")
+        current.exec("INSERT INTO test_current VALUES (1, 'current_data')")
+
+        # Create table in seed
+        seed.exec("CREATE TABLE test_seed (id INTEGER, value TEXT)")
+        seed.exec("INSERT INTO test_seed VALUES (2, 'seed_data')")
+
+        # Verify current has its data
+        result = current.query("SELECT * FROM test_current")
+        assert result.success is True
+        assert result.rows == [[1, 'current_data']]
+
+        # Verify seed has its data
+        result = seed.query("SELECT * FROM test_seed")
+        assert result.success is True
+        assert result.rows == [[2, 'seed_data']]
+
+        # Verify current doesn't have seed's table
+        result = current.query("SELECT name FROM sqlite_master WHERE type='table' AND name='test_seed'")
+        assert result.success is True
+        assert result.rows is None or len(result.rows) == 0
+
+        # Verify seed doesn't have current's table
+        result = seed.query("SELECT name FROM sqlite_master WHERE type='table' AND name='test_current'")
+        assert result.success is True
+        assert result.rows is None or len(result.rows) == 0
+
+    def test_memory_data_sharing(self, fleet_client):
+        """Test that multiple db() calls to same namespace share data."""
+        env = fleet_client.instance({
+            "current": ":memory:shared"
+        })
+
+        # Create table and insert data via first connection
+        db1 = env.db("current")
+        db1.exec("CREATE TABLE test (id INTEGER, value TEXT)")
+        db1.exec("INSERT INTO test VALUES (1, 'shared_data')")
+
+        # Access same database via second connection
+        db2 = env.db("current")
+        result = db2.query("SELECT * FROM test")
+        assert result.success is True
+        assert result.rows == [[1, 'shared_data']]
+
+        # Insert via second connection
+        db2.exec("INSERT INTO test VALUES (2, 'more_data')")
+
+        # Verify via first connection
+        result = db1.query("SELECT * FROM test ORDER BY id")
+        assert result.success is True
+        assert result.rows == [[1, 'shared_data'], [2, 'more_data']]
+
+    def test_memory_data_persists(self, fleet_client):
+        """Test that memory data persists while env is alive."""
+        env = fleet_client.instance({
+            "current": ":memory:persistent"
+        })
+
+        # Create and populate database
+        db = env.db("current")
+        db.exec("CREATE TABLE test (id INTEGER, value TEXT)")
+        db.exec("INSERT INTO test VALUES (1, 'persistent')")
+
+        # Delete the db reference
+        del db
+
+        # Create new connection - data should still be there
+        db_new = env.db("current")
+        result = db_new.query("SELECT * FROM test")
+        assert result.success is True
+        assert result.rows == [[1, 'persistent']]
+
+    def test_memory_anchor_connection_cleanup(self, fleet_client):
+        """Test that closing the instance cleans up anchor connections."""
+        env = fleet_client.instance({
+            "current": ":memory:cleanup_test",
+            "seed": ":memory:cleanup_test2"
+        })
+
+        # Verify anchor connections were created
+        assert hasattr(env._instance, '_memory_anchors')
+        assert 'current' in env._instance._memory_anchors
+        assert 'seed' in env._instance._memory_anchors
+
+        # Setup databases
+        current = env.db("current")
+        current.exec("CREATE TABLE test (id INTEGER)")
+
+        # Close the instance
+        env._instance.close()
+
+        # Verify anchors were cleaned up
+        assert len(env._instance._memory_anchors) == 0
+
 
 @pytest.mark.asyncio
 class TestAsyncFleetInstanceDispatch:
@@ -340,6 +466,141 @@ class TestAsyncFleetInstanceDispatch:
         db2 = env.db("current")
         # db2 should be a fresh instance without the custom attribute
         assert not hasattr(db2, "_custom_attribute")
+
+
+@pytest.mark.asyncio
+class TestAsyncFleetInMemoryTests:
+    """Test AsyncFleet in-memory functionality."""
+
+    @pytest.fixture
+    async def async_fleet_client(self):
+        """Create an AsyncFleet client with mocked HTTP client."""
+        with patch("fleet._async.client.default_httpx_client") as mock_client:
+            mock_client.return_value = AsyncMock()
+            client = AsyncFleet(api_key="test_key")
+            client.client.request = AsyncMock()
+            return client
+
+    async def test_memory_basic_syntax(self, async_fleet_client):
+        """Test that :memory: syntax works in async."""
+        env = await async_fleet_client.instance({
+            "current": ":memory:"
+        })
+
+        db = env.db("current")
+        assert db.mode == "direct"
+
+        # Create table and insert data
+        result = await db.exec("CREATE TABLE test (id INTEGER, value TEXT)")
+        assert result.success is True
+
+        result = await db.exec("INSERT INTO test VALUES (1, 'hello')")
+        assert result.success is True
+
+        # Verify data exists
+        result = await db.query("SELECT * FROM test")
+        assert result.success is True
+        assert result.rows == [[1, 'hello']]
+
+    async def test_memory_namespace_syntax(self, async_fleet_client):
+        """Test that :memory:namespace syntax creates isolated databases in async."""
+        env = await async_fleet_client.instance({
+            "current": ":memory:current",
+            "seed": ":memory:seed"
+        })
+
+        current = env.db("current")
+        seed = env.db("seed")
+
+        # Create table in current
+        await current.exec("CREATE TABLE test_current (id INTEGER, value TEXT)")
+        await current.exec("INSERT INTO test_current VALUES (1, 'current_data')")
+
+        # Create table in seed
+        await seed.exec("CREATE TABLE test_seed (id INTEGER, value TEXT)")
+        await seed.exec("INSERT INTO test_seed VALUES (2, 'seed_data')")
+
+        # Verify current has its data
+        result = await current.query("SELECT * FROM test_current")
+        assert result.success is True
+        assert result.rows == [[1, 'current_data']]
+
+        # Verify seed has its data
+        result = await seed.query("SELECT * FROM test_seed")
+        assert result.success is True
+        assert result.rows == [[2, 'seed_data']]
+
+        # Verify namespaces are isolated
+        result = await current.query("SELECT name FROM sqlite_master WHERE type='table' AND name='test_seed'")
+        assert result.success is True
+        assert result.rows is None or len(result.rows) == 0
+
+    async def test_memory_data_sharing(self, async_fleet_client):
+        """Test that multiple db() calls to same namespace share data in async."""
+        env = await async_fleet_client.instance({
+            "current": ":memory:shared"
+        })
+
+        # Create table and insert data via first connection
+        db1 = env.db("current")
+        await db1.exec("CREATE TABLE test (id INTEGER, value TEXT)")
+        await db1.exec("INSERT INTO test VALUES (1, 'shared_data')")
+
+        # Access same database via second connection
+        db2 = env.db("current")
+        result = await db2.query("SELECT * FROM test")
+        assert result.success is True
+        assert result.rows == [[1, 'shared_data']]
+
+        # Insert via second connection
+        await db2.exec("INSERT INTO test VALUES (2, 'more_data')")
+
+        # Verify via first connection
+        result = await db1.query("SELECT * FROM test ORDER BY id")
+        assert result.success is True
+        assert result.rows == [[1, 'shared_data'], [2, 'more_data']]
+
+    async def test_memory_data_persists(self, async_fleet_client):
+        """Test that memory data persists while env is alive in async."""
+        env = await async_fleet_client.instance({
+            "current": ":memory:persistent"
+        })
+
+        # Create and populate database
+        db = env.db("current")
+        await db.exec("CREATE TABLE test (id INTEGER, value TEXT)")
+        await db.exec("INSERT INTO test VALUES (1, 'persistent')")
+
+        # Delete the db reference
+        del db
+
+        # Create new connection - data should still be there
+        db_new = env.db("current")
+        result = await db_new.query("SELECT * FROM test")
+        assert result.success is True
+        assert result.rows == [[1, 'persistent']]
+
+    async def test_memory_anchor_connection_cleanup(self, async_fleet_client):
+        """Test that closing the instance cleans up anchor connections in async."""
+        env = await async_fleet_client.instance({
+            "current": ":memory:cleanup_test",
+            "seed": ":memory:cleanup_test2"
+        })
+
+        # Verify anchor connections were created
+        assert hasattr(env._instance, '_memory_anchors')
+        assert 'current' in env._instance._memory_anchors
+        assert 'seed' in env._instance._memory_anchors
+
+        # Setup databases
+        current = env.db("current")
+        await current.exec("CREATE TABLE test (id INTEGER)")
+
+        # Close the instance
+        env._instance.close()
+
+        # Verify anchors were cleaned up
+        assert len(env._instance._memory_anchors) == 0
 
 
 if __name__ == "__main__":
