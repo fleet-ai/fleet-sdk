@@ -83,9 +83,12 @@ class InstanceClient:
         Returns:
             An SQLite database resource for the given database name
         """
-        return SQLiteResource(
-            self._resources_state[ResourceType.db.value][name], self.client
-        )
+        resource = self._resources_state[ResourceType.db.value][name]
+        # If it's already a SQLiteResource (e.g., local mode), return it directly
+        if isinstance(resource, SQLiteResource):
+            return resource
+        # Otherwise, create a new one (for HTTP mode)
+        return SQLiteResource(resource, self.client)
 
     def browser(self, name: str) -> BrowserResource:
         return BrowserResource(

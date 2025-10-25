@@ -6,6 +6,7 @@ from datetime import datetime
 import tempfile
 import sqlite3
 import os
+import asyncio
 
 from typing import TYPE_CHECKING
 
@@ -679,16 +680,97 @@ class AsyncQueryBuilder:
 
 
 class AsyncSQLiteResource(Resource):
-    def __init__(self, resource: ResourceModel, client: "AsyncWrapper"):
+    def __init__(
+        self,
+        resource: ResourceModel,
+        client: Optional["AsyncWrapper"] = None,
+        db_path: Optional[str] = None,
+    ):
         super().__init__(resource)
         self.client = client
+        self.db_path = db_path
+        self._mode = "direct" if db_path else "http"
+
+    @property
+    def mode(self) -> str:
+        """Return the mode of this resource: 'direct' (local file) or 'http' (remote API)."""
+        return self._mode
 
     async def describe(self) -> DescribeResponse:
         """Describe the SQLite database schema."""
+        if self._mode == "direct":
+            return await self._describe_direct()
+        else:
+            return await self._describe_http()
+
+    async def _describe_http(self) -> DescribeResponse:
+        """Describe database schema via HTTP API."""
         response = await self.client.request(
             "GET", f"/resources/sqlite/{self.resource.name}/describe"
         )
         return DescribeResponse(**response.json())
+
+    async def _describe_direct(self) -> DescribeResponse:
+        """Describe database schema from local file."""
+        def _sync_describe():
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+
+                # Get all tables
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                )
+                table_names = [row[0] for row in cursor.fetchall()]
+
+                tables = []
+                for table_name in table_names:
+                    # Get table info
+                    cursor.execute(f"PRAGMA table_info({table_name})")
+                    columns = cursor.fetchall()
+
+                    # Get CREATE TABLE SQL
+                    cursor.execute(
+                        f"SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+                        (table_name,)
+                    )
+                    sql_row = cursor.fetchone()
+                    create_sql = sql_row[0] if sql_row else ""
+
+                    table_schema = {
+                        "name": table_name,
+                        "sql": create_sql,
+                        "columns": [
+                            {
+                                "name": col[1],
+                                "type": col[2],
+                                "notnull": bool(col[3]),
+                                "default_value": col[4],
+                                "primary_key": col[5] > 0,
+                            }
+                            for col in columns
+                        ],
+                    }
+                    tables.append(table_schema)
+
+                conn.close()
+
+                return DescribeResponse(
+                    success=True,
+                    resource_name=self.resource.name,
+                    tables=tables,
+                    message="Schema retrieved from local file",
+                )
+            except Exception as e:
+                return DescribeResponse(
+                    success=False,
+                    resource_name=self.resource.name,
+                    tables=None,
+                    error=str(e),
+                    message=f"Failed to describe database: {str(e)}",
+                )
+
+        return await asyncio.to_thread(_sync_describe)
 
     async def query(
         self, query: str, args: Optional[List[Any]] = None
@@ -701,6 +783,15 @@ class AsyncSQLiteResource(Resource):
     async def _query(
         self, query: str, args: Optional[List[Any]] = None, read_only: bool = True
     ) -> QueryResponse:
+        if self._mode == "direct":
+            return await self._query_direct(query, args, read_only)
+        else:
+            return await self._query_http(query, args, read_only)
+
+    async def _query_http(
+        self, query: str, args: Optional[List[Any]] = None, read_only: bool = True
+    ) -> QueryResponse:
+        """Execute query via HTTP API."""
         request = QueryRequest(query=query, args=args, read_only=read_only)
         response = await self.client.request(
             "POST",
@@ -708,6 +799,60 @@ class AsyncSQLiteResource(Resource):
             json=request.model_dump(),
         )
         return QueryResponse(**response.json())
+
+    async def _query_direct(
+        self, query: str, args: Optional[List[Any]] = None, read_only: bool = True
+    ) -> QueryResponse:
+        """Execute query directly on local SQLite file."""
+        def _sync_query():
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+
+                # Execute the query
+                if args:
+                    cursor.execute(query, args)
+                else:
+                    cursor.execute(query)
+
+                # For write operations, commit the transaction
+                if not read_only:
+                    conn.commit()
+
+                # Get column names if available
+                columns = [desc[0] for desc in cursor.description] if cursor.description else []
+
+                # Fetch results for SELECT queries
+                rows = []
+                rows_affected = 0
+                last_insert_id = None
+
+                if cursor.description:  # SELECT query
+                    rows = cursor.fetchall()
+                else:  # INSERT/UPDATE/DELETE
+                    rows_affected = cursor.rowcount
+                    last_insert_id = cursor.lastrowid if cursor.lastrowid else None
+
+                conn.close()
+
+                return QueryResponse(
+                    success=True,
+                    columns=columns if columns else None,
+                    rows=rows if rows else None,
+                    rows_affected=rows_affected if rows_affected > 0 else None,
+                    last_insert_id=last_insert_id,
+                    message="Query executed successfully",
+                )
+            except Exception as e:
+                return QueryResponse(
+                    success=False,
+                    columns=None,
+                    rows=None,
+                    error=str(e),
+                    message=f"Query failed: {str(e)}",
+                )
+
+        return await asyncio.to_thread(_sync_query)
 
     def table(self, table_name: str) -> AsyncQueryBuilder:
         """Create a query builder for the specified table."""

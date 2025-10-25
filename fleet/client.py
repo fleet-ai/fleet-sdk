@@ -21,7 +21,7 @@ import httpx
 import json
 import logging
 import os
-from typing import List, Optional, Dict, Any, TYPE_CHECKING
+from typing import List, Optional, Dict, Any, TYPE_CHECKING, Union
 
 from .base import EnvironmentBase, SyncWrapper
 from .models import (
@@ -46,6 +46,11 @@ from .instance import (
     ResetRequest,
     ResetResponse,
     ExecuteFunctionResponse,
+)
+from .instance.models import (
+    Resource as ResourceModel,
+    ResourceType,
+    ResourceMode,
 )
 from .config import (
     DEFAULT_MAX_RETRIES,
@@ -287,11 +292,113 @@ class Fleet:
             for instance_data in response.json()
         ]
 
-    def instance(self, instance_id: str) -> SyncEnv:
-        response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
-        instance = SyncEnv(client=self.client, **response.json())
-        instance.instance.load()
-        return instance
+    def instance(self, instance_id: Union[str, Dict[str, str]]) -> SyncEnv:
+        """Create or connect to an environment instance.
+
+        Supports three modes based on input type:
+        1. dict: Local filesystem mode - {"current": "./data.db", "seed": "./seed.db"}
+        2. str starting with http:// or https://: Localhost/URL mode
+        3. str (other): Remote cloud instance mode
+
+        Args:
+            instance_id: Instance identifier (str), URL (str starting with http://),
+                        or local db mapping (dict)
+
+        Returns:
+            SyncEnv: Environment instance
+        """
+        # Local filesystem mode - dict of resource names to file paths
+        if isinstance(instance_id, dict):
+            return self._create_local_instance(instance_id)
+
+        # Localhost/direct URL mode - string starting with http:// or https://
+        elif isinstance(instance_id, str) and instance_id.startswith(("http://", "https://")):
+            return self._create_url_instance(instance_id)
+
+        # Remote mode - existing behavior
+        else:
+            response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
+            instance = SyncEnv(client=self.client, **response.json())
+            instance.instance.load()
+            return instance
+
+    def _create_url_instance(self, base_url: str) -> SyncEnv:
+        """Create instance connected to a direct URL (localhost or custom).
+
+        Args:
+            base_url: URL of the instance manager API
+
+        Returns:
+            SyncEnv: Environment instance configured for URL mode
+        """
+        instance_client = InstanceClient(url=base_url, httpx_client=self._httpx_client)
+
+        # Create a minimal environment for URL mode
+        env = SyncEnv(
+            client=self.client,
+            instance_id=base_url,
+            env_key="localhost",
+            version="",
+            status="running",
+            subdomain="localhost",
+            created_at="",
+            updated_at="",
+            terminated_at=None,
+            team_id="",
+            region="localhost",
+            env_variables=None,
+            data_key=None,
+            data_version=None,
+            urls=None,
+            health=None,
+        )
+        env._instance = instance_client
+        return env
+
+    def _create_local_instance(self, dbs: Dict[str, str]) -> SyncEnv:
+        """Create instance with local file-based SQLite resources.
+
+        Args:
+            dbs: Map of resource names to file paths (e.g., {"current": "./data.db"})
+
+        Returns:
+            SyncEnv: Environment instance configured for local mode
+        """
+        instance_client = InstanceClient(url="local://", httpx_client=None)
+        instance_client._resources = []  # Mark as loaded
+
+        # Pre-populate with local SQLiteResources
+        for name, path in dbs.items():
+            resource_model = ResourceModel(
+                name=name,
+                type=ResourceType.db,
+                mode=ResourceMode.rw,
+                label=f"Local: {path}",
+            )
+            instance_client._resources_state[ResourceType.db.value][name] = \
+                SQLiteResource(resource_model, client=None, db_path=path)
+
+        # Create a minimal environment for local mode
+        env = SyncEnv(
+            client=self.client,
+            instance_id="local",
+            env_key="local",
+            version="",
+            status="running",
+            subdomain="local",
+            created_at="",
+            updated_at="",
+            terminated_at=None,
+            team_id="",
+            region="local",
+            env_variables=None,
+            data_key=None,
+            data_version=None,
+            urls=None,
+            health=None,
+        )
+        env._instance = instance_client
+        return env
 
     def check_bundle_exists(self, bundle_hash: str) -> VerifiersCheckResponse:
         return _check_bundle_exists(self.client, bundle_hash)
