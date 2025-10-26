@@ -48,7 +48,7 @@ class BaseWrapper:
         import logging
 
         logger = logging.getLogger(__name__)
-        logger.debug(f"Headers being sent: {headers}")
+        # logger.debug(f"Headers being sent: {headers}")
         return headers
 
 
@@ -93,8 +93,9 @@ class SyncWrapper(BaseWrapper):
 
         # Debug log 500 errors
         if status_code == 500:
-            logger.error(f"Got 500 error from {response.url}")
-            logger.error(f"Response text: {response.text}")
+            # logger.error(f"Got 500 error from {response.url}")
+            # logger.error(f"Response text: {response.text}")
+            pass
 
         # Try to parse error response as JSON
         try:

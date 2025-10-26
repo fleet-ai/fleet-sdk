@@ -37,7 +37,7 @@ class FunctionBundler:
     ) -> bytes:
         """Create a function bundle with statically extracted code."""
 
-        logger.info(f"Creating function bundle for {func.__name__}")
+        # logger.info(f"Creating function bundle for {func.__name__}")
 
         # 1. Parse the main function and find dependencies
         mod_file = Path(func.__code__.co_filename)
@@ -115,7 +115,7 @@ class FunctionBundler:
 
         # Find function calls within the verifier function
         called_functions = self._extract_function_calls(main_func_ast)
-        logger.debug(f"Functions called in verifier: {called_functions}")
+        # logger.debug(f"Functions called in verifier: {called_functions}")
 
         # Find all functions defined in the module
         module_functions = {}
@@ -128,7 +128,7 @@ class FunctionBundler:
         for func_name in called_functions:
             if func_name in module_functions and func_name != func.__name__:
                 same_module_deps.append(func_name)
-                logger.debug(f"Found same-module dependency: {func_name}")
+                # logger.debug(f"Found same-module dependency: {func_name}")
 
         # Separate local and external imports
         local_imports = {}
@@ -292,7 +292,7 @@ class FunctionBundler:
                     code = ast.unparse(node)
                     extracted_code.append(code)
                 except Exception as e:
-                    logger.warning(f"Could not unparse AST node: {e}")
+                    # logger.warning(f"Could not unparse AST node: {e}")
                     # Fallback to original source extraction
                     lines = content.split("\n")
                     start_line = node.lineno - 1
@@ -305,11 +305,11 @@ class FunctionBundler:
                     extracted_code.append(code)
 
             result = "\n\n".join(extracted_code)
-            logger.debug(f"Extracted {len(extracted_code)} items from {file_path}")
+            # logger.debug(f"Extracted {len(extracted_code)} items from {file_path}")
             return result
 
         except Exception as e:
-            logger.warning(f"Failed to extract functions from {file_path}: {e}")
+            # logger.warning(f"Failed to extract functions from {file_path}: {e}")
             # Fallback to including the entire file
             with open(file_path, "r", encoding="utf-8") as f:
                 return f.read()
@@ -464,14 +464,14 @@ class FunctionBundler:
                 version = dist.version  # Get the installed version
                 package_with_version = f"{package_name}=={version}"
                 packages.add(package_with_version)
-                logger.debug(f"Mapped {mod} -> {package_with_version}")
+                # logger.debug(f"Mapped {mod} -> {package_with_version}")
             except imd.PackageNotFoundError:
                 # Skip stdlib or local modules
-                logger.debug(f"Skipping {mod} (stdlib or local)")
+                # logger.debug(f"Skipping {mod} (stdlib or local)")
                 continue
 
         package_list = list(packages)
-        logger.debug(f"Final package list: {package_list}")
+        # logger.debug(f"Final package list: {package_list}")
         return package_list
 
     def _merge_requirements(
@@ -511,10 +511,10 @@ class FunctionBundler:
             if pkg_name not in seen_packages:
                 final_requirements.append(req)
                 seen_packages.add(pkg_name)
-            else:
-                logger.debug(
-                    f"Skipping auto-detected {req}, using explicit version instead"
-                )
+            # else:
+            #     logger.debug(
+            #         f"Skipping auto-detected {req}, using explicit version instead"
+            #     )
 
         # Always ensure fleet-python is included
         if "fleet-python" not in seen_packages:
@@ -565,9 +565,9 @@ class FunctionBundler:
                         )
                         if dep_src:
                             same_module_code += f"\n{dep_src}\n"
-                            logger.debug(
-                                f"Extracted same-module dependency: {dep_name}"
-                            )
+                            # logger.debug(
+                            #     f"Extracted same-module dependency: {dep_name}"
+                            # )
 
                 # Create verifier.py with the main function
                 verifier_file = build_dir / "verifier.py"
@@ -586,7 +586,7 @@ class FunctionBundler:
 {code}
 """
                     dest_path.write_text(extracted_content)
-                    logger.debug(f"Created extracted file: {relative_path}")
+                    # logger.debug(f"Created extracted file: {relative_path}")
 
                     # Ensure __init__.py files exist
                     self._ensure_init_files(Path(relative_path), build_dir)
@@ -595,7 +595,7 @@ class FunctionBundler:
                 return self._create_zip_bundle(build_dir)
 
             except Exception as e:
-                logger.error(f"Failed to build function bundle: {e}")
+                # logger.error(f"Failed to build function bundle: {e}")
                 raise RuntimeError(f"Function bundle creation failed: {e}")
 
     def _ensure_init_files(self, rel_path: Path, build_dir: Path):
@@ -607,7 +607,7 @@ class FunctionBundler:
             if not init_file.exists():
                 init_file.parent.mkdir(parents=True, exist_ok=True)
                 init_file.write_text("# Auto-generated __init__.py")
-                logger.debug(f"Created __init__.py: {current}")
+                # logger.debug(f"Created __init__.py: {current}")
             current = current.parent
 
     def _create_zip_bundle(self, build_dir: Path) -> bytes:
@@ -621,7 +621,7 @@ class FunctionBundler:
                     zf.write(file_path, arcname)
 
         bundle_size = len(zip_buffer.getvalue())
-        logger.debug(f"Created function bundle ({bundle_size:,} bytes)")
+        # logger.debug(f"Created function bundle ({bundle_size:,} bytes)")
         return zip_buffer.getvalue()
 
     def _extract_function_source(
@@ -662,7 +662,8 @@ class FunctionBundler:
                     return "\n".join(func_lines)
 
         except Exception as e:
-            logger.warning(f"Failed to extract function {function_name}: {e}")
+            # logger.warning(f"Failed to extract function {function_name}: {e}")
+            pass
 
         return None
 

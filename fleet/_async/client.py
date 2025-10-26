@@ -406,8 +406,8 @@ class AsyncFleet:
             error_msg = f"Failed to create verifier {task_json.get('key', task_json.get('id'))}: {e}"
             if raise_on_verifier_error:
                 raise ValueError(error_msg) from e
-            else:
-                logger.warning(error_msg)
+            # else:
+            #     logger.warning(error_msg)
 
         task = Task(
             key=task_json.get("key", task_json.get("id")),
@@ -499,25 +499,25 @@ class AsyncFleet:
                                     verifier_sha=tr.verifier.sha256,
                                 )
                             except Exception as e:
-                                logger.warning(
-                                    f"Failed to create verifier {tr.verifier.key}: {e}"
-                                )
+                                # logger.warning(
+                                #     f"Failed to create verifier {tr.verifier.key}: {e}"
+                                # )
                                 return None
                         else:
                             # Fallback: try fetching by ID
                             try:
-                                logger.warning(
-                                    f"Embedded verifier code missing for {tr.verifier.key} (NoSuchKey). "
-                                    f"Attempting to refetch by id {tr.verifier.verifier_id}"
-                                )
+                                # logger.warning(
+                                #     f"Embedded verifier code missing for {tr.verifier.key} (NoSuchKey). "
+                                #     f"Attempting to refetch by id {tr.verifier.verifier_id}"
+                                # )
                                 return await self._load_verifier(
                                     tr.verifier.verifier_id
                                 )
                             except Exception as e:
-                                logger.warning(
-                                    f"Refetch by verifier id failed for {tr.verifier.key}: {e}. "
-                                    "Leaving verifier unset."
-                                )
+                                # logger.warning(
+                                #     f"Refetch by verifier id failed for {tr.verifier.key}: {e}. "
+                                #     "Leaving verifier unset."
+                                # )
                                 return None
 
                 # Add the coroutine for parallel execution
@@ -556,9 +556,10 @@ class AsyncFleet:
             if task_response.verifier:
                 # Process verifier result
                 if isinstance(verifier_result, Exception):
-                    logger.warning(
-                        f"Verifier loading failed for {task_response.key}: {verifier_result}"
-                    )
+                    # logger.warning(
+                    #     f"Verifier loading failed for {task_response.key}: {verifier_result}"
+                    # )
+                    pass
                 elif verifier_result is not None:
                     verifier = verifier_result
                     embedded_code = task_response.verifier.code or ""
@@ -632,10 +633,10 @@ class AsyncFleet:
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump(tasks_data, f, indent=2, default=str)
 
-            logger.info(f"Exported {len(tasks)} tasks to {filename}")
+            # logger.info(f"Exported {len(tasks)} tasks to {filename}")
             return filename
         else:
-            logger.info("No tasks found to export")
+            # logger.info("No tasks found to export")
             return None
 
     async def import_single_task(self, task: Task, project_key: Optional[str] = None):
@@ -664,7 +665,7 @@ class AsyncFleet:
             )
             return response
         except Exception as e:
-            logger.error(f"Failed to import task {task.key}: {e}")
+            # logger.error(f"Failed to import task {task.key}: {e}")
             return None
 
     async def import_tasks(self, filename: str, project_key: Optional[str] = None):
@@ -884,17 +885,17 @@ async def _execute_verifier_remote(
         request_data["bundle"] = bundle_b64
 
     # Debug logging
-    logger.debug(
-        f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}"
-    )
-    logger.debug(f"Request has bundle: {needs_upload}")
-    logger.debug(f"Using client with base_url: {client.base_url}")
-    logger.debug(f"Request data keys: {list(request_data.keys())}")
-    logger.debug(
-        f"Bundle size: {len(request_data.get('bundle', ''))} chars"
-        if "bundle" in request_data
-        else "No bundle"
-    )
+    # logger.debug(
+    #     f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}"
+    # )
+    # logger.debug(f"Request has bundle: {needs_upload}")
+    # logger.debug(f"Using client with base_url: {client.base_url}")
+    # logger.debug(f"Request data keys: {list(request_data.keys())}")
+    # logger.debug(
+    #     f"Bundle size: {len(request_data.get('bundle', ''))} chars"
+    #     if "bundle" in request_data
+    #     else "No bundle"
+    # )
 
     # Note: This should be called on the instance URL, not the orchestrator
     # The instance has manager URLs for verifier execution
@@ -902,6 +903,6 @@ async def _execute_verifier_remote(
 
     # Debug the response
     response_json = response.json()
-    logger.debug(f"Verifier execute response: {response_json}")
+    # logger.debug(f"Verifier execute response: {response_json}")
 
     return VerifiersExecuteResponse(**response_json)
