@@ -334,13 +334,13 @@ class Fleet:
         return _delete_instances_batch(self.client, run_id=run_id, profile_id=profile_id)
     
     def list_runs(
-        self, profile_id: Optional[str] = None, active: Optional[str] = "active"
+        self, profile_id: Optional[str] = None, status: Optional[str] = "active"
     ) -> List[Run]:
         """List all runs (groups of instances by run_id) with aggregated statistics.
         
         Args:
             profile_id: Optional profile ID to filter runs by (use "self" for your own profile)
-            active: Filter by run status - "active" (default), "inactive", or "all"
+            status: Filter by run status - "active" (default), "inactive", or "all"
             
         Returns:
             List[Run] containing run information with instance counts and timestamps
@@ -348,8 +348,8 @@ class Fleet:
         params = {}
         if profile_id:
             params["profile_id"] = profile_id
-        if active:
-            params["active"] = active
+        if status:
+            params["active"] = status
             
         response = self.client.request("GET", "/v1/env/runs", params=params)
         return [Run(**run_data) for run_data in response.json()]

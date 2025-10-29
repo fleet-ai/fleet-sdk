@@ -258,13 +258,13 @@ async def get_task(task_key: str, version_id: Optional[str] = None):
 
 
 async def list_runs(
-    profile_id: Optional[str] = None, active: Optional[str] = "active"
+    profile_id: Optional[str] = None, status: Optional[str] = "active"
 ) -> List[Run]:
     """List all runs (groups of instances by run_id) with aggregated statistics.
 
     Args:
         profile_id: Optional profile ID to filter runs by (use "self" for your own profile)
-        active: Filter by run status - "active" (default), "inactive", or "all"
+        status: Filter by run status - "active" (default), "inactive", or "all"
 
     Returns:
         List[Run] containing run information with instance counts and timestamps
@@ -272,10 +272,10 @@ async def list_runs(
     Example:
         runs = await fleet.list_runs()
         my_runs = await fleet.list_runs(profile_id="self")
-        all_runs = await fleet.list_runs(active="all")
+        all_runs = await fleet.list_runs(status="all")
     """
     return await _async_global_client.get_client().list_runs(
-        profile_id=profile_id, active=active
+        profile_id=profile_id, status=status
     )
 
 

@@ -73,17 +73,17 @@ def close_all(run_id: Optional[str] = None, profile_id: Optional[str] = None) ->
     return Fleet().close_all(run_id=run_id, profile_id=profile_id)
 
 
-def list_runs(profile_id: Optional[str] = None, active: Optional[str] = "active") -> List[Run]:
+def list_runs(profile_id: Optional[str] = None, status: Optional[str] = "active") -> List[Run]:
     """List all runs (groups of instances by run_id) with aggregated statistics.
     
     Args:
         profile_id: Optional profile ID to filter runs by (use "self" for your own profile)
-        active: Filter by run status - "active" (default), "inactive", or "all"
+        status: Filter by run status - "active" (default), "inactive", or "all"
         
     Returns:
         List[Run] containing run information with instance counts and timestamps
     """
-    return Fleet().list_runs(profile_id=profile_id, active=active)
+    return Fleet().list_runs(profile_id=profile_id, status=status)
 
 
 def account() -> AccountResponse:
