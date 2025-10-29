@@ -22,6 +22,7 @@ import json
 import logging
 import os
 from typing import List, Optional, Dict, Any, TYPE_CHECKING, Union
+from urllib.parse import urlparse
 
 from .base import EnvironmentBase, SyncWrapper
 from .models import (
@@ -74,6 +75,14 @@ class SyncEnv(EnvironmentBase):
         self._client = client
         self._apps: Dict[str, InstanceClient] = {}
         self._instance: Optional[InstanceClient] = None
+        self._manager_url_override: Optional[str] = None  # For URL mode
+
+    @property
+    def manager_url(self) -> str:
+        """Override to support URL mode where urls is None."""
+        if self._manager_url_override is not None:
+            return self._manager_url_override
+        return super().manager_url
 
     @property
     def instance(self) -> InstanceClient:
@@ -85,17 +94,17 @@ class SyncEnv(EnvironmentBase):
 
     def app(self, name: str) -> InstanceClient:
         if name not in self._apps:
-            # Extract base URL by removing the current app path (e.g., /sentry/api/v1/env)
-            # manager_url looks like: https://xxx.fleetai.com/sentry/api/v1/env
-            base_url = self.manager_url.split("/api/v1/env")[0]
-            # Remove the current app name (e.g., /sentry) to get the root
-            if "/" in base_url:
-                parts = base_url.rsplit("/", 1)
-                if len(parts) == 2 and parts[0] != "https:/":
-                    base_url = parts[0]
+            # Extract scheme://netloc from manager_url, then construct /{name}/api/v1/env
+            # Supports all URL formats:
+            #   https://host/api/v1/env -> https://host/{name}/api/v1/env
+            #   https://host/sentry/api/v1/env -> https://host/{name}/api/v1/env
+            #   http://localhost:8080/api/v1/env -> http://localhost:8080/{name}/api/v1/env
+            parsed = urlparse(self.manager_url)
+            root = f"{parsed.scheme}://{parsed.netloc}"
+            new_url = f"{root}/{name}/api/v1/env"
 
             self._apps[name] = InstanceClient(
-                f"{base_url}/{name}/api/v1/env",
+                new_url,
                 self._client.httpx_client if self._client else None,
             )
         return self._apps[name]
@@ -353,6 +362,7 @@ class Fleet:
             health=None,
         )
         env._instance = instance_client
+        env._manager_url_override = base_url  # Set manager_url for URL mode
         return env
 
     @staticmethod
@@ -448,6 +458,7 @@ class Fleet:
             health=None,
         )
         env._instance = instance_client
+        env._manager_url_override = "local://"  # Set manager_url for local mode
         return env
 
     def check_bundle_exists(self, bundle_hash: str) -> VerifiersCheckResponse:
