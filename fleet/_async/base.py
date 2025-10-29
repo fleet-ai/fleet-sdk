@@ -2,6 +2,7 @@ import httpx
 from typing import Dict, Any, Optional
 import json
 import logging
+import uuid
 
 from ..models import InstanceResponse
 from ..config import GLOBAL_BASE_URL
@@ -19,6 +20,12 @@ from .exceptions import (
     FleetBadRequestError,
     FleetPermissionError,
 )
+
+# Import version
+try:
+    from .. import __version__
+except ImportError:
+    __version__ = "0.2.69"
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +45,17 @@ class BaseWrapper:
             base_url = GLOBAL_BASE_URL
         self.base_url = base_url
 
-    def get_headers(self) -> Dict[str, str]:
+    def get_headers(self, request_id: Optional[str] = None) -> Dict[str, str]:
         headers: Dict[str, str] = {
             "X-Fleet-SDK-Language": "Python",
-            "X-Fleet-SDK-Version": "1.0.0",
+            "X-Fleet-SDK-Version": __version__,
         }
         headers["Authorization"] = f"Bearer {self.api_key}"
-        # Debug log
-        import logging
-
-        logger = logging.getLogger(__name__)
-        # logger.debug(f"Headers being sent: {headers}")
+        
+        # Add request ID for idempotency (persists across retries)
+        if request_id:
+            headers["X-Request-ID"] = request_id
+        
         return headers
 
 
@@ -67,11 +74,14 @@ class AsyncWrapper(BaseWrapper):
         **kwargs,
     ) -> httpx.Response:
         base_url = base_url or self.base_url
+        # Generate unique request ID that persists across retries
+        request_id = str(uuid.uuid4())
+        
         try:
             response = await self.httpx_client.request(
                 method,
                 f"{base_url}{url}",
-                headers=self.get_headers(),
+                headers=self.get_headers(request_id=request_id),
                 params=params,
                 json=json,
                 **kwargs,
