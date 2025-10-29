@@ -35,6 +35,7 @@ from .models import (
     TaskRequest,
     TaskResponse,
     TaskUpdateRequest,
+    Run,
 )
 from .tasks import Task
 
@@ -271,7 +272,7 @@ class Fleet:
         return self.make(env_key=f"{task.env_id}:{task.version}")
 
     def instances(
-        self, status: Optional[str] = None, region: Optional[str] = None, run_id: Optional[str] = None
+        self, status: Optional[str] = None, region: Optional[str] = None, run_id: Optional[str] = None, profile_id: Optional[str] = None
     ) -> List[SyncEnv]:
         params = {}
         if status:
@@ -280,6 +281,8 @@ class Fleet:
             params["region"] = region
         if run_id:
             params["run_id"] = run_id
+        if profile_id:
+            params["profile_id"] = profile_id
 
         response = self.client.request("GET", "/v1/env/instances", params=params)
         return [
@@ -315,16 +318,41 @@ class Fleet:
         """
         return _delete_instance(self.client, instance_id)
 
-    def close_all(self, run_id: str) -> List[InstanceResponse]:
-        """Close (delete) all instances associated with a run_id.
+    def close_all(self, run_id: Optional[str] = None, profile_id: Optional[str] = None) -> List[InstanceResponse]:
+        """Close (delete) instances using the batch delete endpoint.
         
         Args:
-            run_id: The run ID whose instances should be closed
+            run_id: Optional run ID to filter instances by
+            profile_id: Optional profile ID to filter instances by (use "self" for your own profile)
             
         Returns:
             List[InstanceResponse] containing the deleted instances
+            
+        Note:
+            At least one of run_id or profile_id must be provided.
         """
-        return _delete_instances_by_run_id(self.client, run_id)
+        return _delete_instances_batch(self.client, run_id=run_id, profile_id=profile_id)
+    
+    def list_runs(
+        self, profile_id: Optional[str] = None, active: Optional[str] = "active"
+    ) -> List[Run]:
+        """List all runs (groups of instances by run_id) with aggregated statistics.
+        
+        Args:
+            profile_id: Optional profile ID to filter runs by (use "self" for your own profile)
+            active: Filter by run status - "active" (default), "inactive", or "all"
+            
+        Returns:
+            List[Run] containing run information with instance counts and timestamps
+        """
+        params = {}
+        if profile_id:
+            params["profile_id"] = profile_id
+        if active:
+            params["active"] = active
+            
+        response = self.client.request("GET", "/v1/env/runs", params=params)
+        return [Run(**run_data) for run_data in response.json()]
 
     def load_tasks_from_file(self, filename: str) -> List[Task]:
         with open(filename, "r", encoding="utf-8") as f:
@@ -836,8 +864,20 @@ def _delete_instance(client: SyncWrapper, instance_id: str) -> InstanceResponse:
     return InstanceResponse(**response.json())
 
 
-def _delete_instances_by_run_id(client: SyncWrapper, run_id: str) -> List[InstanceResponse]:
-    response = client.request("DELETE", f"/v1/env/instances/run/{run_id}")
+def _delete_instances_batch(
+    client: SyncWrapper, run_id: Optional[str] = None, profile_id: Optional[str] = None
+) -> List[InstanceResponse]:
+    """Delete instances using the batch endpoint with flexible filtering."""
+    params = {}
+    if run_id:
+        params["run_id"] = run_id
+    if profile_id:
+        params["profile_id"] = profile_id
+    
+    if not params:
+        raise ValueError("At least one of run_id or profile_id must be provided")
+    
+    response = client.request("DELETE", "/v1/env/instances/batch", params=params)
     return [InstanceResponse(**instance_data) for instance_data in response.json()]
 
 

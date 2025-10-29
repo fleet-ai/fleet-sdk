@@ -365,6 +365,16 @@ class InstanceResponse(BaseModel):
     urls: Optional[InstanceURLs] = Field(None, title="Urls")
     health: Optional[bool] = Field(None, title="Health")
     run_id: Optional[str] = Field(None, title="Run Id")
+    profile_id: Optional[str] = Field(None, title="Profile Id")
+
+
+class Run(BaseModel):
+    run_id: str = Field(..., title="Run Id")
+    running_count: int = Field(..., title="Running Count")
+    total_count: int = Field(..., title="Total Count")
+    first_created_at: str = Field(..., title="First Created At")
+    last_created_at: str = Field(..., title="Last Created At")
+    profile_id: Optional[str] = Field(None, title="Profile Id")
 
 
 class AccountResponse(BaseModel):
@@ -372,3 +382,5 @@ class AccountResponse(BaseModel):
     team_name: str = Field(..., title="Team Name")
     instance_limit: int = Field(..., title="Instance Limit")
     instance_count: int = Field(..., title="Instance Count")
+    profile_id: Optional[str] = Field(None, title="Profile Id")
+    profile_name: Optional[str] = Field(None, title="Profile Name")
