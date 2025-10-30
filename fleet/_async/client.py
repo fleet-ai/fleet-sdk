@@ -36,6 +36,7 @@ from ..models import (
     TaskResponse,
     TaskUpdateRequest,
     Run,
+    HeartbeatResponse,
 )
 from .tasks import Task
 
@@ -127,6 +128,23 @@ class AsyncEnv(EnvironmentBase):
     async def close(self) -> InstanceResponse:
         return await _delete_instance(self._load_client, self.instance_id)
 
+    async def heartbeat(self) -> HeartbeatResponse:
+        """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
+        
+        Returns:
+            HeartbeatResponse containing heartbeat status and deadline information
+        """
+        body = {}
+        if self.heartbeat_region:
+            body["region"] = self.heartbeat_region
+        
+        response = await self._load_client.request(
+            "POST", 
+            f"/v1/env/instances/{self.instance_id}/heartbeat",
+            json=body
+        )
+        return HeartbeatResponse(**response.json())
+
     async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
         return await self.instance.verify(validator)
 
@@ -214,6 +232,7 @@ class AsyncFleet:
         image_type: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
         run_id: Optional[str] = None,
+        heartbeat_interval: Optional[int] = None,
     ) -> AsyncEnv:
         if ":" in env_key:
             env_key_part, env_version = env_key.split(":", 1)
@@ -250,6 +269,7 @@ class AsyncFleet:
             created_from="sdk",
             ttl_seconds=ttl_seconds,
             run_id=run_id,
+            heartbeat_interval=heartbeat_interval,
         )
 
         # Only use region-specific base URL if no custom base URL is set
@@ -319,6 +339,18 @@ class AsyncFleet:
             InstanceResponse containing the deleted instance details
         """
         return await _delete_instance(self.client, instance_id)
+
+    async def heartbeat(self, instance_id: str, region: Optional[str] = None) -> HeartbeatResponse:
+        """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
+        
+        Args:
+            instance_id: The instance ID to send heartbeat for
+            region: Optional region override for cross-region heartbeats
+            
+        Returns:
+            HeartbeatResponse containing heartbeat status and deadline information
+        """
+        return await _send_heartbeat(self.client, instance_id, region)
 
     async def close_all(self, run_id: Optional[str] = None, profile_id: Optional[str] = None) -> List[InstanceResponse]:
         """Close (delete) instances using the batch delete endpoint.
@@ -864,6 +896,20 @@ class AsyncFleet:
 async def _delete_instance(client: AsyncWrapper, instance_id: str) -> InstanceResponse:
     response = await client.request("DELETE", f"/v1/env/instances/{instance_id}")
     return InstanceResponse(**response.json())
+
+
+async def _send_heartbeat(client: AsyncWrapper, instance_id: str, region: Optional[str] = None) -> HeartbeatResponse:
+    """Send heartbeat to keep instance alive."""
+    body = {}
+    if region:
+        body["region"] = region
+    
+    response = await client.request(
+        "POST",
+        f"/v1/env/instances/{instance_id}/heartbeat",
+        json=body
+    )
+    return HeartbeatResponse(**response.json())
 
 
 async def _delete_instances_batch(

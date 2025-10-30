@@ -36,6 +36,7 @@ from .models import (
     TaskResponse,
     TaskUpdateRequest,
     Run,
+    HeartbeatResponse,
 )
 from .tasks import Task
 
@@ -127,6 +128,23 @@ class SyncEnv(EnvironmentBase):
     def close(self) -> InstanceResponse:
         return _delete_instance(self._load_client, self.instance_id)
 
+    def heartbeat(self) -> HeartbeatResponse:
+        """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
+        
+        Returns:
+            HeartbeatResponse containing heartbeat status and deadline information
+        """
+        body = {}
+        if self.heartbeat_region:
+            body["region"] = self.heartbeat_region
+        
+        response = self._load_client.request(
+            "POST", 
+            f"/v1/env/instances/{self.instance_id}/heartbeat",
+            json=body
+        )
+        return HeartbeatResponse(**response.json())
+
     def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
         return self.instance.verify(validator)
 
@@ -214,6 +232,7 @@ class Fleet:
         image_type: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
         run_id: Optional[str] = None,
+        heartbeat_interval: Optional[int] = None,
     ) -> SyncEnv:
         if ":" in env_key:
             env_key_part, env_version = env_key.split(":", 1)
@@ -250,6 +269,7 @@ class Fleet:
             created_from="sdk",
             ttl_seconds=ttl_seconds,
             run_id=run_id,
+            heartbeat_interval=heartbeat_interval,
         )
 
         # Only use region-specific base URL if no custom base URL is set
@@ -317,6 +337,18 @@ class Fleet:
             InstanceResponse containing the deleted instance details
         """
         return _delete_instance(self.client, instance_id)
+
+    def heartbeat(self, instance_id: str, region: Optional[str] = None) -> HeartbeatResponse:
+        """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
+        
+        Args:
+            instance_id: The instance ID to send heartbeat for
+            region: Optional region override for cross-region heartbeats
+            
+        Returns:
+            HeartbeatResponse containing heartbeat status and deadline information
+        """
+        return _send_heartbeat(self.client, instance_id, region)
 
     def close_all(self, run_id: Optional[str] = None, profile_id: Optional[str] = None) -> List[InstanceResponse]:
         """Close (delete) instances using the batch delete endpoint.
@@ -862,6 +894,20 @@ class Fleet:
 def _delete_instance(client: SyncWrapper, instance_id: str) -> InstanceResponse:
     response = client.request("DELETE", f"/v1/env/instances/{instance_id}")
     return InstanceResponse(**response.json())
+
+
+def _send_heartbeat(client: SyncWrapper, instance_id: str, region: Optional[str] = None) -> HeartbeatResponse:
+    """Send heartbeat to keep instance alive."""
+    body = {}
+    if region:
+        body["region"] = region
+    
+    response = client.request(
+        "POST",
+        f"/v1/env/instances/{instance_id}/heartbeat",
+        json=body
+    )
+    return HeartbeatResponse(**response.json())
 
 
 def _delete_instances_batch(

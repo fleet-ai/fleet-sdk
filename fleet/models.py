@@ -71,6 +71,7 @@ class InstanceRequest(BaseModel):
     image_type: Optional[str] = Field(None, title="Image Type")
     created_from: Optional[str] = Field(None, title="Created From")
     ttl_seconds: Optional[int] = Field(None, title="TTL Seconds")
+    heartbeat_interval: Optional[int] = Field(None, title="Heartbeat Interval")
 
 
 class InstanceStatus(Enum):
@@ -366,6 +367,8 @@ class InstanceResponse(BaseModel):
     health: Optional[bool] = Field(None, title="Health")
     run_id: Optional[str] = Field(None, title="Run Id")
     profile_id: Optional[str] = Field(None, title="Profile Id")
+    heartbeat_interval: Optional[int] = Field(None, title="Heartbeat Interval")
+    heartbeat_region: Optional[str] = Field(None, title="Heartbeat Region")
 
 
 class Run(BaseModel):
@@ -375,6 +378,14 @@ class Run(BaseModel):
     first_created_at: str = Field(..., title="First Created At")
     last_created_at: str = Field(..., title="Last Created At")
     profile_id: Optional[str] = Field(None, title="Profile Id")
+
+
+class HeartbeatResponse(BaseModel):
+    success: bool = Field(..., title="Success")
+    instance_id: str = Field(..., title="Instance Id")
+    last_heartbeat: str = Field(..., title="Last Heartbeat")
+    deadline_timestamp: float = Field(..., title="Deadline Timestamp")
+    interval_seconds: int = Field(..., title="Interval Seconds")
 
 
 class AccountResponse(BaseModel):

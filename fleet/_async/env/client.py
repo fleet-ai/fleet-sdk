@@ -1,5 +1,5 @@
 from ..client import AsyncFleet, AsyncEnv, Task
-from ...models import Environment as EnvironmentModel, AccountResponse, InstanceResponse, Run
+from ...models import Environment as EnvironmentModel, AccountResponse, InstanceResponse, Run, HeartbeatResponse
 from typing import List, Optional, Dict, Any
 
 
@@ -11,6 +11,7 @@ async def make_async(
     image_type: Optional[str] = None,
     ttl_seconds: Optional[int] = None,
     run_id: Optional[str] = None,
+    heartbeat_interval: Optional[int] = None,
 ) -> AsyncEnv:
     return await AsyncFleet().make(
         env_key,
@@ -20,6 +21,7 @@ async def make_async(
         image_type=image_type,
         ttl_seconds=ttl_seconds,
         run_id=run_id,
+        heartbeat_interval=heartbeat_interval,
     )
 
 
@@ -84,6 +86,18 @@ async def list_runs_async(profile_id: Optional[str] = None, status: Optional[str
         List[Run] containing run information with instance counts and timestamps
     """
     return await AsyncFleet().list_runs(profile_id=profile_id, status=status)
+
+
+async def heartbeat_async(instance_id: str) -> HeartbeatResponse:
+    """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
+    
+    Args:
+        instance_id: The instance ID to send heartbeat for
+        
+    Returns:
+        HeartbeatResponse containing heartbeat status and deadline information
+    """
+    return await AsyncFleet().heartbeat(instance_id)
 
 
 async def account_async() -> AccountResponse:

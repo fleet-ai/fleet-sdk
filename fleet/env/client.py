@@ -1,5 +1,5 @@
 from ..client import Fleet, SyncEnv, Task
-from ..models import Environment as EnvironmentModel, AccountResponse, InstanceResponse, Run
+from ..models import Environment as EnvironmentModel, AccountResponse, InstanceResponse, Run, HeartbeatResponse
 from typing import List, Optional, Dict, Any
 
 
@@ -11,6 +11,7 @@ def make(
     image_type: Optional[str] = None,
     ttl_seconds: Optional[int] = None,
     run_id: Optional[str] = None,
+    heartbeat_interval: Optional[int] = None,
 ) -> SyncEnv:
     return Fleet().make(
         env_key,
@@ -20,6 +21,7 @@ def make(
         image_type=image_type,
         ttl_seconds=ttl_seconds,
         run_id=run_id,
+        heartbeat_interval=heartbeat_interval,
     )
 
 
@@ -84,6 +86,18 @@ def list_runs(profile_id: Optional[str] = None, status: Optional[str] = "active"
         List[Run] containing run information with instance counts and timestamps
     """
     return Fleet().list_runs(profile_id=profile_id, status=status)
+
+
+def heartbeat(instance_id: str) -> HeartbeatResponse:
+    """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
+    
+    Args:
+        instance_id: The instance ID to send heartbeat for
+        
+    Returns:
+        HeartbeatResponse containing heartbeat status and deadline information
+    """
+    return Fleet().heartbeat(instance_id)
 
 
 def account() -> AccountResponse:
