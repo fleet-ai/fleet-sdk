@@ -381,11 +381,21 @@ class Run(BaseModel):
 
 
 class HeartbeatResponse(BaseModel):
-    success: bool = Field(..., title="Success")
-    instance_id: str = Field(..., title="Instance Id")
-    last_heartbeat: str = Field(..., title="Last Heartbeat")
-    deadline_timestamp: float = Field(..., title="Deadline Timestamp")
-    interval_seconds: int = Field(..., title="Interval Seconds")
+    """Response from bumping an instance heartbeat."""
+    
+    success: bool = Field(..., description="Whether the heartbeat was successfully updated")
+    instance_id: str = Field(..., description="The instance ID")
+    last_heartbeat: Optional[str] = Field(
+        None,
+        description="ISO 8601 UTC timestamp of the heartbeat (None if not enabled)",
+    )
+    deadline_timestamp: Optional[float] = Field(
+        None,
+        description="Unix timestamp when next heartbeat is due (None if not enabled)",
+    )
+    interval_seconds: Optional[int] = Field(
+        None, description="Heartbeat interval in seconds (None if not enabled)"
+    )
 
 
 class AccountResponse(BaseModel):
