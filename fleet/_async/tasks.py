@@ -215,13 +215,18 @@ class Task(BaseModel):
         image_type: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
         run_id: Optional[str] = None,
+        heartbeat_interval: Optional[int] = None,
     ):
         """Create an environment instance for this task's environment.
 
         Alias for make() method. Uses the task's env_id (and version if present) to create the env.
         """
         return await self.make(
-            region=region, image_type=image_type, ttl_seconds=ttl_seconds, run_id=run_id
+            region=region,
+            image_type=image_type,
+            ttl_seconds=ttl_seconds,
+            run_id=run_id,
+            heartbeat_interval=heartbeat_interval,
         )
 
     async def make(
@@ -230,6 +235,7 @@ class Task(BaseModel):
         image_type: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
         run_id: Optional[str] = None,
+        heartbeat_interval: Optional[int] = None,
     ):
         """Create an environment instance with task's configuration.
 
@@ -238,12 +244,14 @@ class Task(BaseModel):
         - data_key (data_id + data_version, if present)
         - env_variables (if present)
         - run_id (if present)
+        - heartbeat_interval (if present)
 
         Args:
             region: Optional AWS region for the environment
             image_type: Optional image type for the environment
             ttl_seconds: Optional TTL in seconds for the instance
             run_id: Optional run ID to group instances
+            heartbeat_interval: Optional heartbeat interval in seconds (30-3600)
 
         Returns:
             Environment instance configured for this task
@@ -251,7 +259,7 @@ class Task(BaseModel):
         Example:
             task = fleet.Task(key="my-task", prompt="...", env_id="my-env",
                             data_id="my-data", data_version="v1.0")
-            env = await task.make(region="us-west-2", run_id="my-batch-123")
+            env = await task.make(region="us-west-2", run_id="my-batch-123", heartbeat_interval=60)
         """
         if not self.env_id:
             raise ValueError("Task has no env_id defined")
@@ -267,6 +275,7 @@ class Task(BaseModel):
             image_type=image_type,
             ttl_seconds=ttl_seconds,
             run_id=run_id,
+            heartbeat_interval=heartbeat_interval,
         )
 
 
