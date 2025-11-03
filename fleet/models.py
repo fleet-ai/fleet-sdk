@@ -71,6 +71,7 @@ class InstanceRequest(BaseModel):
     image_type: Optional[str] = Field(None, title="Image Type")
     created_from: Optional[str] = Field(None, title="Created From")
     ttl_seconds: Optional[int] = Field(None, title="TTL Seconds")
+    heartbeat_interval: Optional[int] = Field(None, title="Heartbeat Interval")
 
 
 class InstanceStatus(Enum):
@@ -365,6 +366,36 @@ class InstanceResponse(BaseModel):
     urls: Optional[InstanceURLs] = Field(None, title="Urls")
     health: Optional[bool] = Field(None, title="Health")
     run_id: Optional[str] = Field(None, title="Run Id")
+    profile_id: Optional[str] = Field(None, title="Profile Id")
+    heartbeat_interval: Optional[int] = Field(None, title="Heartbeat Interval")
+    heartbeat_region: Optional[str] = Field(None, title="Heartbeat Region")
+
+
+class Run(BaseModel):
+    run_id: str = Field(..., title="Run Id")
+    running_count: int = Field(..., title="Running Count")
+    total_count: int = Field(..., title="Total Count")
+    first_created_at: str = Field(..., title="First Created At")
+    last_created_at: str = Field(..., title="Last Created At")
+    profile_id: Optional[str] = Field(None, title="Profile Id")
+
+
+class HeartbeatResponse(BaseModel):
+    """Response from bumping an instance heartbeat."""
+    
+    success: bool = Field(..., description="Whether the heartbeat was successfully updated")
+    instance_id: str = Field(..., description="The instance ID")
+    last_heartbeat: Optional[str] = Field(
+        None,
+        description="ISO 8601 UTC timestamp of the heartbeat (None if not enabled)",
+    )
+    deadline_timestamp: Optional[float] = Field(
+        None,
+        description="Unix timestamp when next heartbeat is due (None if not enabled)",
+    )
+    interval_seconds: Optional[int] = Field(
+        None, description="Heartbeat interval in seconds (None if not enabled)"
+    )
 
 
 class AccountResponse(BaseModel):
@@ -372,3 +403,5 @@ class AccountResponse(BaseModel):
     team_name: str = Field(..., title="Team Name")
     instance_limit: int = Field(..., title="Instance Limit")
     instance_count: int = Field(..., title="Instance Count")
+    profile_id: Optional[str] = Field(None, title="Profile Id")
+    profile_name: Optional[str] = Field(None, title="Profile Name")

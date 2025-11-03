@@ -35,6 +35,8 @@ from ..models import (
     TaskRequest,
     TaskResponse,
     TaskUpdateRequest,
+    Run,
+    HeartbeatResponse,
 )
 from .tasks import Task
 
@@ -131,6 +133,23 @@ class AsyncEnv(EnvironmentBase):
     async def close(self) -> InstanceResponse:
         return await _delete_instance(self._load_client, self.instance_id)
 
+    async def heartbeat(self) -> HeartbeatResponse:
+        """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
+        
+        Returns:
+            HeartbeatResponse containing heartbeat status and deadline information
+        """
+        body = {}
+        if self.heartbeat_region:
+            body["region"] = self.heartbeat_region
+        
+        response = await self._load_client.request(
+            "POST", 
+            f"/v1/env/instances/{self.instance_id}/heartbeat",
+            json=body
+        )
+        return HeartbeatResponse(**response.json())
+
     async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
         return await self.instance.verify(validator)
 
@@ -218,6 +237,7 @@ class AsyncFleet:
         image_type: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
         run_id: Optional[str] = None,
+        heartbeat_interval: Optional[int] = None,
     ) -> AsyncEnv:
         if ":" in env_key:
             env_key_part, env_version = env_key.split(":", 1)
@@ -254,6 +274,7 @@ class AsyncFleet:
             created_from="sdk",
             ttl_seconds=ttl_seconds,
             run_id=run_id,
+            heartbeat_interval=heartbeat_interval,
         )
 
         # Only use region-specific base URL if no custom base URL is set
@@ -276,7 +297,7 @@ class AsyncFleet:
         return await self.make(env_key=f"{task.env_id}:{task.version}")
 
     async def instances(
-        self, status: Optional[str] = None, region: Optional[str] = None, run_id: Optional[str] = None
+        self, status: Optional[str] = None, region: Optional[str] = None, run_id: Optional[str] = None, profile_id: Optional[str] = None
     ) -> List[AsyncEnv]:
         params = {}
         if status:
@@ -285,6 +306,8 @@ class AsyncFleet:
             params["region"] = region
         if run_id:
             params["run_id"] = run_id
+        if profile_id:
+            params["profile_id"] = profile_id
 
         response = await self.client.request("GET", "/v1/env/instances", params=params)
         return [
@@ -474,16 +497,53 @@ class AsyncFleet:
         """
         return await _delete_instance(self.client, instance_id)
 
-    async def close_all(self, run_id: str) -> List[InstanceResponse]:
-        """Close (delete) all instances associated with a run_id.
+    async def heartbeat(self, instance_id: str, region: Optional[str] = None) -> HeartbeatResponse:
+        """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
         
         Args:
-            run_id: The run ID whose instances should be closed
+            instance_id: The instance ID to send heartbeat for
+            region: Optional region override for cross-region heartbeats
+            
+        Returns:
+            HeartbeatResponse containing heartbeat status and deadline information
+        """
+        return await _send_heartbeat(self.client, instance_id, region)
+
+    async def close_all(self, run_id: Optional[str] = None, profile_id: Optional[str] = None) -> List[InstanceResponse]:
+        """Close (delete) instances using the batch delete endpoint.
+        
+        Args:
+            run_id: Optional run ID to filter instances by
+            profile_id: Optional profile ID to filter instances by (use "self" for your own profile)
             
         Returns:
             List[InstanceResponse] containing the deleted instances
+            
+        Note:
+            At least one of run_id or profile_id must be provided.
         """
-        return await _delete_instances_by_run_id(self.client, run_id)
+        return await _delete_instances_batch(self.client, run_id=run_id, profile_id=profile_id)
+    
+    async def list_runs(
+        self, profile_id: Optional[str] = None, status: Optional[str] = "active"
+    ) -> List[Run]:
+        """List all runs (groups of instances by run_id) with aggregated statistics.
+        
+        Args:
+            profile_id: Optional profile ID to filter runs by (use "self" for your own profile)
+            status: Filter by run status - "active" (default), "inactive", or "all"
+            
+        Returns:
+            List[Run] containing run information with instance counts and timestamps
+        """
+        params = {}
+        if profile_id:
+            params["profile_id"] = profile_id
+        if status:
+            params["active"] = status
+            
+        response = await self.client.request("GET", "/v1/env/runs", params=params)
+        return [Run(**run_data) for run_data in response.json()]
 
     async def load_tasks_from_file(self, filename: str) -> List[Task]:
         with open(filename, "r", encoding="utf-8") as f:
@@ -563,8 +623,8 @@ class AsyncFleet:
             error_msg = f"Failed to create verifier {task_json.get('key', task_json.get('id'))}: {e}"
             if raise_on_verifier_error:
                 raise ValueError(error_msg) from e
-            else:
-                logger.warning(error_msg)
+            # else:
+            #     logger.warning(error_msg)
 
         task = Task(
             key=task_json.get("key", task_json.get("id")),
@@ -656,25 +716,25 @@ class AsyncFleet:
                                     verifier_sha=tr.verifier.sha256,
                                 )
                             except Exception as e:
-                                logger.warning(
-                                    f"Failed to create verifier {tr.verifier.key}: {e}"
-                                )
+                                # logger.warning(
+                                #     f"Failed to create verifier {tr.verifier.key}: {e}"
+                                # )
                                 return None
                         else:
                             # Fallback: try fetching by ID
                             try:
-                                logger.warning(
-                                    f"Embedded verifier code missing for {tr.verifier.key} (NoSuchKey). "
-                                    f"Attempting to refetch by id {tr.verifier.verifier_id}"
-                                )
+                                # logger.warning(
+                                #     f"Embedded verifier code missing for {tr.verifier.key} (NoSuchKey). "
+                                #     f"Attempting to refetch by id {tr.verifier.verifier_id}"
+                                # )
                                 return await self._load_verifier(
                                     tr.verifier.verifier_id
                                 )
                             except Exception as e:
-                                logger.warning(
-                                    f"Refetch by verifier id failed for {tr.verifier.key}: {e}. "
-                                    "Leaving verifier unset."
-                                )
+                                # logger.warning(
+                                #     f"Refetch by verifier id failed for {tr.verifier.key}: {e}. "
+                                #     "Leaving verifier unset."
+                                # )
                                 return None
 
                 # Add the coroutine for parallel execution
@@ -713,9 +773,10 @@ class AsyncFleet:
             if task_response.verifier:
                 # Process verifier result
                 if isinstance(verifier_result, Exception):
-                    logger.warning(
-                        f"Verifier loading failed for {task_response.key}: {verifier_result}"
-                    )
+                    # logger.warning(
+                    #     f"Verifier loading failed for {task_response.key}: {verifier_result}"
+                    # )
+                    pass
                 elif verifier_result is not None:
                     verifier = verifier_result
                     embedded_code = task_response.verifier.code or ""
@@ -789,10 +850,10 @@ class AsyncFleet:
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump(tasks_data, f, indent=2, default=str)
 
-            logger.info(f"Exported {len(tasks)} tasks to {filename}")
+            # logger.info(f"Exported {len(tasks)} tasks to {filename}")
             return filename
         else:
-            logger.info("No tasks found to export")
+            # logger.info("No tasks found to export")
             return None
 
     async def import_single_task(self, task: Task, project_key: Optional[str] = None):
@@ -821,7 +882,7 @@ class AsyncFleet:
             )
             return response
         except Exception as e:
-            logger.error(f"Failed to import task {task.key}: {e}")
+            # logger.error(f"Failed to import task {task.key}: {e}")
             return None
 
     async def import_tasks(self, filename: str, project_key: Optional[str] = None):
@@ -994,8 +1055,34 @@ async def _delete_instance(client: AsyncWrapper, instance_id: str) -> InstanceRe
     return InstanceResponse(**response.json())
 
 
-async def _delete_instances_by_run_id(client: AsyncWrapper, run_id: str) -> List[InstanceResponse]:
-    response = await client.request("DELETE", f"/v1/env/instances/run/{run_id}")
+async def _send_heartbeat(client: AsyncWrapper, instance_id: str, region: Optional[str] = None) -> HeartbeatResponse:
+    """Send heartbeat to keep instance alive."""
+    body = {}
+    if region:
+        body["region"] = region
+    
+    response = await client.request(
+        "POST",
+        f"/v1/env/instances/{instance_id}/heartbeat",
+        json=body
+    )
+    return HeartbeatResponse(**response.json())
+
+
+async def _delete_instances_batch(
+    client: AsyncWrapper, run_id: Optional[str] = None, profile_id: Optional[str] = None
+) -> List[InstanceResponse]:
+    """Delete instances using the batch endpoint with flexible filtering."""
+    params = {}
+    if run_id:
+        params["run_id"] = run_id
+    if profile_id:
+        params["profile_id"] = profile_id
+    
+    if not params:
+        raise ValueError("At least one of run_id or profile_id must be provided")
+    
+    response = await client.request("DELETE", "/v1/env/instances/batch", params=params)
     return [InstanceResponse(**instance_data) for instance_data in response.json()]
 
 
@@ -1041,17 +1128,17 @@ async def _execute_verifier_remote(
         request_data["bundle"] = bundle_b64
 
     # Debug logging
-    logger.debug(
-        f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}"
-    )
-    logger.debug(f"Request has bundle: {needs_upload}")
-    logger.debug(f"Using client with base_url: {client.base_url}")
-    logger.debug(f"Request data keys: {list(request_data.keys())}")
-    logger.debug(
-        f"Bundle size: {len(request_data.get('bundle', ''))} chars"
-        if "bundle" in request_data
-        else "No bundle"
-    )
+    # logger.debug(
+    #     f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}"
+    # )
+    # logger.debug(f"Request has bundle: {needs_upload}")
+    # logger.debug(f"Using client with base_url: {client.base_url}")
+    # logger.debug(f"Request data keys: {list(request_data.keys())}")
+    # logger.debug(
+    #     f"Bundle size: {len(request_data.get('bundle', ''))} chars"
+    #     if "bundle" in request_data
+    #     else "No bundle"
+    # )
 
     # Note: This should be called on the instance URL, not the orchestrator
     # The instance has manager URLs for verifier execution
@@ -1059,6 +1146,6 @@ async def _execute_verifier_remote(
 
     # Debug the response
     response_json = response.json()
-    logger.debug(f"Verifier execute response: {response_json}")
+    # logger.debug(f"Verifier execute response: {response_json}")
 
     return VerifiersExecuteResponse(**response_json)

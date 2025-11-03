@@ -25,7 +25,7 @@ from ..exceptions import (
     FleetConfigurationError,
 )
 from .client import AsyncFleet, AsyncEnv
-from ..models import InstanceResponse, Environment, AccountResponse
+from ..models import InstanceResponse, Environment, AccountResponse, Run
 from ..instance.models import Resource, ResetResponse
 
 # Import async verifiers
@@ -44,7 +44,7 @@ from ..types import VerifierFunction
 from .. import env
 from . import global_client as _async_global_client
 
-__version__ = "0.1.0"
+__version__ = "0.2.71"
 
 __all__ = [
     # Core classes
@@ -54,6 +54,7 @@ __all__ = [
     "InstanceResponse",
     "Resource",
     "ResetResponse",
+    "Run",
     # Task models
     "Task",
     "VerifierFunction",
@@ -90,6 +91,7 @@ __all__ = [
     "import_tasks",
     "account",
     "get_task",
+    "list_runs",
     # Version
     "__version__",
 ]
@@ -252,6 +254,28 @@ async def get_task(task_key: str, version_id: Optional[str] = None):
     """
     return await _async_global_client.get_client().get_task(
         task_key=task_key, version_id=version_id
+    )
+
+
+async def list_runs(
+    profile_id: Optional[str] = None, status: Optional[str] = "active"
+) -> List[Run]:
+    """List all runs (groups of instances by run_id) with aggregated statistics.
+
+    Args:
+        profile_id: Optional profile ID to filter runs by (use "self" for your own profile)
+        status: Filter by run status - "active" (default), "inactive", or "all"
+
+    Returns:
+        List[Run] containing run information with instance counts and timestamps
+
+    Example:
+        runs = await fleet.list_runs()
+        my_runs = await fleet.list_runs(profile_id="self")
+        all_runs = await fleet.list_runs(status="all")
+    """
+    return await _async_global_client.get_client().list_runs(
+        profile_id=profile_id, status=status
     )
 
 

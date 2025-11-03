@@ -79,9 +79,9 @@ class AsyncVerifierFunction:
 
                 self._bundle_data = zip_buffer.getvalue()
                 self._bundle_sha = _get_bundle_sha(self._bundle_data)
-                logger.debug(
-                    f"Created bundle from raw code for {self.key} with SHA: {self._bundle_sha}"
-                )
+                # logger.debug(
+                #     f"Created bundle from raw code for {self.key} with SHA: {self._bundle_sha}"
+                # )
             else:
                 # Try to create bundle from function source
                 try:
@@ -89,9 +89,9 @@ class AsyncVerifierFunction:
                         self.func, self.extra_requirements, self.verifier_id
                     )
                     self._bundle_sha = _get_bundle_sha(self._bundle_data)
-                    logger.debug(
-                        f"Created bundle for {self.key} with SHA: {self._bundle_sha}"
-                    )
+                    # logger.debug(
+                    #     f"Created bundle for {self.key} with SHA: {self._bundle_sha}"
+                    # )
                 except OSError as e:
                     # Can't create bundle - no source and no raw code
                     raise OSError(f"Cannot create bundle for {self.key}: {e}")
@@ -104,20 +104,21 @@ class AsyncVerifierFunction:
 
         # If bundle_data is empty, we're using server-side bundle
         if not bundle_data:
-            logger.debug(f"Using server-side bundle {bundle_sha[:8]}...")
+            # logger.debug(f"Using server-side bundle {bundle_sha[:8]}...")
             return bundle_sha, False  # No upload needed, server has it
 
         # Always check if bundle exists on server
         try:
             exists = await env.check_bundle_exists(bundle_sha)
             if exists.success:
-                logger.info(f"Bundle {bundle_sha[:8]}... found on server")
+                # logger.info(f"Bundle {bundle_sha[:8]}... found on server")
                 return bundle_sha, False  # Found on server, no upload needed
         except Exception as e:
-            logger.warning(f"Failed to check bundle existence: {e}")
+            # logger.warning(f"Failed to check bundle existence: {e}")
+            pass
 
         # Bundle not found on server - upload needed
-        logger.info(f"Bundle {bundle_sha[:8]}... needs to be uploaded")
+        # logger.info(f"Bundle {bundle_sha[:8]}... needs to be uploaded")
         return bundle_sha, True  # Upload needed
 
     async def __call__(self, env: AsyncEnv, *args, **kwargs) -> float:
@@ -147,7 +148,7 @@ class AsyncVerifierFunction:
                     )
 
         except Exception as e:
-            logger.error(f"Error in verifier {self.key}: {e}")
+            # logger.error(f"Error in verifier {self.key}: {e}")
             # Return error score 0
             return 0.0
 
@@ -179,7 +180,7 @@ class AsyncVerifierFunction:
                 try:
                     return float(result)
                 except (ValueError, TypeError):
-                    logger.warning(f"Could not convert result to float: {result}")
+                    # logger.warning(f"Could not convert result to float: {result}")
                     return 0.0
 
     def _raise_remote_error(self, error_info: Dict[str, Any]):
@@ -238,7 +239,7 @@ Remote traceback:
 
             if needs_upload:
                 # Need to upload bundle to S3
-                logger.info(f"Uploading bundle {bundle_sha[:8]}... for {self.key}")
+                # logger.info(f"Uploading bundle {bundle_sha[:8]}... for {self.key}")
                 bundle_data, _ = self._get_or_create_bundle()
 
                 response = await env.execute_verifier_remote(
@@ -252,11 +253,11 @@ Remote traceback:
                     needs_upload=True,
                 )
 
-                logger.debug(f"Bundle {bundle_sha[:8]}... uploaded successfully")
+                # logger.debug(f"Bundle {bundle_sha[:8]}... uploaded successfully")
 
             else:
                 # Bundle already available - execute without upload
-                logger.info(f"Bundle {bundle_sha[:8]}... already cached for {self.key}")
+                # logger.info(f"Bundle {bundle_sha[:8]}... already cached for {self.key}")
                 response = await env.execute_verifier_remote(
                     bundle_data=b"",  # Empty bundle since it's cached
                     bundle_sha=bundle_sha,
@@ -273,9 +274,9 @@ Remote traceback:
         except Exception as e:
             # Check if error indicates bundle not found and retry with upload
             if self._is_bundle_not_found_error(e) and not needs_upload:
-                logger.info(
-                    f"Bundle {bundle_sha[:8]}... not found on server, uploading..."
-                )
+                # logger.info(
+                #     f"Bundle {bundle_sha[:8]}... not found on server, uploading..."
+                # )
                 bundle_data, _ = self._get_or_create_bundle()
                 response = await env.execute_verifier_remote(
                     bundle_data=bundle_data,
@@ -289,7 +290,7 @@ Remote traceback:
                 )
                 return response
             else:
-                logger.error(f"Error in remote execution of {self.key}: {e}")
+                # logger.error(f"Error in remote execution of {self.key}: {e}")
                 raise
 
 

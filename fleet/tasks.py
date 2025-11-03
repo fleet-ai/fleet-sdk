@@ -208,12 +208,19 @@ class Task(BaseModel):
         image_type: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
         run_id: Optional[str] = None,
+        heartbeat_interval: Optional[int] = None,
     ):
         """Create an environment instance for this task's environment.
 
         Alias for make() method. Uses the task's env_id (and version if present) to create the env.
         """
-        return self.make(region=region, image_type=image_type, ttl_seconds=ttl_seconds, run_id=run_id)
+        return self.make(
+            region=region,
+            image_type=image_type,
+            ttl_seconds=ttl_seconds,
+            run_id=run_id,
+            heartbeat_interval=heartbeat_interval,
+        )
 
     def make(
         self,
@@ -221,6 +228,7 @@ class Task(BaseModel):
         image_type: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
         run_id: Optional[str] = None,
+        heartbeat_interval: Optional[int] = None,
     ):
         """Create an environment instance with task's configuration.
 
@@ -229,12 +237,14 @@ class Task(BaseModel):
         - data_key (data_id + data_version, if present)
         - env_variables (if present)
         - run_id (if present)
+        - heartbeat_interval (if present)
 
         Args:
             region: Optional AWS region for the environment
             image_type: Optional image type for the environment
             ttl_seconds: Optional TTL in seconds for the instance
             run_id: Optional run ID to group instances
+            heartbeat_interval: Optional heartbeat interval in seconds (30-3600)
 
         Returns:
             Environment instance configured for this task
@@ -242,7 +252,7 @@ class Task(BaseModel):
         Example:
             task = fleet.Task(key="my-task", prompt="...", env_id="my-env",
                             data_id="my-data", data_version="v1.0")
-            env = task.make(region="us-west-2", run_id="my-batch-123")
+            env = task.make(region="us-west-2", run_id="my-batch-123", heartbeat_interval=60)
         """
         if not self.env_id:
             raise ValueError("Task has no env_id defined")
@@ -258,6 +268,7 @@ class Task(BaseModel):
             image_type=image_type,
             ttl_seconds=ttl_seconds,
             run_id=run_id,
+            heartbeat_interval=heartbeat_interval,
         )
 
 
@@ -278,6 +289,8 @@ def verifier_from_string(
     try:
         import inspect
         import re
+        import json
+        import string
         from .verifiers import SyncVerifierFunction
         from .verifiers.code import TASK_SUCCESSFUL_SCORE, TASK_FAILED_SCORE
         from .verifiers.db import IgnoreConfig
@@ -292,6 +305,39 @@ def verifier_from_string(
         cleaned_code = re.sub(r"^import fleet\.verifiers.*$\n?", "", cleaned_code, flags=re.MULTILINE)
         cleaned_code = re.sub(r"^import fleet$\n?", "", cleaned_code, flags=re.MULTILINE)
 
+        # Define helper functions for verifier execution
+        _TRANSLATOR = str.maketrans(string.punctuation, " " * len(string.punctuation))
+        
+        def _normalize_text(value: str) -> str:
+            text = value.lower().translate(_TRANSLATOR)
+            return "".join(text.split())
+        
+        def _stringify_content(content: Any) -> str:
+            if isinstance(content, (dict, list)):
+                return json.dumps(content, sort_keys=True)
+            return str(content)
+        
+        def normalized_contains(target: str, blob: Any) -> bool:
+            normalized_target = _normalize_text(target)
+            normalized_blob = _normalize_text(_stringify_content(blob))
+            return normalized_target in normalized_blob
+        
+        def extract_numbers(text: str) -> list:
+            cleaned_text = text.replace(',', '')
+            pattern = r'-?\d+\.?\d*'
+            matches = re.findall(pattern, cleaned_text)
+            return [float(num) for num in matches]
+        
+        def contains_number(text: str, target_number) -> bool:
+            numbers = extract_numbers(text)
+            try:
+                if isinstance(target_number, str):
+                    target_number = target_number.replace(',', '')
+                target = float(target_number)
+            except (ValueError, AttributeError):
+                return False
+            return target in numbers
+
         # Create a globals namespace with all required imports
         exec_globals = globals().copy()
         exec_globals.update(
@@ -300,6 +346,12 @@ def verifier_from_string(
                 "TASK_FAILED_SCORE": TASK_FAILED_SCORE,
                 "IgnoreConfig": IgnoreConfig,
                 "Environment": object,  # Add Environment type if needed
+                "normalized_contains": normalized_contains,
+                "extract_numbers": extract_numbers,
+                "contains_number": contains_number,
+                "json": json,
+                "re": re,
+                "string": string,
             }
         )
 
