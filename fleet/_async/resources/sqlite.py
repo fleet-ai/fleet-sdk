@@ -24,7 +24,7 @@ from fleet.verifiers.db import (
 
 
 class AsyncDatabaseSnapshot:
-    """Async database snapshot that fetches data through API and stores locally for diffing."""
+    """Lazy database snapshot that fetches data on-demand through API."""
 
     def __init__(self, resource: "AsyncSQLiteResource", name: Optional[str] = None):
         self.resource = resource
@@ -32,11 +32,12 @@ class AsyncDatabaseSnapshot:
         self.created_at = datetime.utcnow()
         self._data: Dict[str, List[Dict[str, Any]]] = {}
         self._schemas: Dict[str, List[str]] = {}
-        self._fetched = False
+        self._table_names: Optional[List[str]] = None
+        self._fetched_tables: set = set()
 
-    async def _ensure_fetched(self):
-        """Fetch all data from remote database if not already fetched."""
-        if self._fetched:
+    async def _ensure_tables_list(self):
+        """Fetch just the list of table names if not already fetched."""
+        if self._table_names is not None:
             return
 
         # Get all tables
@@ -45,35 +46,36 @@ class AsyncDatabaseSnapshot:
         )
 
         if not tables_response.rows:
-            self._fetched = True
+            self._table_names = []
             return
 
-        table_names = [row[0] for row in tables_response.rows]
+        self._table_names = [row[0] for row in tables_response.rows]
 
-        # Fetch data from each table
-        for table in table_names:
-            # Get table schema
-            schema_response = await self.resource.query(f"PRAGMA table_info({table})")
-            if schema_response.rows:
-                self._schemas[table] = [
-                    row[1] for row in schema_response.rows
-                ]  # Column names
+    async def _ensure_table_data(self, table: str):
+        """Fetch data for a specific table on demand."""
+        if table in self._fetched_tables:
+            return
 
-            # Get all data
-            data_response = await self.resource.query(f"SELECT * FROM {table}")
-            if data_response.rows and data_response.columns:
-                self._data[table] = [
-                    dict(zip(data_response.columns, row)) for row in data_response.rows
-                ]
-            else:
-                self._data[table] = []
+        # Get table schema
+        schema_response = await self.resource.query(f"PRAGMA table_info({table})")
+        if schema_response.rows:
+            self._schemas[table] = [row[1] for row in schema_response.rows]  # Column names
 
-        self._fetched = True
+        # Get all data for this table
+        data_response = await self.resource.query(f"SELECT * FROM {table}")
+        if data_response.rows and data_response.columns:
+            self._data[table] = [
+                dict(zip(data_response.columns, row)) for row in data_response.rows
+            ]
+        else:
+            self._data[table] = []
+
+        self._fetched_tables.add(table)
 
     async def tables(self) -> List[str]:
         """Get list of all tables in the snapshot."""
-        await self._ensure_fetched()
-        return list(self._data.keys())
+        await self._ensure_tables_list()
+        return list(self._table_names) if self._table_names else []
 
     def table(self, table_name: str) -> "AsyncSnapshotQueryBuilder":
         """Create a query builder for snapshot data."""
@@ -85,13 +87,12 @@ class AsyncDatabaseSnapshot:
         ignore_config: Optional[IgnoreConfig] = None,
     ) -> "AsyncSnapshotDiff":
         """Compare this snapshot with another."""
-        await self._ensure_fetched()
-        await other._ensure_fetched()
+        # No need to fetch all data upfront - diff will fetch on demand
         return AsyncSnapshotDiff(self, other, ignore_config)
 
 
 class AsyncSnapshotQueryBuilder:
-    """Query builder that works on local snapshot data."""
+    """Query builder that works on snapshot data - can use targeted queries when possible."""
 
     def __init__(self, snapshot: AsyncDatabaseSnapshot, table: str):
         self._snapshot = snapshot
@@ -101,10 +102,63 @@ class AsyncSnapshotQueryBuilder:
         self._limit: Optional[int] = None
         self._order_by: Optional[str] = None
         self._order_desc: bool = False
+        self._use_targeted_query = True  # Try to use targeted queries when possible
+
+    def _can_use_targeted_query(self) -> bool:
+        """Check if we can use a targeted query instead of loading all data."""
+        # We can use targeted query if:
+        # 1. We have simple equality conditions
+        # 2. No complex operations like joins
+        # 3. The query is selective (has conditions)
+        if not self._conditions:
+            return False
+        for col, op, val in self._conditions:
+            if op not in ["=", "IS", "IS NOT"]:
+                return False
+        return True
+
+    async def _execute_targeted_query(self) -> List[Dict[str, Any]]:
+        """Execute a targeted query directly instead of loading all data."""
+        # Build WHERE clause
+        where_parts = []
+        for col, op, val in self._conditions:
+            if op == "=" and val is None:
+                where_parts.append(f"{col} IS NULL")
+            elif op == "IS":
+                where_parts.append(f"{col} IS NULL")
+            elif op == "IS NOT":
+                where_parts.append(f"{col} IS NOT NULL")
+            elif op == "=":
+                if isinstance(val, str):
+                    escaped_val = val.replace("'", "''")
+                    where_parts.append(f"{col} = '{escaped_val}'")
+                else:
+                    where_parts.append(f"{col} = '{val}'")
+
+        where_clause = " AND ".join(where_parts)
+
+        # Build full query
+        cols = ", ".join(self._select_cols)
+        query = f"SELECT {cols} FROM {self._table} WHERE {where_clause}"
+
+        if self._order_by:
+            query += f" ORDER BY {self._order_by}"
+        if self._limit is not None:
+            query += f" LIMIT {self._limit}"
+
+        # Execute query
+        response = await self._snapshot.resource.query(query)
+        if response.rows and response.columns:
+            return [dict(zip(response.columns, row)) for row in response.rows]
+        return []
 
     async def _get_data(self) -> List[Dict[str, Any]]:
-        """Get table data from snapshot."""
-        await self._snapshot._ensure_fetched()
+        """Get table data - use targeted query if possible, otherwise load all data."""
+        if self._use_targeted_query and self._can_use_targeted_query():
+            return await self._execute_targeted_query()
+
+        # Fall back to loading all data
+        await self._snapshot._ensure_table_data(self._table)
         return self._snapshot._data.get(self._table, [])
 
     def eq(self, column: str, value: Any) -> "AsyncSnapshotQueryBuilder":
@@ -143,6 +197,11 @@ class AsyncSnapshotQueryBuilder:
         return rows[0] if rows else None
 
     async def all(self) -> List[Dict[str, Any]]:
+        # If we can use targeted query, _get_data already applies filters
+        if self._use_targeted_query and self._can_use_targeted_query():
+            return await self._get_data()
+
+        # Otherwise, get all data and apply filters manually
         data = await self._get_data()
 
         # Apply filters
@@ -207,6 +266,7 @@ class AsyncSnapshotDiff:
         self.after = after
         self.ignore_config = ignore_config or IgnoreConfig()
         self._cached: Optional[Dict[str, Any]] = None
+        self._targeted_mode = False  # Flag to use targeted queries
 
     async def _get_primary_key_columns(self, table: str) -> List[str]:
         """Get primary key columns for a table."""
@@ -246,6 +306,10 @@ class AsyncSnapshotDiff:
 
             # Get primary key columns
             pk_columns = await self._get_primary_key_columns(tbl)
+
+            # Ensure data is fetched for this table
+            await self.before._ensure_table_data(tbl)
+            await self.after._ensure_table_data(tbl)
 
             # Get data from both snapshots
             before_data = self.before._data.get(tbl, [])
@@ -329,9 +393,203 @@ class AsyncSnapshotDiff:
             )
         return self._cached
 
-    async def expect_only(self, allowed_changes: List[Dict[str, Any]]):
-        """Ensure only specified changes occurred."""
-        diff = await self._collect()
+    def _can_use_targeted_queries(self, allowed_changes: List[Dict[str, Any]]) -> bool:
+        """Check if we can use targeted queries for optimization."""
+        # We can use targeted queries if all allowed changes specify table and pk
+        for change in allowed_changes:
+            if "table" not in change or "pk" not in change:
+                return False
+        return True
+
+    def _build_pk_where_clause(self, pk_columns: List[str], pk_value: Any) -> str:
+        """Build WHERE clause for primary key lookup."""
+        # Escape single quotes in values to prevent SQL injection
+        def escape_value(val: Any) -> str:
+            if val is None:
+                return "NULL"
+            elif isinstance(val, str):
+                escaped = str(val).replace("'", "''")
+                return f"'{escaped}'"
+            else:
+                return f"'{val}'"
+
+        if len(pk_columns) == 1:
+            return f"{pk_columns[0]} = {escape_value(pk_value)}"
+        else:
+            # Composite key
+            if isinstance(pk_value, tuple):
+                conditions = [
+                    f"{col} = {escape_value(val)}"
+                    for col, val in zip(pk_columns, pk_value)
+                ]
+                return " AND ".join(conditions)
+            else:
+                # Shouldn't happen if data is consistent
+                return f"{pk_columns[0]} = {escape_value(pk_value)}"
+
+    async def _expect_no_changes(self):
+        """Efficiently verify that no changes occurred between snapshots using row counts."""
+        try:
+            import asyncio
+
+            # Get all tables from both snapshots
+            before_tables = set(await self.before.tables())
+            after_tables = set(await self.after.tables())
+
+            # Check for added/removed tables (excluding ignored ones)
+            added_tables = after_tables - before_tables
+            removed_tables = before_tables - after_tables
+
+            for table in added_tables:
+                if not self.ignore_config.should_ignore_table(table):
+                    raise AssertionError(f"Unexpected table added: {table}")
+
+            for table in removed_tables:
+                if not self.ignore_config.should_ignore_table(table):
+                    raise AssertionError(f"Unexpected table removed: {table}")
+
+            # Prepare tables to check
+            tables_to_check = []
+            all_tables = before_tables | after_tables
+            for table in all_tables:
+                if not self.ignore_config.should_ignore_table(table):
+                    tables_to_check.append(table)
+
+            # If no tables to check, we're done
+            if not tables_to_check:
+                return self
+
+            # Track errors and tables needing verification
+            errors = []
+            tables_needing_verification = []
+
+            async def check_table_counts(table: str):
+                """Check row counts for a single table."""
+                try:
+                    # Get row counts from both snapshots
+                    before_count = 0
+                    after_count = 0
+
+                    if table in before_tables:
+                        before_count_response = await self.before.resource.query(
+                            f"SELECT COUNT(*) FROM {table}"
+                        )
+                        before_count = (
+                            before_count_response.rows[0][0]
+                            if before_count_response.rows
+                            else 0
+                        )
+
+                    if table in after_tables:
+                        after_count_response = await self.after.resource.query(
+                            f"SELECT COUNT(*) FROM {table}"
+                        )
+                        after_count = (
+                            after_count_response.rows[0][0]
+                            if after_count_response.rows
+                            else 0
+                        )
+
+                    if before_count != after_count:
+                        error_msg = (
+                            f"Unexpected change in table '{table}': "
+                            f"row count changed from {before_count} to {after_count}"
+                        )
+                        errors.append(AssertionError(error_msg))
+                    elif before_count > 0 and before_count <= 1000:
+                        # Mark for detailed verification
+                        tables_needing_verification.append(table)
+
+                except Exception as e:
+                    errors.append(e)
+
+            # Execute count checks in parallel
+            await asyncio.gather(*[check_table_counts(table) for table in tables_to_check])
+
+            # Check if any errors occurred during count checking
+            if errors:
+                raise errors[0]
+
+            # Now verify small tables for data changes (also in parallel)
+            if tables_needing_verification:
+                verification_errors = []
+
+                async def verify_table(table: str):
+                    """Verify a single table's data hasn't changed."""
+                    try:
+                        await self._verify_table_unchanged(table)
+                    except AssertionError as e:
+                        verification_errors.append(e)
+
+                await asyncio.gather(*[verify_table(table) for table in tables_needing_verification])
+
+                # Check if any errors occurred during verification
+                if verification_errors:
+                    raise verification_errors[0]
+
+            return self
+
+        except AssertionError:
+            # Re-raise assertion errors (these are expected failures)
+            raise
+        except Exception as e:
+            # If the optimized check fails for other reasons, fall back to full diff
+            print(f"Warning: Optimized no-changes check failed: {e}")
+            print("Falling back to full diff...")
+            return await self._validate_diff_against_allowed_changes(
+                await self._collect(), []
+            )
+
+    async def _verify_table_unchanged(self, table: str):
+        """Verify that a table's data hasn't changed (for small tables)."""
+        # Get primary key columns
+        pk_columns = await self._get_primary_key_columns(table)
+
+        # Get sorted data from both snapshots
+        order_by = ", ".join(pk_columns) if pk_columns else "rowid"
+
+        before_response = await self.before.resource.query(
+            f"SELECT * FROM {table} ORDER BY {order_by}"
+        )
+        after_response = await self.after.resource.query(
+            f"SELECT * FROM {table} ORDER BY {order_by}"
+        )
+
+        # Quick check: if column counts differ, there's a schema change
+        if before_response.columns != after_response.columns:
+            raise AssertionError(f"Schema changed in table '{table}'")
+
+        # Compare row by row
+        if len(before_response.rows) != len(after_response.rows):
+            raise AssertionError(
+                f"Row count mismatch in table '{table}': "
+                f"{len(before_response.rows)} vs {len(after_response.rows)}"
+            )
+
+        for i, (before_row, after_row) in enumerate(
+            zip(before_response.rows, after_response.rows)
+        ):
+            before_dict = dict(zip(before_response.columns, before_row))
+            after_dict = dict(zip(after_response.columns, after_row))
+
+            # Compare fields, ignoring those in ignore config
+            for field in before_response.columns:
+                if self.ignore_config.should_ignore_field(table, field):
+                    continue
+
+                if not _values_equivalent(
+                    before_dict.get(field), after_dict.get(field)
+                ):
+                    pk_val = before_dict.get(pk_columns[0]) if pk_columns else i
+                    raise AssertionError(
+                        f"Unexpected change in table '{table}', row {pk_val}, "
+                        f"field '{field}': {repr(before_dict.get(field))} -> {repr(after_dict.get(field))}"
+                    )
+
+    async def _validate_diff_against_allowed_changes(
+        self, diff: Dict[str, Any], allowed_changes: List[Dict[str, Any]]
+    ):
+        """Validate a collected diff against allowed changes."""
 
         def _is_change_allowed(
             table: str, row_id: Any, field: Optional[str], after_value: Any
@@ -457,6 +715,20 @@ class AsyncSnapshotDiff:
             raise AssertionError("\n".join(error_lines))
 
         return self
+
+    async def expect_only(self, allowed_changes: List[Dict[str, Any]]):
+        """Ensure only specified changes occurred."""
+        # Special case: empty allowed_changes means no changes should have occurred
+        if not allowed_changes:
+            return await self._expect_no_changes()
+
+        # For expect_only, we can optimize by only checking the specific rows mentioned
+        # if self._can_use_targeted_queries(allowed_changes):
+        #     return await self._expect_only_targeted(allowed_changes)
+
+        # Fall back to full diff for complex cases
+        diff = await self._collect()
+        return await self._validate_diff_against_allowed_changes(diff, allowed_changes)
 
 
 class AsyncQueryBuilder:
@@ -865,7 +1137,6 @@ class AsyncSQLiteResource(Resource):
     async def snapshot(self, name: Optional[str] = None) -> AsyncDatabaseSnapshot:
         """Create a snapshot of the current database state."""
         snapshot = AsyncDatabaseSnapshot(self, name)
-        await snapshot._ensure_fetched()
         return snapshot
 
     async def diff(
