@@ -289,6 +289,8 @@ def verifier_from_string(
     try:
         import inspect
         import re
+        import json
+        import string
         from .verifiers import SyncVerifierFunction
         from .verifiers.code import TASK_SUCCESSFUL_SCORE, TASK_FAILED_SCORE
         from .verifiers.db import IgnoreConfig
@@ -300,6 +302,39 @@ def verifier_from_string(
         cleaned_code = re.sub(r"from fleet import.*verifier.*\n", "", cleaned_code)
         cleaned_code = re.sub(r"import.*verifier.*\n", "", cleaned_code)
 
+        # Define helper functions for verifier execution
+        _TRANSLATOR = str.maketrans(string.punctuation, " " * len(string.punctuation))
+        
+        def _normalize_text(value: str) -> str:
+            text = value.lower().translate(_TRANSLATOR)
+            return "".join(text.split())
+        
+        def _stringify_content(content: Any) -> str:
+            if isinstance(content, (dict, list)):
+                return json.dumps(content, sort_keys=True)
+            return str(content)
+        
+        def normalized_contains(target: str, blob: Any) -> bool:
+            normalized_target = _normalize_text(target)
+            normalized_blob = _normalize_text(_stringify_content(blob))
+            return normalized_target in normalized_blob
+        
+        def extract_numbers(text: str) -> list:
+            cleaned_text = text.replace(',', '')
+            pattern = r'-?\d+\.?\d*'
+            matches = re.findall(pattern, cleaned_text)
+            return [float(num) for num in matches]
+        
+        def contains_number(text: str, target_number) -> bool:
+            numbers = extract_numbers(text)
+            try:
+                if isinstance(target_number, str):
+                    target_number = target_number.replace(',', '')
+                target = float(target_number)
+            except (ValueError, AttributeError):
+                return False
+            return target in numbers
+
         # Create a globals namespace with all required imports
         exec_globals = globals().copy()
         exec_globals.update(
@@ -308,6 +343,12 @@ def verifier_from_string(
                 "TASK_FAILED_SCORE": TASK_FAILED_SCORE,
                 "IgnoreConfig": IgnoreConfig,
                 "Environment": object,  # Add Environment type if needed
+                "normalized_contains": normalized_contains,
+                "extract_numbers": extract_numbers,
+                "contains_number": contains_number,
+                "json": json,
+                "re": re,
+                "string": string,
             }
         )
 
