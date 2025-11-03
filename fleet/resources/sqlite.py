@@ -675,16 +675,96 @@ class SyncQueryBuilder:
 
 
 class SQLiteResource(Resource):
-    def __init__(self, resource: ResourceModel, client: "SyncWrapper"):
+    def __init__(
+        self,
+        resource: ResourceModel,
+        client: Optional["SyncWrapper"] = None,
+        db_path: Optional[str] = None,
+    ):
         super().__init__(resource)
         self.client = client
+        self.db_path = db_path
+        self._mode = "direct" if db_path else "http"
+
+    @property
+    def mode(self) -> str:
+        """Return the mode of this resource: 'direct' (local file) or 'http' (remote API)."""
+        return self._mode
 
     def describe(self) -> DescribeResponse:
         """Describe the SQLite database schema."""
+        if self._mode == "direct":
+            return self._describe_direct()
+        else:
+            return self._describe_http()
+
+    def _describe_http(self) -> DescribeResponse:
+        """Describe database schema via HTTP API."""
         response = self.client.request(
             "GET", f"/resources/sqlite/{self.resource.name}/describe"
         )
         return DescribeResponse(**response.json())
+
+    def _describe_direct(self) -> DescribeResponse:
+        """Describe database schema from local file or in-memory database."""
+        try:
+            # Check if we need URI mode (for shared memory databases)
+            use_uri = 'mode=memory' in self.db_path
+            conn = sqlite3.connect(self.db_path, uri=use_uri)
+            cursor = conn.cursor()
+
+            # Get all tables
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+            table_names = [row[0] for row in cursor.fetchall()]
+
+            tables = []
+            for table_name in table_names:
+                # Get table info
+                cursor.execute(f"PRAGMA table_info({table_name})")
+                columns = cursor.fetchall()
+
+                # Get CREATE TABLE SQL
+                cursor.execute(
+                    f"SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+                    (table_name,)
+                )
+                sql_row = cursor.fetchone()
+                create_sql = sql_row[0] if sql_row else ""
+
+                table_schema = {
+                    "name": table_name,
+                    "sql": create_sql,
+                    "columns": [
+                        {
+                            "name": col[1],
+                            "type": col[2],
+                            "notnull": bool(col[3]),
+                            "default_value": col[4],
+                            "primary_key": col[5] > 0,
+                        }
+                        for col in columns
+                    ],
+                }
+                tables.append(table_schema)
+
+            conn.close()
+
+            return DescribeResponse(
+                success=True,
+                resource_name=self.resource.name,
+                tables=tables,
+                message="Schema retrieved from local file",
+            )
+        except Exception as e:
+            return DescribeResponse(
+                success=False,
+                resource_name=self.resource.name,
+                tables=None,
+                error=str(e),
+                message=f"Failed to describe database: {str(e)}",
+            )
 
     def query(self, query: str, args: Optional[List[Any]] = None) -> QueryResponse:
         return self._query(query, args, read_only=True)
@@ -695,6 +775,15 @@ class SQLiteResource(Resource):
     def _query(
         self, query: str, args: Optional[List[Any]] = None, read_only: bool = True
     ) -> QueryResponse:
+        if self._mode == "direct":
+            return self._query_direct(query, args, read_only)
+        else:
+            return self._query_http(query, args, read_only)
+
+    def _query_http(
+        self, query: str, args: Optional[List[Any]] = None, read_only: bool = True
+    ) -> QueryResponse:
+        """Execute query via HTTP API."""
         request = QueryRequest(query=query, args=args, read_only=read_only)
         response = self.client.request(
             "POST",
@@ -702,6 +791,59 @@ class SQLiteResource(Resource):
             json=request.model_dump(),
         )
         return QueryResponse(**response.json())
+
+    def _query_direct(
+        self, query: str, args: Optional[List[Any]] = None, read_only: bool = True
+    ) -> QueryResponse:
+        """Execute query directly on local SQLite file or in-memory database."""
+        try:
+            # Check if we need URI mode (for shared memory databases)
+            use_uri = 'mode=memory' in self.db_path
+            conn = sqlite3.connect(self.db_path, uri=use_uri)
+            cursor = conn.cursor()
+
+            # Execute the query
+            if args:
+                cursor.execute(query, args)
+            else:
+                cursor.execute(query)
+
+            # For write operations, commit the transaction
+            if not read_only:
+                conn.commit()
+
+            # Get column names if available
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+
+            # Fetch results for SELECT queries
+            rows = []
+            rows_affected = 0
+            last_insert_id = None
+
+            if cursor.description:  # SELECT query
+                rows = cursor.fetchall()
+            else:  # INSERT/UPDATE/DELETE
+                rows_affected = cursor.rowcount
+                last_insert_id = cursor.lastrowid if cursor.lastrowid else None
+
+            conn.close()
+
+            return QueryResponse(
+                success=True,
+                columns=columns if columns else None,
+                rows=rows if rows else None,
+                rows_affected=rows_affected if rows_affected > 0 else None,
+                last_insert_id=last_insert_id,
+                message="Query executed successfully",
+            )
+        except Exception as e:
+            return QueryResponse(
+                success=False,
+                columns=None,
+                rows=None,
+                error=str(e),
+                message=f"Query failed: {str(e)}",
+            )
 
     def table(self, table_name: str) -> SyncQueryBuilder:
         """Create a query builder for the specified table."""

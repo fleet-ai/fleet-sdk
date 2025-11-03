@@ -306,8 +306,11 @@ def verifier_from_string(
         # Remove lines like: @verifier(key="...")
         cleaned_code = re.sub(r"@verifier\([^)]*\)\s*\n", "", verifier_func)
         # Also remove the verifier import if present
-        cleaned_code = re.sub(r"from fleet import.*verifier.*\n", "", cleaned_code)
-        cleaned_code = re.sub(r"import.*verifier.*\n", "", cleaned_code)
+        # Use MULTILINE flag to match beginning of lines with ^
+        cleaned_code = re.sub(r"^from fleet\.verifiers.*import.*verifier.*$\n?", "", cleaned_code, flags=re.MULTILINE)
+        cleaned_code = re.sub(r"^from fleet import verifier.*$\n?", "", cleaned_code, flags=re.MULTILINE)
+        cleaned_code = re.sub(r"^import fleet\.verifiers.*$\n?", "", cleaned_code, flags=re.MULTILINE)
+        cleaned_code = re.sub(r"^import fleet$\n?", "", cleaned_code, flags=re.MULTILINE)
 
         # Define helper functions for verifier execution
         _TRANSLATOR = str.maketrans(string.punctuation, " " * len(string.punctuation))

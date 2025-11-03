@@ -21,7 +21,8 @@ import httpx
 import json
 import logging
 import os
-from typing import List, Optional, Dict, Any, TYPE_CHECKING
+from typing import List, Optional, Dict, Any, TYPE_CHECKING, Union
+from urllib.parse import urlparse
 
 from .base import EnvironmentBase, SyncWrapper
 from .models import (
@@ -49,6 +50,11 @@ from .instance import (
     ResetResponse,
     ExecuteFunctionResponse,
 )
+from .instance.models import (
+    Resource as ResourceModel,
+    ResourceType,
+    ResourceMode,
+)
 from .config import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_TIMEOUT,
@@ -71,6 +77,14 @@ class SyncEnv(EnvironmentBase):
         self._client = client
         self._apps: Dict[str, InstanceClient] = {}
         self._instance: Optional[InstanceClient] = None
+        self._manager_url_override: Optional[str] = None  # For URL mode
+
+    @property
+    def manager_url(self) -> str:
+        """Override to support URL mode where urls is None."""
+        if self._manager_url_override is not None:
+            return self._manager_url_override
+        return super().manager_url
 
     @property
     def instance(self) -> InstanceClient:
@@ -82,17 +96,17 @@ class SyncEnv(EnvironmentBase):
 
     def app(self, name: str) -> InstanceClient:
         if name not in self._apps:
-            # Extract base URL by removing the current app path (e.g., /sentry/api/v1/env)
-            # manager_url looks like: https://xxx.fleetai.com/sentry/api/v1/env
-            base_url = self.manager_url.split("/api/v1/env")[0]
-            # Remove the current app name (e.g., /sentry) to get the root
-            if "/" in base_url:
-                parts = base_url.rsplit("/", 1)
-                if len(parts) == 2 and parts[0] != "https:/":
-                    base_url = parts[0]
+            # Extract scheme://netloc from manager_url, then construct /{name}/api/v1/env
+            # Supports all URL formats:
+            #   https://host/api/v1/env -> https://host/{name}/api/v1/env
+            #   https://host/sentry/api/v1/env -> https://host/{name}/api/v1/env
+            #   http://localhost:8080/api/v1/env -> http://localhost:8080/{name}/api/v1/env
+            parsed = urlparse(self.manager_url)
+            root = f"{parsed.scheme}://{parsed.netloc}"
+            new_url = f"{root}/{name}/api/v1/env"
 
             self._apps[name] = InstanceClient(
-                f"{base_url}/{name}/api/v1/env",
+                new_url,
                 self._client.httpx_client if self._client else None,
             )
         return self._apps[name]
@@ -310,11 +324,165 @@ class Fleet:
             for instance_data in response.json()
         ]
 
-    def instance(self, instance_id: str) -> SyncEnv:
-        response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
-        instance = SyncEnv(client=self.client, **response.json())
-        instance.instance.load()
-        return instance
+    def instance(self, instance_id: Union[str, Dict[str, str]]) -> SyncEnv:
+        """Create or connect to an environment instance.
+
+        Supports three modes based on input type:
+        1. dict: Local filesystem mode - {"current": "./data.db", "seed": "./seed.db"}
+        2. str starting with http:// or https://: Localhost/URL mode
+        3. str (other): Remote cloud instance mode
+
+        Args:
+            instance_id: Instance identifier (str), URL (str starting with http://),
+                        or local db mapping (dict)
+
+        Returns:
+            SyncEnv: Environment instance
+        """
+        # Local filesystem mode - dict of resource names to file paths
+        if isinstance(instance_id, dict):
+            return self._create_local_instance(instance_id)
+
+        # Localhost/direct URL mode - string starting with http:// or https://
+        elif isinstance(instance_id, str) and instance_id.startswith(("http://", "https://")):
+            return self._create_url_instance(instance_id)
+
+        # Remote mode - existing behavior
+        else:
+            response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
+            instance = SyncEnv(client=self.client, **response.json())
+            instance.instance.load()
+            return instance
+
+    def _create_url_instance(self, base_url: str) -> SyncEnv:
+        """Create instance connected to a direct URL (localhost or custom).
+
+        Args:
+            base_url: URL of the instance manager API
+
+        Returns:
+            SyncEnv: Environment instance configured for URL mode
+        """
+        instance_client = InstanceClient(url=base_url, httpx_client=self._httpx_client)
+
+        # Create a minimal environment for URL mode
+        env = SyncEnv(
+            client=self.client,
+            instance_id=base_url,
+            env_key="localhost",
+            version="",
+            status="running",
+            subdomain="localhost",
+            created_at="",
+            updated_at="",
+            terminated_at=None,
+            team_id="",
+            region="localhost",
+            env_variables=None,
+            data_key=None,
+            data_version=None,
+            urls=None,
+            health=None,
+        )
+        env._instance = instance_client
+        env._manager_url_override = base_url  # Set manager_url for URL mode
+        return env
+
+    @staticmethod
+    def _normalize_db_path(path: str) -> tuple[str, bool]:
+        """Normalize database path and detect if it's in-memory.
+
+        Args:
+            path: Database path - can be:
+                  - File path: "./data.db"
+                  - Plain memory: ":memory:"
+                  - Named memory: ":memory:namespace"
+                  - URI: "file:name?mode=memory&cache=shared"
+
+        Returns:
+            Tuple of (normalized_path, is_memory)
+        """
+        import uuid
+        import sqlite3
+
+        if path == ":memory:":
+            # Plain :memory: - create unique namespace
+            name = f"mem_{uuid.uuid4().hex[:8]}"
+            return f"file:{name}?mode=memory&cache=shared", True
+        elif path.startswith(":memory:"):
+            # Named memory: :memory:current -> file:current?mode=memory&cache=shared
+            namespace = path[8:]  # Remove ":memory:" prefix
+            return f"file:{namespace}?mode=memory&cache=shared", True
+        elif "mode=memory" in path:
+            # Already a proper memory URI
+            return path, True
+        else:
+            # Regular file path
+            return path, False
+
+    def _create_local_instance(self, dbs: Dict[str, str]) -> SyncEnv:
+        """Create instance with local file-based or in-memory SQLite resources.
+
+        Args:
+            dbs: Map of resource names to paths (e.g., {"current": "./data.db"} or
+                 {"current": ":memory:current"})
+
+        Returns:
+            SyncEnv: Environment instance configured for local mode
+        """
+        import sqlite3
+
+        instance_client = InstanceClient(url="local://", httpx_client=None)
+        instance_client._resources = []  # Mark as loaded
+        instance_client._memory_anchors = {}  # Store anchor connections for in-memory DBs
+
+        # Store creation parameters for local SQLiteResources
+        # This allows db() to create new instances each time (matching HTTP mode behavior)
+        for name, path in dbs.items():
+            # Normalize path and detect if it's in-memory
+            normalized_path, is_memory = self._normalize_db_path(path)
+
+            # Create anchor connection for in-memory databases
+            # This keeps the database alive as long as the env exists
+            if is_memory:
+                anchor_conn = sqlite3.connect(normalized_path, uri=True)
+                instance_client._memory_anchors[name] = anchor_conn
+
+            resource_model = ResourceModel(
+                name=name,
+                type=ResourceType.db,
+                mode=ResourceMode.rw,
+                label=f"Local: {path}",
+            )
+            instance_client._resources_state[ResourceType.db.value][name] = {
+                'type': 'local',
+                'resource_model': resource_model,
+                'db_path': normalized_path,
+                'is_memory': is_memory
+            }
+
+        # Create a minimal environment for local mode
+        env = SyncEnv(
+            client=self.client,
+            instance_id="local",
+            env_key="local",
+            version="",
+            status="running",
+            subdomain="local",
+            created_at="",
+            updated_at="",
+            terminated_at=None,
+            team_id="",
+            region="local",
+            env_variables=None,
+            data_key=None,
+            data_version=None,
+            urls=None,
+            health=None,
+        )
+        env._instance = instance_client
+        env._manager_url_override = "local://"  # Set manager_url for local mode
+        return env
 
     def check_bundle_exists(self, bundle_hash: str) -> VerifiersCheckResponse:
         return _check_bundle_exists(self.client, bundle_hash)

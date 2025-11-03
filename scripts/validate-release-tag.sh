@@ -14,9 +14,9 @@ fi
 
 echo "Validating release tag: $RELEASE_TAG"
 
-# Check tag format: fleet-python-v*.*.*
-if [[ ! $RELEASE_TAG =~ ^fleet-python-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Error: Invalid tag format. Expected: fleet-python-v*.*.*"
+# Check tag format: fleet-python-v*.*.* or fleet-python-v*.*.*b* (for beta releases)
+if [[ ! $RELEASE_TAG =~ ^fleet-python-v[0-9]+\.[0-9]+\.[0-9]+(b[0-9]+)?$ ]]; then
+    echo "Error: Invalid tag format. Expected: fleet-python-v*.*.* or fleet-python-v*.*.*b* (for beta)"
     echo "Received: $RELEASE_TAG"
     exit 1
 fi
@@ -29,10 +29,15 @@ echo "Tag version: $TAG_VERSION"
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "HEAD" ]; then
     echo "Warning: Not on main branch. Current branch: $CURRENT_BRANCH"
-    # Check if the tag is reachable from main
-    if ! git merge-base --is-ancestor $(git rev-parse $RELEASE_TAG) $(git rev-parse origin/main) 2>/dev/null; then
-        echo "Error: Tag $RELEASE_TAG is not reachable from main branch"
-        exit 1
+    # Check if this is a beta release
+    if [[ $TAG_VERSION =~ b[0-9]+$ ]]; then
+        echo "Beta release detected on non-main branch - skipping main branch ancestry check"
+    else
+        # For non-beta releases, check if the tag is reachable from main
+        if ! git merge-base --is-ancestor $(git rev-parse $RELEASE_TAG) $(git rev-parse origin/main) 2>/dev/null; then
+            echo "Error: Tag $RELEASE_TAG is not reachable from main branch"
+            exit 1
+        fi
     fi
 fi
 
