@@ -396,9 +396,6 @@ def apply_verifiers_to_json(json_path: str, python_path: str) -> None:
                 # Also update metadata if it exists
                 if "metadata" in task and isinstance(task["metadata"], dict):
                     task["metadata"]["verifier_code"] = new_code
-                    # Increment version if it exists
-                    if "verifier_version" in task["metadata"]:
-                        task["metadata"]["verifier_version"] += 1
 
                 # Clear verifier_id and verifier_sha to force re-upload
                 task["verifier_id"] = None
