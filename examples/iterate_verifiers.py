@@ -377,6 +377,7 @@ def apply_verifiers_to_json(json_path: str, python_path: str) -> None:
 
     # Update tasks with new verifiers (only if changed)
     updated_count = 0
+    updated_keys = []
     not_found = []
 
     for task in tasks:
@@ -402,10 +403,16 @@ def apply_verifiers_to_json(json_path: str, python_path: str) -> None:
                 task["verifier_sha"] = None
 
                 updated_count += 1
+                updated_keys.append(task_key)
         else:
             not_found.append(task_key)
 
     print(f"\n✓ Updated {updated_count} task(s) with new verifiers")
+
+    if updated_keys:
+        print("\nUpdated task keys:")
+        for key in updated_keys:
+            print(f"  - {key}")
 
     if not_found:
         print(f"\n⚠ Warning: {len(not_found)} task(s) not found in Python file:")
