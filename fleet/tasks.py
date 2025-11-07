@@ -36,6 +36,7 @@ class Task(BaseModel):
     )
     verifier_id: Optional[str] = Field(None, description="Verifier identifier")
     verifier_sha: Optional[str] = Field(None, description="Verifier SHA256 hash")
+    verifier_runtime_version: Optional[str] = Field(None, description="Verifier runtime version")
     metadata: Optional[Dict[str, Any]] = Field(
         default_factory=dict, description="Additional task metadata"
     )
@@ -199,6 +200,7 @@ class Task(BaseModel):
                 verifier_id=verifier_id,
                 verifier_key=self.key,
                 sha256=self.verifier_sha or "",
+                verifier_runtime_version=self.verifier_runtime_version or "",
             )
             self.verifier = verifier
 
@@ -273,7 +275,7 @@ class Task(BaseModel):
 
 
 def verifier_from_string(
-    verifier_func: str, verifier_id: str, verifier_key: str, sha256: str = ""
+    verifier_func: str, verifier_id: str, verifier_key: str, sha256: str = "", verifier_runtime_version: str = ""
 ) -> "VerifierFunction":
     """Create a verifier function from string code.
 
@@ -380,6 +382,7 @@ def verifier_from_string(
             verifier_id=verifier_id,
             sha256=sha256,
             raw_code=verifier_func,
+            verifier_runtime_version=verifier_runtime_version if verifier_runtime_version else None,
         )
 
         # Store additional metadata

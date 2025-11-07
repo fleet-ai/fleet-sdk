@@ -42,6 +42,7 @@ class AsyncVerifierFunction:
         verifier_id: Optional[str] = None,
         sha256: Optional[str] = None,
         raw_code: Optional[str] = None,
+        verifier_runtime_version: Optional[str] = None,
     ):
         self.func = func
         self.key = key
@@ -52,6 +53,7 @@ class AsyncVerifierFunction:
         self._bundle_data: Optional[bytes] = None  # Cached bundle data
         self._raw_code: Optional[str] = raw_code  # Store raw code if provided
         self._is_async = asyncio.iscoroutinefunction(func)
+        self.verifier_runtime_version = verifier_runtime_version
 
         # Copy function metadata
         functools.update_wrapper(self, func)
@@ -251,6 +253,7 @@ Remote traceback:
                     args_array=args_array,
                     kwargs=kwargs,
                     needs_upload=True,
+                    verifier_runtime_version=self.verifier_runtime_version,
                 )
 
                 # logger.debug(f"Bundle {bundle_sha[:8]}... uploaded successfully")
@@ -267,6 +270,7 @@ Remote traceback:
                     args_array=args_array,
                     kwargs=kwargs,
                     needs_upload=False,
+                    verifier_runtime_version=self.verifier_runtime_version,
                 )
 
             return response
@@ -287,6 +291,7 @@ Remote traceback:
                     args_array=args_array,
                     kwargs=kwargs,
                     needs_upload=True,
+                    verifier_runtime_version=self.verifier_runtime_version,
                 )
                 return response
             else:
