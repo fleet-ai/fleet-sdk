@@ -172,6 +172,7 @@ class AsyncEnv(EnvironmentBase):
         kwargs: dict,
         timeout: Optional[int] = 30,
         needs_upload: bool = True,
+        verifier_runtime_version: Optional[str] = None,
     ) -> VerifiersExecuteResponse:
         return await _execute_verifier_remote(
             self._load_client,
@@ -184,6 +185,7 @@ class AsyncEnv(EnvironmentBase):
             kwargs,
             timeout,
             needs_upload,
+            verifier_runtime_version,
         )
 
     def __getstate__(self):
@@ -611,6 +613,11 @@ class AsyncFleet:
         if not verifier_id:
             verifier_id = task_json.get("key", task_json.get("id"))
 
+        # Extract verifier_runtime_version from metadata if present
+        verifier_runtime_version = None
+        if "metadata" in task_json and isinstance(task_json["metadata"], dict):
+            verifier_runtime_version = task_json["metadata"].get("verifier_runtime_version")
+
         try:
             if verifier_id and verifier_code:
                 verifier = await self._create_verifier_from_data(
@@ -618,6 +625,7 @@ class AsyncFleet:
                     verifier_key=task_json.get("key", task_json.get("id")),
                     verifier_code=verifier_code,
                     verifier_sha=verifier_sha,
+                    verifier_runtime_version=verifier_runtime_version,
                 )
         except Exception as e:
             error_msg = f"Failed to create verifier {task_json.get('key', task_json.get('id'))}: {e}"
@@ -641,6 +649,7 @@ class AsyncFleet:
             verifier=verifier,  # Use created verifier or None
             verifier_id=verifier_id,  # Set verifier_id so _rebuild_verifier works
             verifier_sha=verifier_sha,  # Set verifier_sha
+            verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
             metadata=task_json.get("metadata", {}),  # Default empty metadata
             output_json_schema=task_json.get("output_json_schema"),  # JSON schema for output
         )
@@ -999,7 +1008,7 @@ class AsyncFleet:
         return TaskResponse(**response.json())
 
     async def _create_verifier_from_data(
-        self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str
+        self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str, verifier_runtime_version: Optional[str] = None
     ) -> "AsyncVerifierFunction":
         """Create an AsyncVerifierFunction from verifier data.
 
@@ -1020,6 +1029,7 @@ class AsyncFleet:
             verifier_id=verifier_id,
             verifier_key=verifier_key,
             sha256=verifier_sha,
+            verifier_runtime_version=verifier_runtime_version or "",
         )
 
         # Store the original verifier code for reference
@@ -1104,6 +1114,7 @@ async def _execute_verifier_remote(
     kwargs: dict,
     timeout: Optional[int] = 30,
     needs_upload: bool = True,
+    verifier_runtime_version: Optional[str] = None,
 ) -> VerifiersExecuteResponse:
     # Pickle args and kwargs together
     # The first arg should be None as a placeholder for env
@@ -1126,6 +1137,10 @@ async def _execute_verifier_remote(
     if needs_upload:
         bundle_b64 = base64.b64encode(bundle_data).decode("utf-8")
         request_data["bundle"] = bundle_b64
+
+    # Add verifier_runtime_version if present
+    if verifier_runtime_version:
+        request_data["verifier_runtime_version"] = verifier_runtime_version
 
     # Debug logging
     # logger.debug(
