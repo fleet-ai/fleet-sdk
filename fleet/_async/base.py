@@ -2,6 +2,7 @@ import httpx
 from typing import Dict, Any, Optional
 import json
 import logging
+import time
 import uuid
 
 from ..models import InstanceResponse
@@ -51,11 +52,14 @@ class BaseWrapper:
             "X-Fleet-SDK-Version": __version__,
         }
         headers["Authorization"] = f"Bearer {self.api_key}"
-        
+
         # Add request ID for idempotency (persists across retries)
         if request_id:
             headers["X-Request-ID"] = request_id
-        
+
+        # Add timestamp for all requests
+        headers["X-Request-Timestamp"] = str(int(time.time() * 1000))
+
         return headers
 
 
