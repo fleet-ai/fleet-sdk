@@ -136,7 +136,7 @@ class InstanceClient:
 
     def _load_resources(self) -> None:
         if self._resources is None:
-            response = self.client.request("GET", "/resources", timeout=1.0)
+            response = self.client.request("GET", "/resources")
             if response.status_code != 200:
                 self._resources = []
                 return
