@@ -44,7 +44,7 @@ from ..types import VerifierFunction
 from .. import env
 from . import global_client as _async_global_client
 
-__version__ = "0.2.72"
+__version__ = "0.2.74"
 
 __all__ = [
     # Core classes
