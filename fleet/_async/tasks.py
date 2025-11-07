@@ -280,7 +280,7 @@ class Task(BaseModel):
 
 
 def verifier_from_string(
-    verifier_func: str, verifier_id: str, verifier_key: str, sha256: str = ""
+    verifier_func: str, verifier_id: str, verifier_key: str, sha256: str = "", verifier_runtime_version: str = ""
 ) -> "VerifierFunction":
     """Create a verifier function from string code.
 
@@ -289,6 +289,7 @@ def verifier_from_string(
         verifier_id: Unique identifier for the verifier
         verifier_key: Key/name for the verifier
         sha256: SHA256 hash of the verifier code
+        verifier_runtime_version: Verifier runtime version
 
     Returns:
         VerifierFunction instance that can be used to verify tasks
@@ -381,6 +382,7 @@ def verifier_from_string(
             verifier_id=verifier_id,
             sha256=sha256,
             raw_code=verifier_func,
+            verifier_runtime_version=verifier_runtime_version if verifier_runtime_version else None,
         )
 
         return verifier_instance

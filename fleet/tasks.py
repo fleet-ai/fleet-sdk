@@ -284,6 +284,7 @@ def verifier_from_string(
         verifier_id: Unique identifier for the verifier
         verifier_key: Key/name for the verifier
         sha256: SHA256 hash of the verifier code
+        verifier_runtime_version: Verifier runtime version
 
     Returns:
         VerifierFunction instance that can be used to verify tasks
