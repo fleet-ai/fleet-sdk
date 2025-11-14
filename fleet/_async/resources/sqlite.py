@@ -296,19 +296,30 @@ class AsyncSnapshotDiff:
         if self._cached is not None:
             return self._cached
             
-        all_tables = set(await self.before.tables()) | set(await self.after.tables())
+        before_tables = set(await self.before.tables())
+        after_tables = set(await self.after.tables())
+        all_tables = before_tables | after_tables
         diff: dict[str, dict[str, Any]] = {}
-        
+
         for tbl in all_tables:
             if self.ignore_config.should_ignore_table(tbl):
                 continue
-                
+
             # Get primary key columns
             pk_columns = await self._get_primary_key_columns(tbl)
-            
-            # Get data from both snapshots
-            before_data = self.before._data.get(tbl, [])
-            after_data = self.after._data.get(tbl, [])
+
+            # Get data from both snapshots, fetching table contents on demand
+            if tbl in before_tables:
+                await self.before._ensure_table_data(tbl)
+                before_data = self.before._data.get(tbl, [])
+            else:
+                before_data = []
+
+            if tbl in after_tables:
+                await self.after._ensure_table_data(tbl)
+                after_data = self.after._data.get(tbl, [])
+            else:
+                after_data = []
             
             # Create indexes by primary key
             def make_key(row: dict, pk_cols: list[str]) -> Any:
