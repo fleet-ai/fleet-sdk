@@ -255,50 +255,51 @@ class AsyncSnapshotQueryBuilder:
 
 class AsyncSnapshotDiff:
     """Compute & validate changes between two snapshots fetched via API."""
-
+    
     def __init__(
         self,
         before: AsyncDatabaseSnapshot,
         after: AsyncDatabaseSnapshot,
-        ignore_config: Optional[IgnoreConfig] = None,
+        ignore_config: IgnoreConfig | None = None,
     ):
         self.before = before
         self.after = after
         self.ignore_config = ignore_config or IgnoreConfig()
-        self._cached: Optional[Dict[str, Any]] = None
-        self._targeted_mode = False  # Flag to use targeted queries
-
-    async def _get_primary_key_columns(self, table: str) -> List[str]:
+        self._cached: dict[str, Any] | None = None
+        
+    async def _get_primary_key_columns(self, table: str) -> list[str]:
         """Get primary key columns for a table."""
         # Try to get from schema
         schema_response = await self.after.resource.query(f"PRAGMA table_info({table})")
         if not schema_response.rows:
             return ["id"]  # Default fallback
-
+            
         pk_columns = []
         for row in schema_response.rows:
             # row format: (cid, name, type, notnull, dflt_value, pk)
             if row[5] > 0:  # pk > 0 means it's part of primary key
                 pk_columns.append((row[5], row[1]))  # (pk_position, column_name)
-
+                
         if not pk_columns:
             # Try common defaults
             all_columns = [row[1] for row in schema_response.rows]
             if "id" in all_columns:
                 return ["id"]
             return ["rowid"]
-
+            
         # Sort by primary key position and return just the column names
         pk_columns.sort(key=lambda x: x[0])
         return [col[1] for col in pk_columns]
-
+        
     async def _collect(self):
         """Collect all differences between snapshots."""
         if self._cached is not None:
             return self._cached
-
-        all_tables = set(await self.before.tables()) | set(await self.after.tables())
-        diff: Dict[str, Dict[str, Any]] = {}
+            
+        before_tables = set(await self.before.tables())
+        after_tables = set(await self.after.tables())
+        all_tables = before_tables | after_tables
+        diff: dict[str, dict[str, Any]] = {}
 
         for tbl in all_tables:
             if self.ignore_config.should_ignore_table(tbl):
@@ -307,26 +308,31 @@ class AsyncSnapshotDiff:
             # Get primary key columns
             pk_columns = await self._get_primary_key_columns(tbl)
 
-            # Ensure data is fetched for this table
-            await self.before._ensure_table_data(tbl)
-            await self.after._ensure_table_data(tbl)
+            # Get data from both snapshots, fetching table contents on demand
+            if tbl in before_tables:
+                await self.before._ensure_table_data(tbl)
+                before_data = self.before._data.get(tbl, [])
+            else:
+                before_data = []
 
-            # Get data from both snapshots
-            before_data = self.before._data.get(tbl, [])
-            after_data = self.after._data.get(tbl, [])
-
+            if tbl in after_tables:
+                await self.after._ensure_table_data(tbl)
+                after_data = self.after._data.get(tbl, [])
+            else:
+                after_data = []
+            
             # Create indexes by primary key
-            def make_key(row: dict, pk_cols: List[str]) -> Any:
+            def make_key(row: dict, pk_cols: list[str]) -> Any:
                 if len(pk_cols) == 1:
                     return row.get(pk_cols[0])
                 return tuple(row.get(col) for col in pk_cols)
-
+                
             before_index = {make_key(row, pk_columns): row for row in before_data}
             after_index = {make_key(row, pk_columns): row for row in after_data}
-
+            
             before_keys = set(before_index.keys())
             after_keys = set(after_index.keys())
-
+            
             # Find changes
             result = {
                 "table_name": tbl,
@@ -337,23 +343,27 @@ class AsyncSnapshotDiff:
                 "unchanged_count": 0,
                 "total_changes": 0,
             }
-
+            
             # Added rows
             for key in after_keys - before_keys:
-                result["added_rows"].append({"row_id": key, "data": after_index[key]})
-
+                result["added_rows"].append({
+                    "row_id": key,
+                    "data": after_index[key]
+                })
+                
             # Removed rows
             for key in before_keys - after_keys:
-                result["removed_rows"].append(
-                    {"row_id": key, "data": before_index[key]}
-                )
-
+                result["removed_rows"].append({
+                    "row_id": key,
+                    "data": before_index[key]
+                })
+                
             # Modified rows
             for key in before_keys & after_keys:
                 before_row = before_index[key]
                 after_row = after_index[key]
                 changes = {}
-
+                
                 for field in set(before_row.keys()) | set(after_row.keys()):
                     if self.ignore_config.should_ignore_field(tbl, field):
                         continue
@@ -361,413 +371,33 @@ class AsyncSnapshotDiff:
                     after_val = after_row.get(field)
                     if not _values_equivalent(before_val, after_val):
                         changes[field] = {"before": before_val, "after": after_val}
-
+                        
                 if changes:
-                    result["modified_rows"].append(
-                        {
-                            "row_id": key,
-                            "changes": changes,
-                            "data": after_row,  # Current state
-                        }
-                    )
+                    result["modified_rows"].append({
+                        "row_id": key,
+                        "changes": changes,
+                        "data": after_row  # Current state
+                    })
                 else:
                     result["unchanged_count"] += 1
-
+                    
             result["total_changes"] = (
-                len(result["added_rows"])
-                + len(result["removed_rows"])
-                + len(result["modified_rows"])
+                len(result["added_rows"]) +
+                len(result["removed_rows"]) +
+                len(result["modified_rows"])
             )
-
+            
             diff[tbl] = result
-
+            
         self._cached = diff
         return diff
-
-    @property
-    def changes(self) -> Dict[str, Dict[str, Any]]:
-        """Expose cached changes; ensure callers awaited a diff-producing method first."""
-        if self._cached is None:
-            raise RuntimeError(
-                "Diff not collected yet; await an operation like expect_only() first."
-            )
-        return self._cached
-
-    def _can_use_targeted_queries(self, allowed_changes: List[Dict[str, Any]]) -> bool:
-        """Check if we can use targeted queries for optimization."""
-        # We can use targeted queries if all allowed changes specify table and pk
-        for change in allowed_changes:
-            if "table" not in change or "pk" not in change:
-                return False
-        return True
-
-    def _build_pk_where_clause(self, pk_columns: List[str], pk_value: Any) -> str:
-        """Build WHERE clause for primary key lookup."""
-        # Escape single quotes in values to prevent SQL injection
-        def escape_value(val: Any) -> str:
-            if val is None:
-                return "NULL"
-            elif isinstance(val, str):
-                escaped = str(val).replace("'", "''")
-                return f"'{escaped}'"
-            else:
-                return f"'{val}'"
-
-        if len(pk_columns) == 1:
-            return f"{pk_columns[0]} = {escape_value(pk_value)}"
-        else:
-            # Composite key
-            if isinstance(pk_value, tuple):
-                conditions = [
-                    f"{col} = {escape_value(val)}"
-                    for col, val in zip(pk_columns, pk_value)
-                ]
-                return " AND ".join(conditions)
-            else:
-                # Shouldn't happen if data is consistent
-                return f"{pk_columns[0]} = {escape_value(pk_value)}"
-
-    async def _expect_no_changes(self):
-        """Efficiently verify that no changes occurred between snapshots using row counts."""
-        try:
-            import asyncio
-
-            # Get all tables from both snapshots
-            before_tables = set(await self.before.tables())
-            after_tables = set(await self.after.tables())
-
-            # Check for added/removed tables (excluding ignored ones)
-            added_tables = after_tables - before_tables
-            removed_tables = before_tables - after_tables
-
-            for table in added_tables:
-                if not self.ignore_config.should_ignore_table(table):
-                    raise AssertionError(f"Unexpected table added: {table}")
-
-            for table in removed_tables:
-                if not self.ignore_config.should_ignore_table(table):
-                    raise AssertionError(f"Unexpected table removed: {table}")
-
-            # Prepare tables to check
-            tables_to_check = []
-            all_tables = before_tables | after_tables
-            for table in all_tables:
-                if not self.ignore_config.should_ignore_table(table):
-                    tables_to_check.append(table)
-
-            # If no tables to check, we're done
-            if not tables_to_check:
-                return self
-
-            # Track errors and tables needing verification
-            errors = []
-            tables_needing_verification = []
-
-            async def check_table_counts(table: str):
-                """Check row counts for a single table."""
-                try:
-                    # Get row counts from both snapshots
-                    before_count = 0
-                    after_count = 0
-
-                    if table in before_tables:
-                        before_count_response = await self.before.resource.query(
-                            f"SELECT COUNT(*) FROM {table}"
-                        )
-                        before_count = (
-                            before_count_response.rows[0][0]
-                            if before_count_response.rows
-                            else 0
-                        )
-
-                    if table in after_tables:
-                        after_count_response = await self.after.resource.query(
-                            f"SELECT COUNT(*) FROM {table}"
-                        )
-                        after_count = (
-                            after_count_response.rows[0][0]
-                            if after_count_response.rows
-                            else 0
-                        )
-
-                    if before_count != after_count:
-                        error_msg = (
-                            f"Unexpected change in table '{table}': "
-                            f"row count changed from {before_count} to {after_count}"
-                        )
-                        errors.append(AssertionError(error_msg))
-                    elif before_count > 0 and before_count <= 1000:
-                        # Mark for detailed verification
-                        tables_needing_verification.append(table)
-
-                except Exception as e:
-                    errors.append(e)
-
-            # Execute count checks in parallel
-            await asyncio.gather(*[check_table_counts(table) for table in tables_to_check])
-
-            # Check if any errors occurred during count checking
-            if errors:
-                raise errors[0]
-
-            # Now verify small tables for data changes (also in parallel)
-            if tables_needing_verification:
-                verification_errors = []
-
-                async def verify_table(table: str):
-                    """Verify a single table's data hasn't changed."""
-                    try:
-                        await self._verify_table_unchanged(table)
-                    except AssertionError as e:
-                        verification_errors.append(e)
-
-                await asyncio.gather(*[verify_table(table) for table in tables_needing_verification])
-
-                # Check if any errors occurred during verification
-                if verification_errors:
-                    raise verification_errors[0]
-
-            return self
-
-        except AssertionError:
-            # Re-raise assertion errors (these are expected failures)
-            raise
-        except Exception as e:
-            # If the optimized check fails for other reasons, fall back to full diff
-            print(f"Warning: Optimized no-changes check failed: {e}")
-            print("Falling back to full diff...")
-            return await self._validate_diff_against_allowed_changes(
-                await self._collect(), []
-            )
-
-    async def _verify_table_unchanged(self, table: str):
-        """Verify that a table's data hasn't changed (for small tables)."""
-        # Get primary key columns
-        pk_columns = await self._get_primary_key_columns(table)
-
-        # Get sorted data from both snapshots
-        order_by = ", ".join(pk_columns) if pk_columns else "rowid"
-
-        before_response = await self.before.resource.query(
-            f"SELECT * FROM {table} ORDER BY {order_by}"
-        )
-        after_response = await self.after.resource.query(
-            f"SELECT * FROM {table} ORDER BY {order_by}"
-        )
-
-        # Quick check: if column counts differ, there's a schema change
-        if before_response.columns != after_response.columns:
-            raise AssertionError(f"Schema changed in table '{table}'")
-
-        # Compare row by row
-        if len(before_response.rows) != len(after_response.rows):
-            raise AssertionError(
-                f"Row count mismatch in table '{table}': "
-                f"{len(before_response.rows)} vs {len(after_response.rows)}"
-            )
-
-        for i, (before_row, after_row) in enumerate(
-            zip(before_response.rows, after_response.rows)
-        ):
-            before_dict = dict(zip(before_response.columns, before_row))
-            after_dict = dict(zip(after_response.columns, after_row))
-
-            # Compare fields, ignoring those in ignore config
-            for field in before_response.columns:
-                if self.ignore_config.should_ignore_field(table, field):
-                    continue
-
-                if not _values_equivalent(
-                    before_dict.get(field), after_dict.get(field)
-                ):
-                    pk_val = before_dict.get(pk_columns[0]) if pk_columns else i
-                    raise AssertionError(
-                        f"Unexpected change in table '{table}', row {pk_val}, "
-                        f"field '{field}': {repr(before_dict.get(field))} -> {repr(after_dict.get(field))}"
-                    )
-
-    def _is_field_change_allowed(
-        self, table_changes: List[Dict[str, Any]], pk: Any, field: str, after_val: Any
-    ) -> bool:
-        """Check if a specific field change is allowed."""
-        for change in table_changes:
-            if (
-                str(change.get("pk")) == str(pk)
-                and change.get("field") == field
-                and _values_equivalent(change.get("after"), after_val)
-            ):
-                return True
-        return False
-
-    def _is_row_change_allowed(
-        self, table_changes: List[Dict[str, Any]], pk: Any, change_type: str
-    ) -> bool:
-        """Check if a row addition/deletion is allowed."""
-        for change in table_changes:
-            if str(change.get("pk")) == str(pk) and change.get("after") == change_type:
-                return True
-        return False
-
-    async def _expect_only_targeted(self, allowed_changes: List[Dict[str, Any]]):
-        """Optimized version that only queries specific rows mentioned in allowed_changes."""
-        import asyncio
-
-        # Group allowed changes by table
-        changes_by_table: Dict[str, List[Dict[str, Any]]] = {}
-        for change in allowed_changes:
-            table = change["table"]
-            if table not in changes_by_table:
-                changes_by_table[table] = []
-            changes_by_table[table].append(change)
-
-        errors = []
-
-        # Function to check a single row
-        async def check_row(
-            table: str,
-            pk: Any,
-            table_changes: List[Dict[str, Any]],
-            pk_columns: List[str],
-        ):
-            try:
-                # Build WHERE clause for this PK
-                where_sql = self._build_pk_where_clause(pk_columns, pk)
-
-                # Query before snapshot
-                before_query = f"SELECT * FROM {table} WHERE {where_sql}"
-                before_response = await self.before.resource.query(before_query)
-                before_row = (
-                    dict(zip(before_response.columns, before_response.rows[0]))
-                    if before_response.rows
-                    else None
-                )
-
-                # Query after snapshot
-                after_response = await self.after.resource.query(before_query)
-                after_row = (
-                    dict(zip(after_response.columns, after_response.rows[0]))
-                    if after_response.rows
-                    else None
-                )
-
-                # Check changes for this row
-                if before_row and after_row:
-                    # Modified row - check fields
-                    for field in set(before_row.keys()) | set(after_row.keys()):
-                        if self.ignore_config.should_ignore_field(table, field):
-                            continue
-                        before_val = before_row.get(field)
-                        after_val = after_row.get(field)
-                        if not _values_equivalent(before_val, after_val):
-                            # Check if this change is allowed
-                            if not self._is_field_change_allowed(
-                                table_changes, pk, field, after_val
-                            ):
-                                error_msg = (
-                                    f"Unexpected change in table '{table}', "
-                                    f"row {pk}, field '{field}': "
-                                    f"{repr(before_val)} -> {repr(after_val)}"
-                                )
-                                errors.append(AssertionError(error_msg))
-                                return  # Stop checking this row
-                elif not before_row and after_row:
-                    # Added row
-                    if not self._is_row_change_allowed(table_changes, pk, "__added__"):
-                        error_msg = f"Unexpected row added in table '{table}': {pk}"
-                        errors.append(AssertionError(error_msg))
-                elif before_row and not after_row:
-                    # Removed row
-                    if not self._is_row_change_allowed(table_changes, pk, "__removed__"):
-                        error_msg = f"Unexpected row removed from table '{table}': {pk}"
-                        errors.append(AssertionError(error_msg))
-            except Exception as e:
-                errors.append(e)
-
-        # Prepare all row checks
-        row_checks = []
-        for table, table_changes in changes_by_table.items():
-            if self.ignore_config.should_ignore_table(table):
-                continue
-
-            # Get primary key columns once per table
-            pk_columns = await self._get_primary_key_columns(table)
-
-            # Extract unique PKs to check
-            pks_to_check = {change["pk"] for change in table_changes}
-
-            for pk in pks_to_check:
-                row_checks.append((table, pk, table_changes, pk_columns))
-
-        # Execute row checks in parallel
-        if row_checks:
-            await asyncio.gather(
-                *[
-                    check_row(table, pk, table_changes, pk_columns)
-                    for table, pk, table_changes, pk_columns in row_checks
-                ]
-            )
-
-        # Check for errors from row checks
-        if errors:
-            raise errors[0]
-
-        # Now check tables not mentioned in allowed_changes to ensure no changes
-        all_tables = set(await self.before.tables()) | set(await self.after.tables())
-        tables_to_verify = []
-
-        for table in all_tables:
-            if (
-                table not in changes_by_table
-                and not self.ignore_config.should_ignore_table(table)
-            ):
-                tables_to_verify.append(table)
-
-        # Function to verify no changes in a table
-        async def verify_no_changes(table: str):
-            try:
-                # For tables with no allowed changes, just check row counts
-                before_count_response = await self.before.resource.query(
-                    f"SELECT COUNT(*) FROM {table}"
-                )
-                before_count = (
-                    before_count_response.rows[0][0]
-                    if before_count_response.rows
-                    else 0
-                )
-
-                after_count_response = await self.after.resource.query(
-                    f"SELECT COUNT(*) FROM {table}"
-                )
-                after_count = (
-                    after_count_response.rows[0][0] if after_count_response.rows else 0
-                )
-
-                if before_count != after_count:
-                    error_msg = (
-                        f"Unexpected change in table '{table}': "
-                        f"row count changed from {before_count} to {after_count}"
-                    )
-                    errors.append(AssertionError(error_msg))
-            except Exception as e:
-                errors.append(e)
-
-        # Execute table verification in parallel
-        if tables_to_verify:
-            await asyncio.gather(*[verify_no_changes(table) for table in tables_to_verify])
-
-        # Final error check
-        if errors:
-            raise errors[0]
-
-        return self
-
-    async def _validate_diff_against_allowed_changes(
-        self, diff: Dict[str, Any], allowed_changes: List[Dict[str, Any]]
-    ):
-        """Validate a collected diff against allowed changes."""
-
+        
+    async def expect_only(self, allowed_changes: list[dict[str, Any]]):
+        """Ensure only specified changes occurred."""
+        diff = await self._collect()
+        
         def _is_change_allowed(
-            table: str, row_id: Any, field: Optional[str], after_value: Any
+            table: str, row_id: Any, field: str | None, after_value: Any
         ) -> bool:
             """Check if a change is in the allowed list using semantic comparison."""
             for allowed in allowed_changes:
@@ -776,7 +406,7 @@ class AsyncSnapshotDiff:
                 pk_match = (
                     str(allowed_pk) == str(row_id) if allowed_pk is not None else False
                 )
-
+                
                 if (
                     allowed["table"] == table
                     and pk_match
@@ -785,65 +415,57 @@ class AsyncSnapshotDiff:
                 ):
                     return True
             return False
-
+            
         # Collect all unexpected changes
         unexpected_changes = []
-
+        
         for tbl, report in diff.items():
             for row in report.get("modified_rows", []):
                 for f, vals in row["changes"].items():
                     if self.ignore_config.should_ignore_field(tbl, f):
                         continue
                     if not _is_change_allowed(tbl, row["row_id"], f, vals["after"]):
-                        unexpected_changes.append(
-                            {
-                                "type": "modification",
-                                "table": tbl,
-                                "row_id": row["row_id"],
-                                "field": f,
-                                "before": vals.get("before"),
-                                "after": vals["after"],
-                                "full_row": row,
-                            }
-                        )
-
+                        unexpected_changes.append({
+                            "type": "modification",
+                            "table": tbl,
+                            "row_id": row["row_id"],
+                            "field": f,
+                            "before": vals.get("before"),
+                            "after": vals["after"],
+                            "full_row": row,
+                        })
+                        
             for row in report.get("added_rows", []):
                 if not _is_change_allowed(tbl, row["row_id"], None, "__added__"):
-                    unexpected_changes.append(
-                        {
-                            "type": "insertion",
-                            "table": tbl,
-                            "row_id": row["row_id"],
-                            "field": None,
-                            "after": "__added__",
-                            "full_row": row,
-                        }
-                    )
-
+                    unexpected_changes.append({
+                        "type": "insertion",
+                        "table": tbl,
+                        "row_id": row["row_id"],
+                        "field": None,
+                        "after": "__added__",
+                        "full_row": row,
+                    })
+                    
             for row in report.get("removed_rows", []):
                 if not _is_change_allowed(tbl, row["row_id"], None, "__removed__"):
-                    unexpected_changes.append(
-                        {
-                            "type": "deletion",
-                            "table": tbl,
-                            "row_id": row["row_id"],
-                            "field": None,
-                            "after": "__removed__",
-                            "full_row": row,
-                        }
-                    )
-
+                    unexpected_changes.append({
+                        "type": "deletion",
+                        "table": tbl,
+                        "row_id": row["row_id"],
+                        "field": None,
+                        "after": "__removed__",
+                        "full_row": row,
+                    })
+                    
         if unexpected_changes:
             # Build comprehensive error message
             error_lines = ["Unexpected database changes detected:"]
             error_lines.append("")
-
+            
             for i, change in enumerate(unexpected_changes[:5], 1):
-                error_lines.append(
-                    f"{i}. {change['type'].upper()} in table '{change['table']}':"
-                )
+                error_lines.append(f"{i}. {change['type'].upper()} in table '{change['table']}':")
                 error_lines.append(f"   Row ID: {change['row_id']}")
-
+                
                 if change["type"] == "modification":
                     error_lines.append(f"   Field: {change['field']}")
                     error_lines.append(f"   Before: {repr(change['before'])}")
@@ -852,7 +474,7 @@ class AsyncSnapshotDiff:
                     error_lines.append("   New row added")
                 elif change["type"] == "deletion":
                     error_lines.append("   Row deleted")
-
+                    
                 # Show some context from the row
                 if "full_row" in change and change["full_row"]:
                     row_data = change["full_row"]
@@ -861,15 +483,13 @@ class AsyncSnapshotDiff:
                             row_data.get("data", {}), max_fields=5
                         )
                         error_lines.append(f"   Row data: {formatted_row}")
-
+                        
                 error_lines.append("")
-
+                
             if len(unexpected_changes) > 5:
-                error_lines.append(
-                    f"... and {len(unexpected_changes) - 5} more unexpected changes"
-                )
+                error_lines.append(f"... and {len(unexpected_changes) - 5} more unexpected changes")
                 error_lines.append("")
-
+                
             # Show what changes were allowed
             error_lines.append("Allowed changes were:")
             if allowed_changes:
@@ -881,29 +501,13 @@ class AsyncSnapshotDiff:
                         f"After: {repr(allowed.get('after'))}"
                     )
                 if len(allowed_changes) > 3:
-                    error_lines.append(
-                        f"  ... and {len(allowed_changes) - 3} more allowed changes"
-                    )
+                    error_lines.append(f"  ... and {len(allowed_changes) - 3} more allowed changes")
             else:
                 error_lines.append("  (No changes were allowed)")
-
+                
             raise AssertionError("\n".join(error_lines))
-
+            
         return self
-
-    async def expect_only(self, allowed_changes: List[Dict[str, Any]]):
-        """Ensure only specified changes occurred."""
-        # Special case: empty allowed_changes means no changes should have occurred
-        if not allowed_changes:
-            return await self._expect_no_changes()
-
-        # For expect_only, we can optimize by only checking the specific rows mentioned
-        if self._can_use_targeted_queries(allowed_changes):
-            return await self._expect_only_targeted(allowed_changes)
-
-        # Fall back to full diff for complex cases
-        diff = await self._collect()
-        return await self._validate_diff_against_allowed_changes(diff, allowed_changes)
 
 
 class AsyncQueryBuilder:
