@@ -1317,7 +1317,7 @@ class SyncSnapshotDiff:
                     if "fields" in allowed:
                         # Show bulk fields spec
                         fields_summary = ", ".join(
-                            f[0] if len(f) == 1 else f"{f[0]}={repr(f[1])}"
+                            f[0] if len(f) == 1 else f"{f[0]}={'NOT_CHECKED' if f[1] is ... else repr(f[1])}"
                             for f in allowed["fields"][:10]
                         )
                         if len(allowed["fields"]) > 10:
