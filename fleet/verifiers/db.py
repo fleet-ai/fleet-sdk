@@ -599,25 +599,30 @@ class SnapshotDiff:
 
     # ------------------------------------------------------------------
     def expect_only_v2(self, allowed_changes: List[Dict[str, Any]]):
-        """Allowed changes with bulk field spec support.
+        """Allowed changes with bulk field spec support and explicit type field.
 
-        This version supports:
-        1. Bulk field specs for additions: {"table": "t", "pk": 1, "fields": [("name", "value"), ("status", ...)]}
+        This version supports explicit change types via the "type" field:
+        1. Insert specs: {"table": "t", "pk": 1, "type": "insert", "fields": [("name", "value"), ("status", ...)]}
            - ("name", value): check that field equals value
            - ("name", None): check that field is SQL NULL
            - ("name", ...): don't check the value, just acknowledge the field exists
-        2. Deletion specs:
-           - Without field validation: {"table": "t", "pk": 1, "before": True}
-           - With field validation: {"table": "t", "pk": 1, "fields": [...], "before": True}
-        3. Bulk field specs for modifications: {"table": "t", "pk": 1, "fields": [("name", "new_value"), ...]}
-           - Same semantics as additions, but applied to the changed fields
-           - Every changed field must be accounted for in the fields list
-        4. Whole-row specs:
+        2. Modify specs: {"table": "t", "pk": 1, "type": "modify", "resulting_fields": [...], "no_other_changes": True/False}
+           - Uses "resulting_fields" (not "fields") to be explicit about what's being checked
+           - "no_other_changes" is REQUIRED and must be True or False:
+             - True: Every changed field must be in resulting_fields (strict mode)
+             - False: Only check fields in resulting_fields match, ignore other changes
+           - ("field_name", value): check that after value equals value
+           - ("field_name", None): check that after value is SQL NULL
+           - ("field_name", ...): don't check value, just acknowledge field changed
+        3. Delete specs:
+           - Without field validation: {"table": "t", "pk": 1, "type": "delete"}
+           - With field validation: {"table": "t", "pk": 1, "type": "delete", "fields": [...]}
+        4. Whole-row specs (legacy):
            - For additions: {"table": "t", "pk": 1, "fields": None, "after": "__added__"}
            - For deletions: {"table": "t", "pk": 1, "fields": None, "after": "__removed__"}
         
-        When using "fields", every field (for additions: all row fields;
-        for modifications: all changed fields) must be accounted for in the list.
+        When using "fields" for inserts, every field must be accounted for in the list.
+        For modifications, use "resulting_fields" with explicit "no_other_changes".
         For deletions with "fields", all specified fields are validated against the deleted row.
         """
         diff = self._collect()
@@ -649,32 +654,60 @@ class SnapshotDiff:
                     return True
             return False
 
-        def _get_fields_spec(table: str, row_id: str, for_deletion: bool = False) -> Optional[List[tuple]]:
-            """Get the bulk fields spec for a given table/row if it exists."""
+        def _get_fields_spec_for_type(table: str, row_id: str, change_type: str) -> Optional[List[tuple]]:
+            """Get the bulk fields spec for a given table/row/type if it exists.
+            
+            Args:
+                table: The table name
+                row_id: The primary key value
+                change_type: One of "insert", "modify", or "delete"
+                
+            Note: For "modify" type, use _get_modify_spec instead.
+            """
             for allowed in allowed_changes:
                 allowed_pk = allowed.get("pk")
                 pk_match = (
                     str(allowed_pk) == str(row_id) if allowed_pk is not None else False
                 )
-                if allowed["table"] == table and pk_match and "fields" in allowed:
-                    # For deletions, require "before": True
-                    if for_deletion:
-                        if allowed.get("before") is True:
-                            return allowed["fields"]
-                    else:
-                        # For additions, accept specs without "before": True
-                        if allowed.get("before") is not True:
-                            return allowed["fields"]
+                if (
+                    allowed["table"] == table
+                    and pk_match
+                    and allowed.get("type") == change_type
+                    and "fields" in allowed
+                ):
+                    return allowed["fields"]
             return None
 
-        def _is_deletion_allowed(table: str, row_id: str) -> bool:
-            """Check if a deletion is allowed via 'before': True spec (with or without fields)."""
+        def _get_modify_spec(table: str, row_id: str) -> Optional[Dict[str, Any]]:
+            """Get the modify spec for a given table/row if it exists.
+            
+            Returns the full spec dict containing:
+            - resulting_fields: List of field tuples
+            - no_other_changes: Boolean (required)
+            
+            Returns None if no modify spec found.
+            """
             for allowed in allowed_changes:
                 allowed_pk = allowed.get("pk")
                 pk_match = (
                     str(allowed_pk) == str(row_id) if allowed_pk is not None else False
                 )
-                if allowed["table"] == table and pk_match and allowed.get("before") is True:
+                if (
+                    allowed["table"] == table
+                    and pk_match
+                    and allowed.get("type") == "modify"
+                ):
+                    return allowed
+            return None
+
+        def _is_type_allowed(table: str, row_id: str, change_type: str) -> bool:
+            """Check if a change type is allowed for the given table/row (with or without fields)."""
+            for allowed in allowed_changes:
+                allowed_pk = allowed.get("pk")
+                pk_match = (
+                    str(allowed_pk) == str(row_id) if allowed_pk is not None else False
+                )
+                if allowed["table"] == table and pk_match and allowed.get("type") == change_type:
                     return True
             return False
 
@@ -744,19 +777,28 @@ class SnapshotDiff:
             table: str,
             row_id: str,
             row_changes: Dict[str, Dict[str, Any]],
-            fields_spec: List[tuple],
+            resulting_fields: List[tuple],
+            no_other_changes: bool,
         ) -> Optional[List[tuple]]:
-            """Validate a modification against a bulk fields spec.
+            """Validate a modification against a resulting_fields spec.
 
             Returns None if validation passes, or a list of (field, actual_value, issue)
             tuples for mismatches.
+            
+            Args:
+                table: The table name
+                row_id: The row primary key
+                row_changes: Dict of field_name -> {"before": ..., "after": ...}
+                resulting_fields: List of field tuples to validate
+                no_other_changes: If True, all changed fields must be in resulting_fields.
+                                  If False, only validate fields in resulting_fields, ignore others.
             
             Field spec semantics for modifications:
             - ("field_name", value): check that after value equals value
             - ("field_name", None): check that after value is SQL NULL
             - ("field_name", ...): don't check value, just acknowledge field changed
             """
-            spec_map = _parse_fields_spec(fields_spec)
+            spec_map = _parse_fields_spec(resulting_fields)
             unmatched_fields = []
 
             for field_name, vals in row_changes.items():
@@ -767,10 +809,13 @@ class SnapshotDiff:
                 after_value = vals["after"]
 
                 if field_name not in spec_map:
-                    # Changed field not in spec - this is an error
-                    unmatched_fields.append(
-                        (field_name, after_value, "NOT_IN_FIELDS_SPEC")
-                    )
+                    # Changed field not in spec
+                    if no_other_changes:
+                        # Strict mode: all changed fields must be accounted for
+                        unmatched_fields.append(
+                            (field_name, after_value, "NOT_IN_RESULTING_FIELDS")
+                        )
+                    # If no_other_changes=False, ignore fields not in spec
                 else:
                     should_check, expected_value = spec_map[field_name]
                     if should_check and not _values_equivalent(
@@ -783,18 +828,6 @@ class SnapshotDiff:
 
             return unmatched_fields if unmatched_fields else None
 
-        def _get_modification_fields_spec(table: str, row_id: str) -> Optional[List[tuple]]:
-            """Get the bulk fields spec for a modification if it exists."""
-            for allowed in allowed_changes:
-                allowed_pk = allowed.get("pk")
-                pk_match = (
-                    str(allowed_pk) == str(row_id) if allowed_pk is not None else False
-                )
-                if allowed["table"] == table and pk_match and "fields" in allowed:
-                    # For modifications, accept specs without "before": True
-                    if allowed.get("before") is not True:
-                        return allowed["fields"]
-            return None
 
         # Collect all unexpected changes for detailed reporting
         unexpected_changes = []
@@ -803,28 +836,49 @@ class SnapshotDiff:
             for row in report.get("modified_rows", []):
                 row_changes = row["changes"]
 
-                # Check for bulk fields spec for modifications
-                fields_spec = _get_modification_fields_spec(tbl, row["row_id"])
-                if fields_spec is not None:
-                    unmatched = _validate_modification_with_fields_spec(
-                        tbl, row["row_id"], row_changes, fields_spec
-                    )
-                    if unmatched:
-                        unexpected_changes.append(
-                            {
-                                "type": "modification",
-                                "table": tbl,
-                                "row_id": row["row_id"],
-                                "field": None,
-                                "before": None,
-                                "after": None,
-                                "full_row": row,
-                                "unmatched_fields": unmatched,
-                            }
+                # Check for modify spec with resulting_fields
+                modify_spec = _get_modify_spec(tbl, row["row_id"])
+                if modify_spec is not None:
+                    resulting_fields = modify_spec.get("resulting_fields")
+                    if resulting_fields is not None:
+                        # Validate that no_other_changes is provided
+                        if "no_other_changes" not in modify_spec:
+                            raise ValueError(
+                                f"Modify spec for table '{tbl}' pk={row['row_id']} "
+                                f"has 'resulting_fields' but missing required 'no_other_changes' field. "
+                                f"Set 'no_other_changes': True to verify no other fields changed, "
+                                f"or 'no_other_changes': False to only check the specified fields."
+                            )
+                        no_other_changes = modify_spec["no_other_changes"]
+                        if not isinstance(no_other_changes, bool):
+                            raise ValueError(
+                                f"Modify spec for table '{tbl}' pk={row['row_id']} "
+                                f"has 'no_other_changes' but it must be a boolean (True or False), "
+                                f"got {type(no_other_changes).__name__}: {repr(no_other_changes)}"
+                            )
+                        
+                        unmatched = _validate_modification_with_fields_spec(
+                            tbl, row["row_id"], row_changes, resulting_fields, no_other_changes
                         )
-                    continue  # Skip to next row
+                        if unmatched:
+                            unexpected_changes.append(
+                                {
+                                    "type": "modification",
+                                    "table": tbl,
+                                    "row_id": row["row_id"],
+                                    "field": None,
+                                    "before": None,
+                                    "after": None,
+                                    "full_row": row,
+                                    "unmatched_fields": unmatched,
+                                }
+                            )
+                        continue  # Skip to next row
+                    else:
+                        # Modify spec without resulting_fields - just allow the modification
+                        continue  # Skip to next row
 
-                # Fall back to single-field specs
+                # Fall back to single-field specs (legacy)
                 for f, vals in row_changes.items():
                     if self.ignore_config.should_ignore_field(tbl, f):
                         continue
@@ -844,8 +898,8 @@ class SnapshotDiff:
             for row in report.get("added_rows", []):
                 row_data = row.get("data", {})
 
-                # Check for bulk fields spec
-                fields_spec = _get_fields_spec(tbl, row["row_id"], for_deletion=False)
+                # Check for bulk fields spec (type: "insert")
+                fields_spec = _get_fields_spec_for_type(tbl, row["row_id"], "insert")
                 if fields_spec is not None:
                     unmatched = _validate_row_with_fields_spec(
                         tbl, row["row_id"], row_data, fields_spec
@@ -864,7 +918,11 @@ class SnapshotDiff:
                         )
                     continue  # Skip to next row
 
-                # Check for whole-row spec
+                # Check if insertion is allowed without field validation
+                if _is_type_allowed(tbl, row["row_id"], "insert"):
+                    continue  # Insertion is allowed, skip to next row
+
+                # Check for whole-row spec (legacy)
                 whole_row_allowed = _is_change_allowed(
                     tbl, row["row_id"], None, "__added__"
                 )
@@ -884,8 +942,8 @@ class SnapshotDiff:
             for row in report.get("removed_rows", []):
                 row_data = row.get("data", {})
 
-                # Check for bulk fields spec with "before": True
-                fields_spec = _get_fields_spec(tbl, row["row_id"], for_deletion=True)
+                # Check for bulk fields spec (type: "delete")
+                fields_spec = _get_fields_spec_for_type(tbl, row["row_id"], "delete")
                 if fields_spec is not None:
                     unmatched = _validate_row_with_fields_spec(
                         tbl, row["row_id"], row_data, fields_spec
@@ -904,11 +962,11 @@ class SnapshotDiff:
                         )
                     continue  # Skip to next row
 
-                # Check for "before": True spec without fields (allows deletion without field validation)
-                if _is_deletion_allowed(tbl, row["row_id"]):
+                # Check if deletion is allowed without field validation
+                if _is_type_allowed(tbl, row["row_id"], "delete"):
                     continue  # Deletion is allowed, skip to next row
 
-                # Check for whole-row spec
+                # Check for whole-row spec (legacy)
                 whole_row_allowed = _is_change_allowed(
                     tbl, row["row_id"], None, "__removed__"
                 )
@@ -991,8 +1049,26 @@ class SnapshotDiff:
             error_lines.append("Allowed changes were:")
             if allowed_changes:
                 for i, allowed in enumerate(allowed_changes[:3], 1):
-                    if "fields" in allowed:
-                        # Show bulk fields spec
+                    change_type = allowed.get("type", "unspecified")
+                    
+                    # For modify type, use resulting_fields
+                    if change_type == "modify" and "resulting_fields" in allowed and allowed["resulting_fields"] is not None:
+                        fields_summary = ", ".join(
+                            f[0] if len(f) == 1 else f"{f[0]}={'NOT_CHECKED' if f[1] is ... else repr(f[1])}"
+                            for f in allowed["resulting_fields"][:3]
+                        )
+                        if len(allowed["resulting_fields"]) > 3:
+                            fields_summary += f", ... +{len(allowed['resulting_fields']) - 3} more"
+                        no_other = allowed.get("no_other_changes", "NOT_SET")
+                        error_lines.append(
+                            f"  {i}. Table: {allowed.get('table')}, "
+                            f"ID: {allowed.get('pk')}, "
+                            f"Type: {change_type}, "
+                            f"resulting_fields: [{fields_summary}], "
+                            f"no_other_changes: {no_other}"
+                        )
+                    elif "fields" in allowed and allowed["fields"] is not None:
+                        # Show bulk fields spec (for insert/delete)
                         fields_summary = ", ".join(
                             f[0] if len(f) == 1 else f"{f[0]}={'NOT_CHECKED' if f[1] is ... else repr(f[1])}"
                             for f in allowed["fields"][:3]
@@ -1002,14 +1078,14 @@ class SnapshotDiff:
                         error_lines.append(
                             f"  {i}. Table: {allowed.get('table')}, "
                             f"ID: {allowed.get('pk')}, "
+                            f"Type: {change_type}, "
                             f"Fields: [{fields_summary}]"
                         )
                     else:
                         error_lines.append(
                             f"  {i}. Table: {allowed.get('table')}, "
                             f"ID: {allowed.get('pk')}, "
-                            f"Field: {allowed.get('field')}, "
-                            f"After: {repr(allowed.get('after'))}"
+                            f"Type: {change_type}"
                         )
                 if len(allowed_changes) > 3:
                     error_lines.append(

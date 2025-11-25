@@ -56,6 +56,7 @@ def test_field_level_specs_for_added_row():
                 {
                     "table": "users",
                     "pk": 2,
+                    "type": "insert",
                     "fields": [("id", 2), ("name", "Bob"), ("status", "inactive")],
                 },
             ]
@@ -102,6 +103,7 @@ def test_field_level_specs_with_wrong_values():
                     {
                         "table": "users",
                         "pk": 2,
+                        "type": "insert",
                         "fields": [
                             ("id", 2),
                             ("name", "Bob"),
@@ -146,12 +148,15 @@ def test_modification_with_bulk_fields_spec():
         after = DatabaseSnapshot(after_db)
 
         # Bulk field specs for modifications - specify all changed fields
+        # no_other_changes=True ensures no other fields changed
         before.diff(after).expect_only_v2(
             [
                 {
                     "table": "users",
                     "pk": 1,
-                    "fields": [("name", "Alice Updated"), ("status", "inactive")],
+                    "type": "modify",
+                    "resulting_fields": [("name", "Alice Updated"), ("status", "inactive")],
+                    "no_other_changes": True,
                 },
             ]
         )
@@ -196,10 +201,12 @@ def test_modification_with_bulk_fields_spec_wrong_value():
                     {
                         "table": "users",
                         "pk": 1,
-                        "fields": [
+                        "type": "modify",
+                        "resulting_fields": [
                             ("name", "Alice Updated"),
                             ("status", "WRONG_VALUE"),  # Wrong!
                         ],
+                        "no_other_changes": True,
                     },
                 ]
             )
@@ -210,7 +217,7 @@ def test_modification_with_bulk_fields_spec_wrong_value():
 
 
 def test_modification_with_bulk_fields_spec_missing_field():
-    """Test that missing fields in modification bulk field specs are detected"""
+    """Test that missing fields in modification bulk field specs are detected when no_other_changes=True"""
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         before_db = f.name
@@ -238,23 +245,257 @@ def test_modification_with_bulk_fields_spec_missing_field():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # Should fail because status change is not in fields spec
+        # Should fail because status change is not in resulting_fields and no_other_changes=True
         with pytest.raises(AssertionError) as exc_info:
             before.diff(after).expect_only_v2(
                 [
                     {
                         "table": "users",
                         "pk": 1,
-                        "fields": [
+                        "type": "modify",
+                        "resulting_fields": [
                             ("name", "Alice Updated"),
-                            # status is missing - should fail
+                            # status is missing - should fail with no_other_changes=True
                         ],
+                        "no_other_changes": True,
                     },
                 ]
             )
 
         assert "status" in str(exc_info.value)
-        assert "NOT_IN_FIELDS_SPEC" in str(exc_info.value)
+        assert "NOT_IN_RESULTING_FIELDS" in str(exc_info.value)
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_modification_no_other_changes_false_allows_extra_changes():
+    """Test that no_other_changes=False allows other fields to change without checking them"""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, status TEXT, updated_at TEXT)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'active', '2024-01-01')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, status TEXT, updated_at TEXT)"
+        )
+        # All three fields changed: name, status, updated_at
+        conn.execute("INSERT INTO users VALUES (1, 'Alice Updated', 'inactive', '2024-01-15')")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # With no_other_changes=False, we only need to specify the fields we care about
+        # status and updated_at changed but we don't check them
+        before.diff(after).expect_only_v2(
+            [
+                {
+                    "table": "users",
+                    "pk": 1,
+                    "type": "modify",
+                    "resulting_fields": [
+                        ("name", "Alice Updated"),
+                        # status and updated_at not specified - that's OK with no_other_changes=False
+                    ],
+                    "no_other_changes": False,  # Allows other changes
+                },
+            ]
+        )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_modification_no_other_changes_true_with_ellipsis():
+    """
+    Test that no_other_changes=True and specifying fields with ... means only the specified
+    fields are checked, and all other fields must remain unchanged (even if ... is used as the value).
+    """
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        # Initial table and row
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, status TEXT, updated_at TEXT)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'active', '2024-01-01')")
+        conn.commit()
+        conn.close()
+
+        # After: only 'name' changes (others should remain exactly the same)
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, status TEXT, updated_at TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO users VALUES (1, 'Alice Updated', 'active', '2024-01-01')"
+        )
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Specify to check only name with ..., others must remain the same (enforced by no_other_changes=True)
+        before.diff(after).expect_only_v2(
+            [
+                {
+                    "table": "users",
+                    "pk": 1,
+                    "type": "modify",
+                    "resulting_fields": [
+                        ("name", ...),  # Only check that field changed, but not checking its value
+                    ],
+                    "no_other_changes": True,
+                },
+            ]
+        )
+
+        # Now, test that a change to a non-listed field triggers an error
+        # We'll modify status, which is not covered by 'resulting_fields'
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "DELETE FROM users WHERE id=1"
+        )
+        conn.execute(
+            "INSERT INTO users VALUES (1, 'Alice Updated', 'inactive', '2024-01-01')"
+        )
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(AssertionError) as exc_info:
+            before.diff(after).expect_only_v2(
+                [
+                    {
+                        "table": "users",
+                        "pk": 1,
+                        "type": "modify",
+                        "resulting_fields": [
+                            ("name", ...),  # Only allow name to change, not status
+                        ],
+                        "no_other_changes": True,
+                    },
+                ]
+            )
+        print(exc_info.value, "BLAHS")
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_modification_no_other_changes_false_still_validates_specified():
+    """Test that no_other_changes=False still validates the fields that ARE specified"""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, status TEXT)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'active')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, status TEXT)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice Updated', 'inactive')")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Should fail because name value is wrong, even with no_other_changes=False
+        with pytest.raises(AssertionError, match="Unexpected database changes"):
+            before.diff(after).expect_only_v2(
+                [
+                    {
+                        "table": "users",
+                        "pk": 1,
+                        "type": "modify",
+                        "resulting_fields": [
+                            ("name", "WRONG VALUE"),  # This is wrong
+                        ],
+                        "no_other_changes": False,  # Allows status to change unvalidated
+                    },
+                ]
+            )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_modification_missing_no_other_changes_raises_error():
+    """Test that missing no_other_changes field raises a ValueError"""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, status TEXT)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'active')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, status TEXT)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice Updated', 'inactive')")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Should fail because no_other_changes is missing
+        with pytest.raises(ValueError, match="missing required 'no_other_changes'"):
+            before.diff(after).expect_only_v2(
+                [
+                    {
+                        "table": "users",
+                        "pk": 1,
+                        "type": "modify",
+                        "resulting_fields": [
+                            ("name", "Alice Updated"),
+                            ("status", "inactive"),
+                        ],
+                        # no_other_changes is MISSING - should raise ValueError
+                    },
+                ]
+            )
 
     finally:
         os.unlink(before_db)
@@ -296,11 +537,13 @@ def test_modification_with_bulk_fields_spec_ellipsis():
                 {
                     "table": "users",
                     "pk": 1,
-                    "fields": [
+                    "type": "modify",
+                    "resulting_fields": [
                         ("name", "Alice Updated"),
                         ("status", "inactive"),
                         ("updated_at", ...),  # Don't check value
                     ],
+                    "no_other_changes": True,
                 },
             ]
         )
@@ -361,6 +604,7 @@ def test_multiple_table_changes_with_mixed_specs():
                 {
                     "table": "users",
                     "pk": 3,
+                    "type": "insert",
                     "fields": [
                         ("id", 3),
                         ("name", "Charlie"),
@@ -368,9 +612,15 @@ def test_multiple_table_changes_with_mixed_specs():
                         ("role", "user"),
                     ],
                 },
-                # Bulk field specs for order status modification
-                {"table": "orders", "pk": 1, "fields": [("status", "completed")]},
-                # Whole-row spec for new order
+                # Bulk field specs for order status modification (using new format)
+                {
+                    "table": "orders",
+                    "pk": 1,
+                    "type": "modify",
+                    "resulting_fields": [("status", "completed")],
+                    "no_other_changes": True,
+                },
+                # Whole-row spec for new order (legacy)
                 {"table": "orders", "pk": 2, "fields": None, "after": "__added__"},
             ]
         )
@@ -460,6 +710,7 @@ def test_numeric_type_conversion_in_specs():
                 {
                     "table": "metrics",
                     "pk": "2",
+                    "type": "insert",
                     "fields": [("id", 2), ("value", 2.71), ("count", 17)],
                 },
             ]
@@ -501,13 +752,13 @@ def test_deletion_with_field_level_specs():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # Bulk field specs for deleted row (with "before": True)
+        # Bulk field specs for deleted row (with "type": "delete")
         before.diff(after).expect_only_v2(
             [
                 {
                     "table": "inventory",
                     "pk": 2,
-                    "before": True,
+                    "type": "delete",
                     "fields": [
                         ("id", 2),
                         ("item", "Widget B"),
@@ -515,7 +766,7 @@ def test_deletion_with_field_level_specs():
                         ("location", "Warehouse 2"),
                     ],
                 },
-                # also do a whole-row check
+                # also do a whole-row check (legacy)
                 {
                     "table": "inventory",
                     "pk": 2,
@@ -567,6 +818,7 @@ def test_mixed_data_types_and_null_values():
                 {
                     "table": "mixed_data",
                     "pk": 2,
+                    "type": "insert",
                     "fields": [
                         ("id", 2),
                         ("text_val", None),  # Check that value IS NULL
@@ -658,6 +910,7 @@ def test_missing_field_specs():
                     {
                         "table": "users",
                         "pk": 2,
+                        "type": "insert",
                         "fields": [
                             ("id", 2),
                             ("name", "Bob"),
@@ -754,6 +1007,7 @@ def test_fields_spec_basic():
                 {
                     "table": "users",
                     "pk": 2,
+                    "type": "insert",
                     "fields": [
                         ("id", 2),
                         ("name", "Bob"),
@@ -803,6 +1057,7 @@ def test_fields_spec_with_ellipsis_means_dont_check():
                 {
                     "table": "users",
                     "pk": 2,
+                    "type": "insert",
                     "fields": [
                         ("id", 2),
                         ("name", "Bob"),
@@ -852,6 +1107,7 @@ def test_fields_spec_with_none_checks_for_null():
                 {
                     "table": "users",
                     "pk": 2,
+                    "type": "insert",
                     "fields": [
                         ("id", 2),
                         ("name", "Bob"),
@@ -902,6 +1158,7 @@ def test_fields_spec_with_none_fails_when_not_null():
                     {
                         "table": "users",
                         "pk": 2,
+                        "type": "insert",
                         "fields": [
                             ("id", 2),
                             ("name", "Bob"),
@@ -954,6 +1211,7 @@ def test_fields_spec_1_tuple_raises_error():
                     {
                         "table": "users",
                         "pk": 2,
+                        "type": "insert",
                         "fields": [
                             ("id", 2),
                             ("name", "Bob"),
@@ -1003,6 +1261,7 @@ def test_fields_spec_missing_field_fails():
                     {
                         "table": "users",
                         "pk": 2,
+                        "type": "insert",
                         "fields": [
                             ("id", 2),
                             ("name", "Bob"),
@@ -1055,6 +1314,7 @@ def test_fields_spec_wrong_value_fails():
                     {
                         "table": "users",
                         "pk": 2,
+                        "type": "insert",
                         "fields": [
                             ("id", 2),
                             ("name", "Bob"),
@@ -1109,6 +1369,7 @@ def test_fields_spec_with_ignore_config():
                 {
                     "table": "users",
                     "pk": 2,
+                    "type": "insert",
                     "fields": [
                         ("id", 2),
                         ("name", "Bob"),
@@ -1219,6 +1480,7 @@ def test_security_field_level_specs_catch_wrong_role():
                     {
                         "table": "users",
                         "pk": 2,
+                        "type": "insert",
                         "fields": [
                             ("id", 2),
                             ("name", "Bob"),
@@ -1278,6 +1540,7 @@ def test_financial_data_validation():
                     {
                         "table": "orders",
                         "pk": 2,
+                        "type": "insert",
                         "fields": [
                             ("id", 2),
                             ("user_id", 200),
@@ -1337,6 +1600,7 @@ def test_permissions_validation():
                     {
                         "table": "permissions",
                         "pk": 2,
+                        "type": "insert",
                         "fields": [
                             ("id", 2),
                             ("user_id", 200),
@@ -1404,6 +1668,7 @@ def test_json_field_validation():
                     {
                         "table": "configs",
                         "pk": 2,
+                        "type": "insert",
                         "fields": [
                             ("id", 2),
                             ("name", "user_config"),
@@ -1468,6 +1733,7 @@ def test_expect_only_ignores_field_specs_with_whole_row():
                     {
                         "table": "products",
                         "pk": 2,
+                        "type": "insert",
                         "fields": [
                             ("id", 2),
                             ("name", "Gadget"),
@@ -1527,6 +1793,7 @@ def test_expect_only_v2_validates_field_values():
                     {
                         "table": "accounts",
                         "pk": 2,
+                        "type": "insert",
                         "fields": [
                             ("id", 2),
                             ("username", "bob"),
@@ -1586,6 +1853,7 @@ def test_expect_only_v2_validates_is_public():
                     {
                         "table": "settings",
                         "pk": 1,
+                        "type": "insert",
                         "fields": [
                             ("id", 1),
                             ("key", "api_key"),
@@ -1603,7 +1871,7 @@ def test_expect_only_v2_validates_is_public():
 
 def test_deletion_with_bulk_fields_spec():
     """
-    expect_only_v2 validates field values for deleted rows using bulk field specs with 'before': True,
+    expect_only_v2 validates field values for deleted rows using bulk field specs with 'type': 'delete',
     and without fields.
     """
 
@@ -1644,7 +1912,7 @@ def test_deletion_with_bulk_fields_spec():
                     {
                         "table": "sessions",
                         "pk": 2,
-                        "before": True,
+                        "type": "delete",
                     },
                 ]
             )
