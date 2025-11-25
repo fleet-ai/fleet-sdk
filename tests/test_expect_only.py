@@ -1,5 +1,8 @@
 """
-Test to verify expect_only works correctly with row additions and field-level specs.
+Test to verify expect_only and expect_only_v2 work correctly.
+
+expect_only: Original simple implementation - only supports whole-row specs for additions/deletions
+expect_only_v2: Enhanced implementation with field-level spec support for additions/deletions
 """
 
 import sqlite3
@@ -9,8 +12,13 @@ import pytest
 from fleet.verifiers.db import DatabaseSnapshot, IgnoreConfig
 
 
+# ============================================================================
+# Tests for expect_only_v2 (field-level spec support)
+# ============================================================================
+
+
 def test_field_level_specs_for_added_row():
-    """Test that field-level specs work for row additions"""
+    """Test that field-level specs work for row additions in expect_only_v2"""
 
     # Create two temporary databases
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -42,8 +50,8 @@ def test_field_level_specs_for_added_row():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # Field-level specs should work for added rows
-        before.diff(after).expect_only(
+        # Field-level specs should work for added rows in v2
+        before.diff(after).expect_only_v2(
             [
                 {"table": "users", "pk": 2, "field": "id", "after": 2},
                 {"table": "users", "pk": 2, "field": "name", "after": "Bob"},
@@ -57,7 +65,7 @@ def test_field_level_specs_for_added_row():
 
 
 def test_field_level_specs_with_wrong_values():
-    """Test that wrong values are detected"""
+    """Test that wrong values are detected in expect_only_v2"""
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         before_db = f.name
@@ -87,7 +95,7 @@ def test_field_level_specs_with_wrong_values():
 
         # Should fail because status value is wrong
         with pytest.raises(AssertionError, match="Unexpected database changes"):
-            before.diff(after).expect_only(
+            before.diff(after).expect_only_v2(
                 [
                     {"table": "users", "pk": 2, "field": "id", "after": 2},
                     {"table": "users", "pk": 2, "field": "name", "after": "Bob"},
@@ -106,7 +114,7 @@ def test_field_level_specs_with_wrong_values():
 
 
 def test_multiple_table_changes_with_mixed_specs():
-    """Test complex scenario with multiple tables and mixed field/row specs"""
+    """Test complex scenario with multiple tables and mixed field/row specs in expect_only_v2"""
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         before_db = f.name
@@ -150,7 +158,7 @@ def test_multiple_table_changes_with_mixed_specs():
         after = DatabaseSnapshot(after_db)
 
         # Mixed specs: field-level for new user, whole-row for new order
-        before.diff(after).expect_only(
+        before.diff(after).expect_only_v2(
             [
                 # Field-level specs for new user
                 {"table": "users", "pk": 3, "field": "id", "after": 3},
@@ -220,7 +228,7 @@ def test_partial_field_specs_with_unexpected_changes():
 
 
 def test_numeric_type_conversion_in_specs():
-    """Test that numeric type conversions work correctly in field specs"""
+    """Test that numeric type conversions work correctly in field specs with expect_only_v2"""
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         before_db = f.name
@@ -249,7 +257,7 @@ def test_numeric_type_conversion_in_specs():
         after = DatabaseSnapshot(after_db)
 
         # Test string vs integer comparison for primary key
-        before.diff(after).expect_only(
+        before.diff(after).expect_only_v2(
             [
                 {"table": "metrics", "pk": "2", "field": "id", "after": 2},
                 {"table": "metrics", "pk": "2", "field": "value", "after": 2.71},
@@ -263,7 +271,7 @@ def test_numeric_type_conversion_in_specs():
 
 
 def test_deletion_with_field_level_specs():
-    """Test that field-level specs work for row deletions"""
+    """Test that field-level specs work for row deletions in expect_only_v2"""
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         before_db = f.name
@@ -294,7 +302,7 @@ def test_deletion_with_field_level_specs():
         after = DatabaseSnapshot(after_db)
 
         # Field-level specs for deleted row
-        before.diff(after).expect_only(
+        before.diff(after).expect_only_v2(
             [
                 {"table": "inventory", "pk": 2, "field": "id", "before": 2},
                 {"table": "inventory", "pk": 2, "field": "item", "before": "Widget B"},
@@ -314,7 +322,7 @@ def test_deletion_with_field_level_specs():
 
 
 def test_mixed_data_types_and_null_values():
-    """Test field specs with mixed data types and null values"""
+    """Test field specs with mixed data types and null values in expect_only_v2"""
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         before_db = f.name
@@ -343,7 +351,7 @@ def test_mixed_data_types_and_null_values():
         after = DatabaseSnapshot(after_db)
 
         # Test various data types and null handling
-        before.diff(after).expect_only(
+        before.diff(after).expect_only_v2(
             [
                 {"table": "mixed_data", "pk": 2, "field": "id", "after": 2},
                 {"table": "mixed_data", "pk": 2, "field": "text_val", "after": None},
@@ -403,7 +411,7 @@ def test_whole_row_spec_backward_compat():
 
 
 def test_missing_field_specs():
-    """Test that missing field specs are detected"""
+    """Test that missing field specs are detected in expect_only_v2"""
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         before_db = f.name
@@ -433,7 +441,7 @@ def test_missing_field_specs():
 
         # Should fail because status field spec is missing
         with pytest.raises(AssertionError, match="Unexpected database changes"):
-            before.diff(after).expect_only(
+            before.diff(after).expect_only_v2(
                 [
                     {"table": "users", "pk": 2, "field": "id", "after": 2},
                     {"table": "users", "pk": 2, "field": "name", "after": "Bob"},
@@ -494,7 +502,7 @@ def test_modified_row_with_unauthorized_field_change():
 
 
 def test_ignore_config_with_field_specs():
-    """Test that ignore_config works correctly with field-level specs"""
+    """Test that ignore_config works correctly with field-level specs in expect_only_v2"""
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         before_db = f.name
@@ -526,7 +534,7 @@ def test_ignore_config_with_field_specs():
         ignore_config = IgnoreConfig(table_fields={"users": {"updated_at"}})
 
         # Should work without specifying updated_at because it's ignored
-        before.diff(after, ignore_config).expect_only(
+        before.diff(after, ignore_config).expect_only_v2(
             [
                 {"table": "users", "pk": 2, "field": "id", "after": 2},
                 {"table": "users", "pk": 2, "field": "name", "after": "Bob"},
@@ -540,22 +548,19 @@ def test_ignore_config_with_field_specs():
 
 
 # ============================================================================
-# Tests demonstrating OLD implementation's security issues
-# These tests show cases that PASS with the old whole-row approach but
-# represent security vulnerabilities that SHOULD have been caught.
+# Tests demonstrating expect_only vs expect_only_v2 behavior
+# These tests show cases where expect_only (whole-row only) is more permissive
+# than expect_only_v2 (field-level specs).
 # ============================================================================
 
 
-def test_security_whole_row_spec_allows_malicious_values():
+def test_security_whole_row_spec_allows_any_values():
     """
-    SECURITY ISSUE: Whole-row specs allow ANY field values, even malicious ones.
+    expect_only with whole-row specs allows ANY field values.
 
-    This test demonstrates the danger of using field=None (whole-row spec).
-    With the old implementation, this was the ONLY way to allow additions,
-    but it's too permissive and allows unauthorized data through.
-
-    This test PASSES (showing backward compatibility) but highlights why you
-    should migrate to field-level specs for better security.
+    This demonstrates that expect_only with field=None (whole-row spec)
+    is permissive - it only checks that a row was added, not what values it has.
+    Use expect_only_v2 with field-level specs for stricter validation.
     """
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -577,57 +582,7 @@ def test_security_whole_row_spec_allows_malicious_values():
             "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, role TEXT, active INTEGER)"
         )
         conn.execute("INSERT INTO users VALUES (1, 'Alice', 'user', 1)")
-        # Malicious: user added with admin role!
-        conn.execute("INSERT INTO users VALUES (2, 'Hacker', 'admin', 1)")
-        conn.commit()
-        conn.close()
-
-        before = DatabaseSnapshot(before_db)
-        after = DatabaseSnapshot(after_db)
-
-        # This PASSES but is insecure - we're allowing a user with admin role!
-        # The old implementation would only support this approach
-        before.diff(after).expect_only(
-            [{"table": "users", "pk": 2, "field": None, "after": "__added__"}]
-        )
-
-        # What we SHOULD do (secure): specify exact values
-        # This would catch if role was 'admin' instead of 'user'
-
-    finally:
-        os.unlink(before_db)
-        os.unlink(after_db)
-
-
-def test_security_field_level_specs_catch_malicious_role():
-    """
-    SECURITY: Field-level specs properly catch unauthorized values.
-
-    This demonstrates the NEW, secure way to validate additions.
-    If someone tries to add a user with 'admin' role when we expected 'user',
-    it will be caught.
-    """
-
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        before_db = f.name
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        after_db = f.name
-
-    try:
-        conn = sqlite3.connect(before_db)
-        conn.execute(
-            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, role TEXT, active INTEGER)"
-        )
-        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'user', 1)")
-        conn.commit()
-        conn.close()
-
-        conn = sqlite3.connect(after_db)
-        conn.execute(
-            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, role TEXT, active INTEGER)"
-        )
-        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'user', 1)")
-        # Attempted malicious addition with admin role
+        # User added with admin role
         conn.execute("INSERT INTO users VALUES (2, 'Bob', 'admin', 1)")
         conn.commit()
         conn.close()
@@ -635,9 +590,54 @@ def test_security_field_level_specs_catch_malicious_role():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # This correctly FAILS because role is 'admin' not 'user'
+        # expect_only with whole-row spec passes - doesn't check field values
+        before.diff(after).expect_only(
+            [{"table": "users", "pk": 2, "field": None, "after": "__added__"}]
+        )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_security_field_level_specs_catch_wrong_role():
+    """
+    expect_only_v2 with field-level specs catches unauthorized values.
+
+    If someone tries to add a user with 'admin' role when we expected 'user',
+    expect_only_v2 will catch it.
+    """
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, role TEXT, active INTEGER)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'user', 1)")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, role TEXT, active INTEGER)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'user', 1)")
+        # User added with admin role
+        conn.execute("INSERT INTO users VALUES (2, 'Bob', 'admin', 1)")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # expect_only_v2 correctly FAILS because role is 'admin' not 'user'
         with pytest.raises(AssertionError, match="Unexpected database changes"):
-            before.diff(after).expect_only(
+            before.diff(after).expect_only_v2(
                 [
                     {"table": "users", "pk": 2, "field": "id", "after": 2},
                     {"table": "users", "pk": 2, "field": "name", "after": "Bob"},
@@ -656,11 +656,9 @@ def test_security_field_level_specs_catch_malicious_role():
         os.unlink(after_db)
 
 
-def test_security_sensitive_financial_data():
+def test_financial_data_validation():
     """
-    SECURITY: Whole-row spec could allow price manipulation in e-commerce.
-
-    Demonstrates a real-world security scenario where whole-row specs are dangerous.
+    Demonstrates difference between expect_only and expect_only_v2 for financial data.
     """
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -682,7 +680,7 @@ def test_security_sensitive_financial_data():
             "CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL, discount REAL)"
         )
         conn.execute("INSERT INTO orders VALUES (1, 100, 50.00, 0.0)")
-        # Malicious: order with 100% discount!
+        # Order with 100% discount
         conn.execute("INSERT INTO orders VALUES (2, 200, 1000.00, 1000.00)")
         conn.commit()
         conn.close()
@@ -690,15 +688,14 @@ def test_security_sensitive_financial_data():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # OLD WAY (insecure): This PASSES even with suspicious 100% discount
+        # expect_only with whole-row spec passes - doesn't check discount value
         before.diff(after).expect_only(
             [{"table": "orders", "pk": 2, "field": None, "after": "__added__"}]
         )
 
-        # NEW WAY (secure): Would catch the excessive discount
-        # If we specified expected values, this would fail:
+        # expect_only_v2 with field-level specs catches unexpected discount
         with pytest.raises(AssertionError, match="Unexpected database changes"):
-            before.diff(after).expect_only(
+            before.diff(after).expect_only_v2(
                 [
                     {"table": "orders", "pk": 2, "field": "id", "after": 2},
                     {"table": "orders", "pk": 2, "field": "user_id", "after": 200},
@@ -717,11 +714,9 @@ def test_security_sensitive_financial_data():
         os.unlink(after_db)
 
 
-def test_security_privilege_escalation_in_permissions():
+def test_permissions_validation():
     """
-    SECURITY: Demonstrates privilege escalation vulnerability with whole-row specs.
-
-    In a permissions system, whole-row specs could allow unauthorized permission grants.
+    Demonstrates difference between expect_only and expect_only_v2 for permissions.
     """
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -743,7 +738,7 @@ def test_security_privilege_escalation_in_permissions():
             "CREATE TABLE permissions (id INTEGER PRIMARY KEY, user_id INTEGER, resource TEXT, can_read INTEGER, can_write INTEGER, can_delete INTEGER)"
         )
         conn.execute("INSERT INTO permissions VALUES (1, 100, 'documents', 1, 0, 0)")
-        # Malicious: grant full permissions including delete!
+        # Grant full permissions including delete
         conn.execute("INSERT INTO permissions VALUES (2, 200, 'admin_panel', 1, 1, 1)")
         conn.commit()
         conn.close()
@@ -751,14 +746,14 @@ def test_security_privilege_escalation_in_permissions():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # INSECURE: Whole-row spec allows the dangerous permission grant
+        # expect_only with whole-row spec passes - doesn't check permission values
         before.diff(after).expect_only(
             [{"table": "permissions", "pk": 2, "field": None, "after": "__added__"}]
         )
 
-        # SECURE: Field-level specs would catch unauthorized delete permission
+        # expect_only_v2 with field-level specs catches unexpected delete permission
         with pytest.raises(AssertionError, match="Unexpected database changes"):
-            before.diff(after).expect_only(
+            before.diff(after).expect_only_v2(
                 [
                     {"table": "permissions", "pk": 2, "field": "id", "after": 2},
                     {"table": "permissions", "pk": 2, "field": "user_id", "after": 200},
@@ -784,9 +779,9 @@ def test_security_privilege_escalation_in_permissions():
         os.unlink(after_db)
 
 
-def test_security_data_injection_in_json_fields():
+def test_json_field_validation():
     """
-    SECURITY: Whole-row specs could allow malicious data in JSON/text fields.
+    Demonstrates difference between expect_only and expect_only_v2 for JSON/text fields.
     """
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -812,9 +807,9 @@ def test_security_data_injection_in_json_fields():
         conn.execute(
             "INSERT INTO configs VALUES (1, 'app_config', '{\"debug\": false}')"
         )
-        # Malicious: config with debug enabled and backdoor URL
+        # Config with different settings
         conn.execute(
-            'INSERT INTO configs VALUES (2, \'user_config\', \'{"debug": true, "backdoor": "https://evil.com"}\')'
+            'INSERT INTO configs VALUES (2, \'user_config\', \'{"debug": true, "extra": "value"}\')'
         )
         conn.commit()
         conn.close()
@@ -822,14 +817,14 @@ def test_security_data_injection_in_json_fields():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # INSECURE: Passes even with malicious settings
+        # expect_only with whole-row spec passes - doesn't check settings value
         before.diff(after).expect_only(
             [{"table": "configs", "pk": 2, "field": None, "after": "__added__"}]
         )
 
-        # SECURE: Would catch the malicious settings
+        # expect_only_v2 with field-level specs catches unexpected settings
         with pytest.raises(AssertionError, match="Unexpected database changes"):
-            before.diff(after).expect_only(
+            before.diff(after).expect_only_v2(
                 [
                     {"table": "configs", "pk": 2, "field": "id", "after": 2},
                     {
@@ -853,15 +848,14 @@ def test_security_data_injection_in_json_fields():
 
 
 # ============================================================================
-# Tests showing field-level specs being IGNORED (not validated)
-# These demonstrate cases where you specify field values but they're not checked
+# Tests showing expect_only vs expect_only_v2 behavior with conflicting specs
 # ============================================================================
 
 
-def test_bug_field_specs_ignored_with_whole_row_spec():
+def test_expect_only_ignores_field_specs_with_whole_row():
     """
-    This test SHOULD FAIL (on buggy code) because we specify wrong field values
-    that should be caught but aren't.
+    expect_only with whole-row spec ignores any additional field specs.
+    expect_only_v2 with field-level specs validates field values.
     """
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -891,15 +885,27 @@ def test_bug_field_specs_ignored_with_whole_row_spec():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # This SHOULD fail because we're specifying wrong values
-        # We say price=50.0 (actual: 999.99) and stock=500 (actual: 1)
-        # With the buggy implementation, this wrongly passes
-        # With the fix, this should raise AssertionError
+        # expect_only with whole-row spec passes - ignores field specs
+        before.diff(after).expect_only(
+            [{"table": "products", "pk": 2, "field": None, "after": "__added__"}]
+        )
+
+        # expect_only_v2 with wrong field values fails
         with pytest.raises(AssertionError, match="Unexpected database changes"):
-            before.diff(after).expect_only(
+            before.diff(after).expect_only_v2(
                 [
-                    {"table": "products", "pk": 2, "field": None, "after": "__added__"},
-                    # These specify WRONG values - should be caught!
+                    {
+                        "table": "products",
+                        "pk": 2,
+                        "field": "id",
+                        "after": 2,
+                    },
+                    {
+                        "table": "products",
+                        "pk": 2,
+                        "field": "name",
+                        "after": "Gadget",
+                    },
                     {
                         "table": "products",
                         "pk": 2,
@@ -920,13 +926,9 @@ def test_bug_field_specs_ignored_with_whole_row_spec():
         os.unlink(after_db)
 
 
-def test_bug_wrong_values_pass_with_whole_row_spec():
+def test_expect_only_v2_validates_field_values():
     """
-    BUG: You can specify any values in field specs alongside a whole-row spec,
-    even completely wrong ones, and validation passes.
-
-    This test SHOULD FAIL to catch the dangerous security issue where role=admin
-    and balance=1000000 are allowed even though we specified role=user and balance=0.
+    expect_only_v2 validates field values for added rows.
     """
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -956,13 +958,27 @@ def test_bug_wrong_values_pass_with_whole_row_spec():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # Should fail because field values don't match!
-        # We say role=user (actual: admin) and balance=0.0 (actual: 1000000.0)
+        # expect_only with whole-row spec passes
+        before.diff(after).expect_only(
+            [{"table": "accounts", "pk": 2, "field": None, "after": "__added__"}]
+        )
+
+        # expect_only_v2 with wrong field values fails
         with pytest.raises(AssertionError, match="Unexpected database changes"):
-            before.diff(after).expect_only(
+            before.diff(after).expect_only_v2(
                 [
-                    {"table": "accounts", "pk": 2, "field": None, "after": "__added__"},
-                    # These specifications are COMPLETELY WRONG - should be caught:
+                    {
+                        "table": "accounts",
+                        "pk": 2,
+                        "field": "id",
+                        "after": 2,
+                    },
+                    {
+                        "table": "accounts",
+                        "pk": 2,
+                        "field": "username",
+                        "after": "bob",
+                    },
                     {
                         "table": "accounts",
                         "pk": 2,
@@ -983,12 +999,9 @@ def test_bug_wrong_values_pass_with_whole_row_spec():
         os.unlink(after_db)
 
 
-def test_bug_conflicting_specs_pass_silently():
+def test_expect_only_v2_validates_is_public():
     """
-    BUG: You can have conflicting specs (field-level AND whole-row) and
-    the old implementation silently ignores the conflict, using only whole-row.
-
-    This test SHOULD FAIL because we specify is_public=0 but it's actually 1.
+    expect_only_v2 validates field values including boolean-like fields.
     """
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -1008,21 +1021,28 @@ def test_bug_conflicting_specs_pass_silently():
         conn.execute(
             "CREATE TABLE settings (id INTEGER PRIMARY KEY, key TEXT, value TEXT, is_public INTEGER)"
         )
-        # Add a setting that should be private but isn't
+        # Add a setting with is_public=1
         conn.execute(
             "INSERT INTO settings VALUES (1, 'api_key', 'secret123', 1)"
-        )  # is_public=1 (BAD!)
+        )
         conn.commit()
         conn.close()
 
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # Should fail - we say is_public=0 but it's actually 1 (security issue!)
+        # expect_only with whole-row spec passes
+        before.diff(after).expect_only(
+            [{"table": "settings", "pk": 1, "field": None, "after": "__added__"}]
+        )
+
+        # expect_only_v2 with wrong is_public value fails
         with pytest.raises(AssertionError, match="Unexpected database changes"):
-            before.diff(after).expect_only(
+            before.diff(after).expect_only_v2(
                 [
-                    {"table": "settings", "pk": 1, "field": None, "after": "__added__"},
+                    {"table": "settings", "pk": 1, "field": "id", "after": 1},
+                    {"table": "settings", "pk": 1, "field": "key", "after": "api_key"},
+                    {"table": "settings", "pk": 1, "field": "value", "after": "secret123"},
                     {
                         "table": "settings",
                         "pk": 1,
@@ -1037,13 +1057,9 @@ def test_bug_conflicting_specs_pass_silently():
         os.unlink(after_db)
 
 
-def test_bug_field_specs_dont_work_for_deletions():
+def test_expect_only_v2_validates_deletion_field_values():
     """
-    BUG: Field-level specs with 'before' values don't work for validating deletions.
-    Only whole-row deletion specs (field=None) are checked.
-
-    This test SHOULD FAIL because we're deleting an admin session when we said
-    we should only delete non-admin sessions (admin_session=0).
+    expect_only_v2 validates field values for deleted rows using 'before' key.
     """
 
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -1073,17 +1089,18 @@ def test_bug_field_specs_dont_work_for_deletions():
         before = DatabaseSnapshot(before_db)
         after = DatabaseSnapshot(after_db)
 
-        # Should fail - we say admin_session=0 but it's actually 1!
-        # We're deleting an admin session when we shouldn't be
+        # expect_only with whole-row spec passes
+        before.diff(after).expect_only(
+            [{"table": "sessions", "pk": 2, "field": None, "after": "__removed__"}]
+        )
+
+        # expect_only_v2 with wrong admin_session value fails
         with pytest.raises(AssertionError, match="Unexpected database changes"):
-            before.diff(after).expect_only(
+            before.diff(after).expect_only_v2(
                 [
-                    {
-                        "table": "sessions",
-                        "pk": 2,
-                        "field": None,
-                        "after": "__removed__",
-                    },
+                    {"table": "sessions", "pk": 2, "field": "id", "before": 2},
+                    {"table": "sessions", "pk": 2, "field": "user_id", "before": 101},
+                    {"table": "sessions", "pk": 2, "field": "active", "before": 1},
                     {
                         "table": "sessions",
                         "pk": 2,

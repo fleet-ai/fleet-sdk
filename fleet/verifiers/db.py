@@ -502,6 +502,153 @@ class SnapshotDiff:
                         )
 
             for row in report.get("added_rows", []):
+                if not _is_change_allowed(tbl, row["row_id"], None, "__added__"):
+                    unexpected_changes.append(
+                        {
+                            "type": "insertion",
+                            "table": tbl,
+                            "row_id": row["row_id"],
+                            "field": None,
+                            "after": "__added__",
+                            "full_row": row,
+                        }
+                    )
+
+            for row in report.get("removed_rows", []):
+                if not _is_change_allowed(tbl, row["row_id"], None, "__removed__"):
+                    unexpected_changes.append(
+                        {
+                            "type": "deletion",
+                            "table": tbl,
+                            "row_id": row["row_id"],
+                            "field": None,
+                            "after": "__removed__",
+                            "full_row": row,
+                        }
+                    )
+
+        if unexpected_changes:
+            # Build comprehensive error message
+            error_lines = ["Unexpected database changes detected:"]
+            error_lines.append("")
+
+            for i, change in enumerate(
+                unexpected_changes[:5], 1
+            ):  # Show first 5 changes
+                error_lines.append(
+                    f"{i}. {change['type'].upper()} in table '{change['table']}':"
+                )
+                error_lines.append(f"   Row ID: {change['row_id']}")
+
+                if change["type"] == "modification":
+                    error_lines.append(f"   Field: {change['field']}")
+                    error_lines.append(f"   Before: {repr(change['before'])}")
+                    error_lines.append(f"   After: {repr(change['after'])}")
+                elif change["type"] == "insertion":
+                    error_lines.append("   New row added")
+                elif change["type"] == "deletion":
+                    error_lines.append("   Row deleted")
+
+                # Show some context from the row
+                if "full_row" in change and change["full_row"]:
+                    row_data = change["full_row"]
+                    if change["type"] == "modification" and "data" in row_data:
+                        # For modifications, show the current state
+                        formatted_row = _format_row_for_error(
+                            row_data.get("data", {}), max_fields=5
+                        )
+                        error_lines.append(f"   Row data: {formatted_row}")
+                    elif (
+                        change["type"] in ["insertion", "deletion"]
+                        and "data" in row_data
+                    ):
+                        # For insertions/deletions, show the row data
+                        formatted_row = _format_row_for_error(
+                            row_data.get("data", {}), max_fields=5
+                        )
+                        error_lines.append(f"   Row data: {formatted_row}")
+
+                error_lines.append("")
+
+            if len(unexpected_changes) > 5:
+                error_lines.append(
+                    f"... and {len(unexpected_changes) - 5} more unexpected changes"
+                )
+                error_lines.append("")
+
+            # Show what changes were allowed
+            error_lines.append("Allowed changes were:")
+            if allowed_changes:
+                for i, allowed in enumerate(allowed_changes[:3], 1):
+                    error_lines.append(
+                        f"  {i}. Table: {allowed.get('table')}, "
+                        f"ID: {allowed.get('pk')}, "
+                        f"Field: {allowed.get('field')}, "
+                        f"After: {repr(allowed.get('after'))}"
+                    )
+                if len(allowed_changes) > 3:
+                    error_lines.append(
+                        f"  ... and {len(allowed_changes) - 3} more allowed changes"
+                    )
+            else:
+                error_lines.append("  (No changes were allowed)")
+
+            raise AssertionError("\n".join(error_lines))
+
+        return self
+
+    # ------------------------------------------------------------------
+    def expect_only_v2(self, allowed_changes: List[Dict[str, Any]]):
+        """Allowed changes with field-level spec support for added/removed rows.
+
+        This version supports field-level specifications for added/removed rows,
+        allowing users to specify expected field values instead of just whole-row specs.
+        """
+        diff = self._collect()
+
+        def _is_change_allowed(
+            table: str, row_id: str, field: Optional[str], after_value: Any
+        ) -> bool:
+            """Check if a change is in the allowed list using semantic comparison."""
+            for allowed in allowed_changes:
+                allowed_pk = allowed.get("pk")
+                # Handle type conversion for primary key comparison
+                # Convert both to strings for comparison to handle int/string mismatches
+                pk_match = (
+                    str(allowed_pk) == str(row_id) if allowed_pk is not None else False
+                )
+
+                if (
+                    allowed["table"] == table
+                    and pk_match
+                    and allowed.get("field") == field
+                    and _values_equivalent(allowed.get("after"), after_value)
+                ):
+                    return True
+            return False
+
+        # Collect all unexpected changes for detailed reporting
+        unexpected_changes = []
+
+        for tbl, report in diff.items():
+            for row in report.get("modified_rows", []):
+                for f, vals in row["changes"].items():
+                    if self.ignore_config.should_ignore_field(tbl, f):
+                        continue
+                    if not _is_change_allowed(tbl, row["row_id"], f, vals["after"]):
+                        unexpected_changes.append(
+                            {
+                                "type": "modification",
+                                "table": tbl,
+                                "row_id": row["row_id"],
+                                "field": f,
+                                "before": vals.get("before"),
+                                "after": vals["after"],
+                                "full_row": row,
+                            }
+                        )
+
+            for row in report.get("added_rows", []):
                 # Check if there are any field-level specs DEFINED for this row (not whether they match)
                 row_data = row.get("data", {})
                 has_field_specs = False
