@@ -382,7 +382,7 @@ def test_modification_no_other_changes_true_with_ellipsis():
         conn.commit()
         conn.close()
 
-        with pytest.raises(AssertionError) as exc_info:
+        with pytest.raises(AssertionError):
             before.diff(after).expect_only_v2(
                 [
                     {
@@ -396,7 +396,6 @@ def test_modification_no_other_changes_true_with_ellipsis():
                     },
                 ]
             )
-        print(exc_info.value, "BLAHS")
 
     finally:
         os.unlink(before_db)
