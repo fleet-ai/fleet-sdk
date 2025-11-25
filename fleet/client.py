@@ -21,7 +21,8 @@ import httpx
 import json
 import logging
 import os
-from typing import List, Optional, Dict, Any, TYPE_CHECKING
+from typing import List, Optional, Dict, Any, TYPE_CHECKING, Union
+from urllib.parse import urlparse
 
 from .base import EnvironmentBase, SyncWrapper
 from .models import (
@@ -35,6 +36,8 @@ from .models import (
     TaskRequest,
     TaskResponse,
     TaskUpdateRequest,
+    Run,
+    HeartbeatResponse,
 )
 from .tasks import Task
 
@@ -46,6 +49,11 @@ from .instance import (
     ResetRequest,
     ResetResponse,
     ExecuteFunctionResponse,
+)
+from .instance.models import (
+    Resource as ResourceModel,
+    ResourceType,
+    ResourceMode,
 )
 from .config import (
     DEFAULT_MAX_RETRIES,
@@ -69,6 +77,14 @@ class SyncEnv(EnvironmentBase):
         self._client = client
         self._apps: Dict[str, InstanceClient] = {}
         self._instance: Optional[InstanceClient] = None
+        self._manager_url_override: Optional[str] = None  # For URL mode
+
+    @property
+    def manager_url(self) -> str:
+        """Override to support URL mode where urls is None."""
+        if self._manager_url_override is not None:
+            return self._manager_url_override
+        return super().manager_url
 
     @property
     def instance(self) -> InstanceClient:
@@ -80,17 +96,17 @@ class SyncEnv(EnvironmentBase):
 
     def app(self, name: str) -> InstanceClient:
         if name not in self._apps:
-            # Extract base URL by removing the current app path (e.g., /sentry/api/v1/env)
-            # manager_url looks like: https://xxx.fleetai.com/sentry/api/v1/env
-            base_url = self.manager_url.split("/api/v1/env")[0]
-            # Remove the current app name (e.g., /sentry) to get the root
-            if "/" in base_url:
-                parts = base_url.rsplit("/", 1)
-                if len(parts) == 2 and parts[0] != "https:/":
-                    base_url = parts[0]
+            # Extract scheme://netloc from manager_url, then construct /{name}/api/v1/env
+            # Supports all URL formats:
+            #   https://host/api/v1/env -> https://host/{name}/api/v1/env
+            #   https://host/sentry/api/v1/env -> https://host/{name}/api/v1/env
+            #   http://localhost:8080/api/v1/env -> http://localhost:8080/{name}/api/v1/env
+            parsed = urlparse(self.manager_url)
+            root = f"{parsed.scheme}://{parsed.netloc}"
+            new_url = f"{root}/{name}/api/v1/env"
 
             self._apps[name] = InstanceClient(
-                f"{base_url}/{name}/api/v1/env",
+                new_url,
                 self._client.httpx_client if self._client else None,
             )
         return self._apps[name]
@@ -126,6 +142,23 @@ class SyncEnv(EnvironmentBase):
     def close(self) -> InstanceResponse:
         return _delete_instance(self._load_client, self.instance_id)
 
+    def heartbeat(self) -> HeartbeatResponse:
+        """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
+        
+        Returns:
+            HeartbeatResponse containing heartbeat status and deadline information
+        """
+        body = {}
+        if self.heartbeat_region:
+            body["region"] = self.heartbeat_region
+        
+        response = self._load_client.request(
+            "POST", 
+            f"/v1/env/instances/{self.instance_id}/heartbeat",
+            json=body
+        )
+        return HeartbeatResponse(**response.json())
+
     def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
         return self.instance.verify(validator)
 
@@ -148,6 +181,7 @@ class SyncEnv(EnvironmentBase):
         kwargs: dict,
         timeout: Optional[int] = 30,
         needs_upload: bool = True,
+        verifier_runtime_version: Optional[str] = None,
     ) -> VerifiersExecuteResponse:
         return _execute_verifier_remote(
             self._load_client,
@@ -160,6 +194,7 @@ class SyncEnv(EnvironmentBase):
             kwargs,
             timeout,
             needs_upload,
+            verifier_runtime_version,
         )
 
     def __getstate__(self):
@@ -212,6 +247,8 @@ class Fleet:
         env_variables: Optional[Dict[str, Any]] = None,
         image_type: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
+        run_id: Optional[str] = None,
+        heartbeat_interval: Optional[int] = None,
     ) -> SyncEnv:
         if ":" in env_key:
             env_key_part, env_version = env_key.split(":", 1)
@@ -247,6 +284,8 @@ class Fleet:
             image_type=image_type,
             created_from="sdk",
             ttl_seconds=ttl_seconds,
+            run_id=run_id,
+            heartbeat_interval=heartbeat_interval,
         )
 
         # Only use region-specific base URL if no custom base URL is set
@@ -269,13 +308,17 @@ class Fleet:
         return self.make(env_key=f"{task.env_id}:{task.version}")
 
     def instances(
-        self, status: Optional[str] = None, region: Optional[str] = None
+        self, status: Optional[str] = None, region: Optional[str] = None, run_id: Optional[str] = None, profile_id: Optional[str] = None
     ) -> List[SyncEnv]:
         params = {}
         if status:
             params["status"] = status
         if region:
             params["region"] = region
+        if run_id:
+            params["run_id"] = run_id
+        if profile_id:
+            params["profile_id"] = profile_id
 
         response = self.client.request("GET", "/v1/env/instances", params=params)
         return [
@@ -283,11 +326,165 @@ class Fleet:
             for instance_data in response.json()
         ]
 
-    def instance(self, instance_id: str) -> SyncEnv:
-        response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
-        instance = SyncEnv(client=self.client, **response.json())
-        instance.instance.load()
-        return instance
+    def instance(self, instance_id: Union[str, Dict[str, str]]) -> SyncEnv:
+        """Create or connect to an environment instance.
+
+        Supports three modes based on input type:
+        1. dict: Local filesystem mode - {"current": "./data.db", "seed": "./seed.db"}
+        2. str starting with http:// or https://: Localhost/URL mode
+        3. str (other): Remote cloud instance mode
+
+        Args:
+            instance_id: Instance identifier (str), URL (str starting with http://),
+                        or local db mapping (dict)
+
+        Returns:
+            SyncEnv: Environment instance
+        """
+        # Local filesystem mode - dict of resource names to file paths
+        if isinstance(instance_id, dict):
+            return self._create_local_instance(instance_id)
+
+        # Localhost/direct URL mode - string starting with http:// or https://
+        elif isinstance(instance_id, str) and instance_id.startswith(("http://", "https://")):
+            return self._create_url_instance(instance_id)
+
+        # Remote mode - existing behavior
+        else:
+            response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
+            instance = SyncEnv(client=self.client, **response.json())
+            instance.instance.load()
+            return instance
+
+    def _create_url_instance(self, base_url: str) -> SyncEnv:
+        """Create instance connected to a direct URL (localhost or custom).
+
+        Args:
+            base_url: URL of the instance manager API
+
+        Returns:
+            SyncEnv: Environment instance configured for URL mode
+        """
+        instance_client = InstanceClient(url=base_url, httpx_client=self._httpx_client)
+
+        # Create a minimal environment for URL mode
+        env = SyncEnv(
+            client=self.client,
+            instance_id=base_url,
+            env_key="localhost",
+            version="",
+            status="running",
+            subdomain="localhost",
+            created_at="",
+            updated_at="",
+            terminated_at=None,
+            team_id="",
+            region="localhost",
+            env_variables=None,
+            data_key=None,
+            data_version=None,
+            urls=None,
+            health=None,
+        )
+        env._instance = instance_client
+        env._manager_url_override = base_url  # Set manager_url for URL mode
+        return env
+
+    @staticmethod
+    def _normalize_db_path(path: str) -> tuple[str, bool]:
+        """Normalize database path and detect if it's in-memory.
+
+        Args:
+            path: Database path - can be:
+                  - File path: "./data.db"
+                  - Plain memory: ":memory:"
+                  - Named memory: ":memory:namespace"
+                  - URI: "file:name?mode=memory&cache=shared"
+
+        Returns:
+            Tuple of (normalized_path, is_memory)
+        """
+        import uuid
+        import sqlite3
+
+        if path == ":memory:":
+            # Plain :memory: - create unique namespace
+            name = f"mem_{uuid.uuid4().hex[:8]}"
+            return f"file:{name}?mode=memory&cache=shared", True
+        elif path.startswith(":memory:"):
+            # Named memory: :memory:current -> file:current?mode=memory&cache=shared
+            namespace = path[8:]  # Remove ":memory:" prefix
+            return f"file:{namespace}?mode=memory&cache=shared", True
+        elif "mode=memory" in path:
+            # Already a proper memory URI
+            return path, True
+        else:
+            # Regular file path
+            return path, False
+
+    def _create_local_instance(self, dbs: Dict[str, str]) -> SyncEnv:
+        """Create instance with local file-based or in-memory SQLite resources.
+
+        Args:
+            dbs: Map of resource names to paths (e.g., {"current": "./data.db"} or
+                 {"current": ":memory:current"})
+
+        Returns:
+            SyncEnv: Environment instance configured for local mode
+        """
+        import sqlite3
+
+        instance_client = InstanceClient(url="local://", httpx_client=None)
+        instance_client._resources = []  # Mark as loaded
+        instance_client._memory_anchors = {}  # Store anchor connections for in-memory DBs
+
+        # Store creation parameters for local SQLiteResources
+        # This allows db() to create new instances each time (matching HTTP mode behavior)
+        for name, path in dbs.items():
+            # Normalize path and detect if it's in-memory
+            normalized_path, is_memory = self._normalize_db_path(path)
+
+            # Create anchor connection for in-memory databases
+            # This keeps the database alive as long as the env exists
+            if is_memory:
+                anchor_conn = sqlite3.connect(normalized_path, uri=True)
+                instance_client._memory_anchors[name] = anchor_conn
+
+            resource_model = ResourceModel(
+                name=name,
+                type=ResourceType.db,
+                mode=ResourceMode.rw,
+                label=f"Local: {path}",
+            )
+            instance_client._resources_state[ResourceType.db.value][name] = {
+                'type': 'local',
+                'resource_model': resource_model,
+                'db_path': normalized_path,
+                'is_memory': is_memory
+            }
+
+        # Create a minimal environment for local mode
+        env = SyncEnv(
+            client=self.client,
+            instance_id="local",
+            env_key="local",
+            version="",
+            status="running",
+            subdomain="local",
+            created_at="",
+            updated_at="",
+            terminated_at=None,
+            team_id="",
+            region="local",
+            env_variables=None,
+            data_key=None,
+            data_version=None,
+            urls=None,
+            health=None,
+        )
+        env._instance = instance_client
+        env._manager_url_override = "local://"  # Set manager_url for local mode
+        return env
 
     def check_bundle_exists(self, bundle_hash: str) -> VerifiersCheckResponse:
         return _check_bundle_exists(self.client, bundle_hash)
@@ -299,6 +496,65 @@ class Fleet:
 
     def delete(self, instance_id: str) -> InstanceResponse:
         return _delete_instance(self.client, instance_id)
+
+    def close(self, instance_id: str) -> InstanceResponse:
+        """Close (delete) a specific instance by ID.
+        
+        Args:
+            instance_id: The instance ID to close
+            
+        Returns:
+            InstanceResponse containing the deleted instance details
+        """
+        return _delete_instance(self.client, instance_id)
+
+    def heartbeat(self, instance_id: str, region: Optional[str] = None) -> HeartbeatResponse:
+        """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
+        
+        Args:
+            instance_id: The instance ID to send heartbeat for
+            region: Optional region override for cross-region heartbeats
+            
+        Returns:
+            HeartbeatResponse containing heartbeat status and deadline information
+        """
+        return _send_heartbeat(self.client, instance_id, region)
+
+    def close_all(self, run_id: Optional[str] = None, profile_id: Optional[str] = None) -> List[InstanceResponse]:
+        """Close (delete) instances using the batch delete endpoint.
+        
+        Args:
+            run_id: Optional run ID to filter instances by
+            profile_id: Optional profile ID to filter instances by (use "self" for your own profile)
+            
+        Returns:
+            List[InstanceResponse] containing the deleted instances
+            
+        Note:
+            At least one of run_id or profile_id must be provided.
+        """
+        return _delete_instances_batch(self.client, run_id=run_id, profile_id=profile_id)
+    
+    def list_runs(
+        self, profile_id: Optional[str] = None, status: Optional[str] = "active"
+    ) -> List[Run]:
+        """List all runs (groups of instances by run_id) with aggregated statistics.
+        
+        Args:
+            profile_id: Optional profile ID to filter runs by (use "self" for your own profile)
+            status: Filter by run status - "active" (default), "inactive", or "all"
+            
+        Returns:
+            List[Run] containing run information with instance counts and timestamps
+        """
+        params = {}
+        if profile_id:
+            params["profile_id"] = profile_id
+        if status:
+            params["active"] = status
+            
+        response = self.client.request("GET", "/v1/env/runs", params=params)
+        return [Run(**run_data) for run_data in response.json()]
 
     def load_tasks_from_file(self, filename: str) -> List[Task]:
         with open(filename, "r", encoding="utf-8") as f:
@@ -366,6 +622,11 @@ class Fleet:
         if not verifier_id:
             verifier_id = task_json.get("key", task_json.get("id"))
 
+        # Extract verifier_runtime_version from metadata if present
+        verifier_runtime_version = None
+        if "metadata" in task_json and isinstance(task_json["metadata"], dict):
+            verifier_runtime_version = task_json["metadata"].get("verifier_runtime_version")
+
         try:
             if verifier_id and verifier_code:
                 verifier = self._create_verifier_from_data(
@@ -373,13 +634,14 @@ class Fleet:
                     verifier_key=task_json.get("key", task_json.get("id")),
                     verifier_code=verifier_code,
                     verifier_sha=verifier_sha,
+                    verifier_runtime_version=verifier_runtime_version,
                 )
         except Exception as e:
             error_msg = f"Failed to create verifier {task_json.get('key', task_json.get('id'))}: {e}"
             if raise_on_verifier_error:
                 raise ValueError(error_msg) from e
-            else:
-                logger.warning(error_msg)
+            # else:
+            #     logger.warning(error_msg)
 
         task = Task(
             key=task_json.get("key", task_json.get("id")),
@@ -396,6 +658,7 @@ class Fleet:
             verifier=verifier,  # Use created verifier or None
             verifier_id=verifier_id,  # Set verifier_id so _rebuild_verifier works
             verifier_sha=verifier_sha,  # Set verifier_sha
+            verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
             metadata=task_json.get("metadata", {}),  # Default empty metadata
             output_json_schema=task_json.get("output_json_schema"),  # JSON schema for output
         )
@@ -469,23 +732,23 @@ class Fleet:
                                 verifier_sha=tr.verifier.sha256,
                             )
                         except Exception as e:
-                            logger.warning(
-                                f"Failed to create verifier {tr.verifier.key}: {e}"
-                            )
+                            # logger.warning(
+                            #     f"Failed to create verifier {tr.verifier.key}: {e}"
+                            # )
                             return None
                     else:
                         # Fallback: try fetching by ID
                         try:
-                            logger.warning(
-                                f"Embedded verifier code missing for {tr.verifier.key} (NoSuchKey). "
-                                f"Attempting to refetch by id {tr.verifier.verifier_id}"
-                            )
+                            # logger.warning(
+                            #     f"Embedded verifier code missing for {tr.verifier.key} (NoSuchKey). "
+                            #     f"Attempting to refetch by id {tr.verifier.verifier_id}"
+                            # )
                             return self._load_verifier(tr.verifier.verifier_id)
                         except Exception as e:
-                            logger.warning(
-                                f"Refetch by verifier id failed for {tr.verifier.key}: {e}. "
-                                "Leaving verifier unset."
-                            )
+                            # logger.warning(
+                            #     f"Refetch by verifier id failed for {tr.verifier.key}: {e}. "
+                            #     "Leaving verifier unset."
+                            # )
                             return None
 
                 # Add the task for parallel execution
@@ -525,7 +788,7 @@ class Fleet:
                             result = future.result()
                             verifier_results.append(result)
                         except Exception as e:
-                            logger.warning(f"Verifier loading failed: {e}")
+                            # logger.warning(f"Verifier loading failed: {e}")
                             verifier_results.append(None)
 
         # Build tasks with results
@@ -559,7 +822,7 @@ class Fleet:
                 env_variables=task_response.env_variables or {},
                 verifier_func=verifier_func,  # Set verifier code
                 verifier=verifier,  # Use created verifier or None
-                metadata={},  # Default empty metadata
+                metadata=task_response.metadata or {},
                 output_json_schema=getattr(task_response, "output_json_schema", None),  # Get output_json_schema if available
             )
             tasks.append(task)
@@ -612,10 +875,10 @@ class Fleet:
             with open(filename, "w", encoding="utf-8") as f:
                 json.dump(tasks_data, f, indent=2, default=str)
 
-            logger.info(f"Exported {len(tasks)} tasks to {filename}")
+            # logger.info(f"Exported {len(tasks)} tasks to {filename}")
             return filename
         else:
-            logger.info("No tasks found to export")
+            # logger.info("No tasks found to export")
             return None
 
     def import_single_task(self, task: Task, project_key: Optional[str] = None):
@@ -644,7 +907,7 @@ class Fleet:
             )
             return response
         except Exception as e:
-            logger.error(f"Failed to import task {task.key}: {e}")
+            # logger.error(f"Failed to import task {task.key}: {e}")
             return None
 
     def import_tasks(self, filename: str, project_key: Optional[str] = None):
@@ -706,6 +969,7 @@ class Fleet:
         task_key: str,
         prompt: Optional[str] = None,
         verifier_code: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> TaskResponse:
         """Update an existing task.
 
@@ -713,11 +977,12 @@ class Fleet:
             task_key: The key of the task to update
             prompt: New prompt text for the task (optional)
             verifier_code: Python code for task verification (optional)
+            metadata: Additional metadata for the task (optional)
 
         Returns:
             TaskResponse containing the updated task details
         """
-        payload = TaskUpdateRequest(prompt=prompt, verifier_code=verifier_code)
+        payload = TaskUpdateRequest(prompt=prompt, verifier_code=verifier_code, metadata=metadata)
         response = self.client.request(
             "PUT", f"/v1/tasks/{task_key}", json=payload.model_dump(exclude_none=True)
         )
@@ -751,7 +1016,7 @@ class Fleet:
         return TaskResponse(**response.json())
 
     def _create_verifier_from_data(
-        self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str
+        self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str, verifier_runtime_version: Optional[str] = None
     ) -> "SyncVerifierFunction":
         """Create an AsyncVerifierFunction from verifier data.
 
@@ -773,6 +1038,7 @@ class Fleet:
             verifier_id=verifier_id,
             verifier_key=verifier_key,
             sha256=verifier_sha,
+            verifier_runtime_version=verifier_runtime_version or "",
         )
 
         # Store the original verifier code for reference
@@ -808,6 +1074,37 @@ def _delete_instance(client: SyncWrapper, instance_id: str) -> InstanceResponse:
     return InstanceResponse(**response.json())
 
 
+def _send_heartbeat(client: SyncWrapper, instance_id: str, region: Optional[str] = None) -> HeartbeatResponse:
+    """Send heartbeat to keep instance alive."""
+    body = {}
+    if region:
+        body["region"] = region
+    
+    response = client.request(
+        "POST",
+        f"/v1/env/instances/{instance_id}/heartbeat",
+        json=body
+    )
+    return HeartbeatResponse(**response.json())
+
+
+def _delete_instances_batch(
+    client: SyncWrapper, run_id: Optional[str] = None, profile_id: Optional[str] = None
+) -> List[InstanceResponse]:
+    """Delete instances using the batch endpoint with flexible filtering."""
+    params = {}
+    if run_id:
+        params["run_id"] = run_id
+    if profile_id:
+        params["profile_id"] = profile_id
+    
+    if not params:
+        raise ValueError("At least one of run_id or profile_id must be provided")
+    
+    response = client.request("DELETE", "/v1/env/instances/batch", params=params)
+    return [InstanceResponse(**instance_data) for instance_data in response.json()]
+
+
 def _check_bundle_exists(
     client: SyncWrapper, bundle_hash: str
 ) -> VerifiersCheckResponse:
@@ -826,6 +1123,7 @@ def _execute_verifier_remote(
     kwargs: dict,
     timeout: Optional[int] = 30,
     needs_upload: bool = True,
+    verifier_runtime_version: Optional[str] = None,
 ) -> VerifiersExecuteResponse:
     # Pickle args and kwargs together
     # The first arg should be None as a placeholder for env
@@ -849,18 +1147,22 @@ def _execute_verifier_remote(
         bundle_b64 = base64.b64encode(bundle_data).decode("utf-8")
         request_data["bundle"] = bundle_b64
 
+    # Add verifier_runtime_version if present
+    if verifier_runtime_version:
+        request_data["verifier_runtime_version"] = verifier_runtime_version
+
     # Debug logging
-    logger.debug(
-        f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}"
-    )
-    logger.debug(f"Request has bundle: {needs_upload}")
-    logger.debug(f"Using client with base_url: {client.base_url}")
-    logger.debug(f"Request data keys: {list(request_data.keys())}")
-    logger.debug(
-        f"Bundle size: {len(request_data.get('bundle', ''))} chars"
-        if "bundle" in request_data
-        else "No bundle"
-    )
+    # logger.debug(
+    #     f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}"
+    # )
+    # logger.debug(f"Request has bundle: {needs_upload}")
+    # logger.debug(f"Using client with base_url: {client.base_url}")
+    # logger.debug(f"Request data keys: {list(request_data.keys())}")
+    # logger.debug(
+    #     f"Bundle size: {len(request_data.get('bundle', ''))} chars"
+    #     if "bundle" in request_data
+    #     else "No bundle"
+    # )
 
     # Note: This should be called on the instance URL, not the orchestrator
     # The instance has manager URLs for verifier execution
@@ -868,6 +1170,6 @@ def _execute_verifier_remote(
 
     # Debug the response
     response_json = response.json()
-    logger.debug(f"Verifier execute response: {response_json}")
+    # logger.debug(f"Verifier execute response: {response_json}")
 
     return VerifiersExecuteResponse(**response_json)

@@ -26,7 +26,7 @@ from .exceptions import (
 )
 from .client import Fleet, SyncEnv
 from ._async.client import AsyncFleet, AsyncEnv
-from .models import InstanceResponse, Environment
+from .models import InstanceResponse, Environment, Run
 from .instance.models import Resource, ResetResponse
 
 # Import sync verifiers with explicit naming
@@ -73,7 +73,7 @@ from . import env
 from . import global_client as _global_client
 from ._async import global_client as _async_global_client
 
-__version__ = "0.1.0"
+__version__ = "0.2.74"
 
 __all__ = [
     # Core classes
@@ -86,6 +86,7 @@ __all__ = [
     "SyncEnv",
     "Resource",
     "ResetResponse",
+    "Run",
     # Task models
     "Task",
     "VerifierFunction",

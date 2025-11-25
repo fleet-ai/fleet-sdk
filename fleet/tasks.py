@@ -36,6 +36,7 @@ class Task(BaseModel):
     )
     verifier_id: Optional[str] = Field(None, description="Verifier identifier")
     verifier_sha: Optional[str] = Field(None, description="Verifier SHA256 hash")
+    verifier_runtime_version: Optional[str] = Field(None, description="Verifier runtime version")
     metadata: Optional[Dict[str, Any]] = Field(
         default_factory=dict, description="Additional task metadata"
     )
@@ -199,26 +200,37 @@ class Task(BaseModel):
                 verifier_id=verifier_id,
                 verifier_key=self.key,
                 sha256=self.verifier_sha or "",
+                verifier_runtime_version=self.verifier_runtime_version or "",
             )
             self.verifier = verifier
 
-    def make_env(self, region: Optional[str] = None):
+    def make_env(
+        self,
+        region: Optional[str] = None,
+        image_type: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+        run_id: Optional[str] = None,
+        heartbeat_interval: Optional[int] = None,
+    ):
         """Create an environment instance for this task's environment.
 
-        Uses the task's env_id (and version if present) to create the env.
+        Alias for make() method. Uses the task's env_id (and version if present) to create the env.
         """
-        if not self.env_id:
-            raise ValueError("Task has no env_id defined")
-        # Deferred import to avoid circular dependencies
-        from .client import Fleet
-
-        return Fleet().make(env_key=self.env_key, region=region)
+        return self.make(
+            region=region,
+            image_type=image_type,
+            ttl_seconds=ttl_seconds,
+            run_id=run_id,
+            heartbeat_interval=heartbeat_interval,
+        )
 
     def make(
         self,
         region: Optional[str] = None,
         image_type: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
+        run_id: Optional[str] = None,
+        heartbeat_interval: Optional[int] = None,
     ):
         """Create an environment instance with task's configuration.
 
@@ -226,11 +238,15 @@ class Task(BaseModel):
         - env_key (env_id + version)
         - data_key (data_id + data_version, if present)
         - env_variables (if present)
+        - run_id (if present)
+        - heartbeat_interval (if present)
 
         Args:
             region: Optional AWS region for the environment
             image_type: Optional image type for the environment
             ttl_seconds: Optional TTL in seconds for the instance
+            run_id: Optional run ID to group instances
+            heartbeat_interval: Optional heartbeat interval in seconds (30-3600)
 
         Returns:
             Environment instance configured for this task
@@ -238,7 +254,7 @@ class Task(BaseModel):
         Example:
             task = fleet.Task(key="my-task", prompt="...", env_id="my-env",
                             data_id="my-data", data_version="v1.0")
-            env = task.make(region="us-west-2")
+            env = task.make(region="us-west-2", run_id="my-batch-123", heartbeat_interval=60)
         """
         if not self.env_id:
             raise ValueError("Task has no env_id defined")
@@ -253,11 +269,13 @@ class Task(BaseModel):
             env_variables=self.env_variables if self.env_variables else None,
             image_type=image_type,
             ttl_seconds=ttl_seconds,
+            run_id=run_id,
+            heartbeat_interval=heartbeat_interval,
         )
 
 
 def verifier_from_string(
-    verifier_func: str, verifier_id: str, verifier_key: str, sha256: str = ""
+    verifier_func: str, verifier_id: str, verifier_key: str, sha256: str = "", verifier_runtime_version: str = ""
 ) -> "VerifierFunction":
     """Create a verifier function from string code.
 
@@ -266,6 +284,7 @@ def verifier_from_string(
         verifier_id: Unique identifier for the verifier
         verifier_key: Key/name for the verifier
         sha256: SHA256 hash of the verifier code
+        verifier_runtime_version: Verifier runtime version
 
     Returns:
         VerifierFunction instance that can be used to verify tasks
@@ -273,16 +292,54 @@ def verifier_from_string(
     try:
         import inspect
         import re
+        import json
+        import string
         from .verifiers import SyncVerifierFunction
         from .verifiers.code import TASK_SUCCESSFUL_SCORE, TASK_FAILED_SCORE
         from .verifiers.db import IgnoreConfig
 
         # Strip @verifier decorator if present to avoid double-wrapping
         # Remove lines like: @verifier(key="...")
-        cleaned_code = re.sub(r'@verifier\([^)]*\)\s*\n', '', verifier_func)
+        cleaned_code = re.sub(r"@verifier\([^)]*\)\s*\n", "", verifier_func)
         # Also remove the verifier import if present
-        cleaned_code = re.sub(r'from fleet import.*verifier.*\n', '', cleaned_code)
-        cleaned_code = re.sub(r'import.*verifier.*\n', '', cleaned_code)
+        # Use MULTILINE flag to match beginning of lines with ^
+        cleaned_code = re.sub(r"^from fleet\.verifiers.*import.*verifier.*$\n?", "", cleaned_code, flags=re.MULTILINE)
+        cleaned_code = re.sub(r"^from fleet import verifier.*$\n?", "", cleaned_code, flags=re.MULTILINE)
+        cleaned_code = re.sub(r"^import fleet\.verifiers.*$\n?", "", cleaned_code, flags=re.MULTILINE)
+        cleaned_code = re.sub(r"^import fleet$\n?", "", cleaned_code, flags=re.MULTILINE)
+
+        # Define helper functions for verifier execution
+        _TRANSLATOR = str.maketrans(string.punctuation, " " * len(string.punctuation))
+        
+        def _normalize_text(value: str) -> str:
+            text = value.lower().translate(_TRANSLATOR)
+            return "".join(text.split())
+        
+        def _stringify_content(content: Any) -> str:
+            if isinstance(content, (dict, list)):
+                return json.dumps(content, sort_keys=True)
+            return str(content)
+        
+        def normalized_contains(target: str, blob: Any) -> bool:
+            normalized_target = _normalize_text(target)
+            normalized_blob = _normalize_text(_stringify_content(blob))
+            return normalized_target in normalized_blob
+        
+        def extract_numbers(text: str) -> list:
+            cleaned_text = text.replace(',', '')
+            pattern = r'-?\d+\.?\d*'
+            matches = re.findall(pattern, cleaned_text)
+            return [float(num) for num in matches]
+        
+        def contains_number(text: str, target_number) -> bool:
+            numbers = extract_numbers(text)
+            try:
+                if isinstance(target_number, str):
+                    target_number = target_number.replace(',', '')
+                target = float(target_number)
+            except (ValueError, AttributeError):
+                return False
+            return target in numbers
 
         # Create a globals namespace with all required imports
         exec_globals = globals().copy()
@@ -292,6 +349,12 @@ def verifier_from_string(
                 "TASK_FAILED_SCORE": TASK_FAILED_SCORE,
                 "IgnoreConfig": IgnoreConfig,
                 "Environment": object,  # Add Environment type if needed
+                "normalized_contains": normalized_contains,
+                "extract_numbers": extract_numbers,
+                "contains_number": contains_number,
+                "json": json,
+                "re": re,
+                "string": string,
             }
         )
 
@@ -320,6 +383,7 @@ def verifier_from_string(
             verifier_id=verifier_id,
             sha256=sha256,
             raw_code=verifier_func,
+            verifier_runtime_version=verifier_runtime_version if verifier_runtime_version else None,
         )
 
         # Store additional metadata
@@ -389,7 +453,7 @@ def load_tasks(
 
 
 def update_task(
-    task_key: str, prompt: Optional[str] = None, verifier_code: Optional[str] = None
+    task_key: str, prompt: Optional[str] = None, verifier_code: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None
 ):
     """Convenience function to update an existing task.
 
@@ -397,6 +461,7 @@ def update_task(
         task_key: The key of the task to update
         prompt: New prompt text for the task (optional)
         verifier_code: Python code for task verification (optional)
+        metadata: Additional metadata for the task (optional)
 
     Returns:
         TaskResponse containing the updated task details
@@ -404,16 +469,19 @@ def update_task(
     Examples:
         response = fleet.update_task("my-task", prompt="New prompt text")
         response = fleet.update_task("my-task", verifier_code="def verify(env): return True")
+        response = fleet.update_task("my-task", metadata={"seed": 42, "story": "Updated story"})
     """
     from .global_client import get_client
 
     client = get_client()
     return client.update_task(
-        task_key=task_key, prompt=prompt, verifier_code=verifier_code
+        task_key=task_key, prompt=prompt, verifier_code=verifier_code, metadata=metadata
     )
 
 
-def get_task(task_key: str, version_id: Optional[str] = None, team_id: Optional[str] = None):
+def get_task(
+    task_key: str, version_id: Optional[str] = None, team_id: Optional[str] = None
+):
     """Convenience function to get a task by key and optional version.
 
     Args:

@@ -49,7 +49,7 @@ class SyncVerifierFunction:
                     )
 
         except Exception as e:
-            logger.error(f"Error in verifier {self.key}: {e}")
+            # logger.error(f"Error in verifier {self.key}: {e}")
             # Return error score 0
             return 0.0
 

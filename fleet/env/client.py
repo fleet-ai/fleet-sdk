@@ -1,5 +1,5 @@
 from ..client import Fleet, SyncEnv, Task
-from ..models import Environment as EnvironmentModel, AccountResponse
+from ..models import Environment as EnvironmentModel, AccountResponse, InstanceResponse, Run, HeartbeatResponse
 from typing import List, Optional, Dict, Any
 
 
@@ -10,6 +10,8 @@ def make(
     env_variables: Optional[Dict[str, Any]] = None,
     image_type: Optional[str] = None,
     ttl_seconds: Optional[int] = None,
+    run_id: Optional[str] = None,
+    heartbeat_interval: Optional[int] = None,
 ) -> SyncEnv:
     return Fleet().make(
         env_key,
@@ -18,6 +20,8 @@ def make(
         env_variables=env_variables,
         image_type=image_type,
         ttl_seconds=ttl_seconds,
+        run_id=run_id,
+        heartbeat_interval=heartbeat_interval,
     )
 
 
@@ -34,13 +38,66 @@ def list_regions() -> List[str]:
 
 
 def list_instances(
-    status: Optional[str] = None, region: Optional[str] = None
+    status: Optional[str] = None, region: Optional[str] = None, run_id: Optional[str] = None, profile_id: Optional[str] = None
 ) -> List[SyncEnv]:
-    return Fleet().instances(status=status, region=region)
+    return Fleet().instances(status=status, region=region, run_id=run_id, profile_id=profile_id)
 
 
 def get(instance_id: str) -> SyncEnv:
     return Fleet().instance(instance_id)
+
+
+def close(instance_id: str) -> InstanceResponse:
+    """Close (delete) a specific instance by ID.
+    
+    Args:
+        instance_id: The instance ID to close
+        
+    Returns:
+        InstanceResponse containing the deleted instance details
+    """
+    return Fleet().close(instance_id)
+
+
+def close_all(run_id: Optional[str] = None, profile_id: Optional[str] = None) -> List[InstanceResponse]:
+    """Close (delete) instances using the batch delete endpoint.
+    
+    Args:
+        run_id: Optional run ID to filter instances by
+        profile_id: Optional profile ID to filter instances by (use "self" for your own profile)
+        
+    Returns:
+        List[InstanceResponse] containing the deleted instances
+        
+    Note:
+        At least one of run_id or profile_id must be provided.
+    """
+    return Fleet().close_all(run_id=run_id, profile_id=profile_id)
+
+
+def list_runs(profile_id: Optional[str] = None, status: Optional[str] = "active") -> List[Run]:
+    """List all runs (groups of instances by run_id) with aggregated statistics.
+    
+    Args:
+        profile_id: Optional profile ID to filter runs by (use "self" for your own profile)
+        status: Filter by run status - "active" (default), "inactive", or "all"
+        
+    Returns:
+        List[Run] containing run information with instance counts and timestamps
+    """
+    return Fleet().list_runs(profile_id=profile_id, status=status)
+
+
+def heartbeat(instance_id: str) -> HeartbeatResponse:
+    """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
+    
+    Args:
+        instance_id: The instance ID to send heartbeat for
+        
+    Returns:
+        HeartbeatResponse containing heartbeat status and deadline information
+    """
+    return Fleet().heartbeat(instance_id)
 
 
 def account() -> AccountResponse:

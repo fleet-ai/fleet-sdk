@@ -155,12 +155,14 @@ class TaskRequest(BaseModel):
     verifier_id: Optional[str] = Field(None, title="Verifier Id")
     version: Optional[str] = Field(None, title="Version")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
+    metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
     output_json_schema: Optional[Dict[str, Any]] = Field(None, title="Output Json Schema")
 
 
 class TaskUpdateRequest(BaseModel):
     prompt: Optional[str] = Field(None, title="Prompt")
     verifier_code: Optional[str] = Field(None, title="Verifier Code")
+    metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
 
 
 class VerifierData(BaseModel):
@@ -186,6 +188,7 @@ class TaskResponse(BaseModel):
     data_version: Optional[str] = Field(None, title="Data Version")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     verifier: Optional[VerifierData] = Field(None, title="Verifier")
+    metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
     output_json_schema: Optional[Dict[str, Any]] = Field(None, title="Output Json Schema")
 
 

@@ -83,9 +83,17 @@ class InstanceClient:
         Returns:
             An SQLite database resource for the given database name
         """
-        return SQLiteResource(
-            self._resources_state[ResourceType.db.value][name], self.client
-        )
+        resource_info = self._resources_state[ResourceType.db.value][name]
+        # Local mode - resource_info is a dict with creation parameters
+        if isinstance(resource_info, dict) and resource_info.get('type') == 'local':
+            # Create new instance each time (matching HTTP mode behavior)
+            return SQLiteResource(
+                resource_info['resource_model'],
+                client=None,
+                db_path=resource_info['db_path']
+            )
+        # HTTP mode - resource_info is a ResourceModel, create new wrapper
+        return SQLiteResource(resource_info, self.client)
 
     def browser(self, name: str) -> BrowserResource:
         return BrowserResource(
@@ -128,7 +136,7 @@ class InstanceClient:
 
     def _load_resources(self) -> None:
         if self._resources is None:
-            response = self.client.request("GET", "/resources", timeout=1.0)
+            response = self.client.request("GET", "/resources")
             if response.status_code != 200:
                 self._resources = []
                 return
@@ -175,10 +183,17 @@ class InstanceClient:
         response = self.client.request("GET", "/health")
         return HealthResponse(**response.json())
 
+    def close(self):
+        """Close anchor connections for in-memory databases."""
+        if hasattr(self, '_memory_anchors'):
+            for conn in self._memory_anchors.values():
+                conn.close()
+            self._memory_anchors.clear()
+
     def __enter__(self):
-        """Async context manager entry."""
+        """Context manager entry."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
+        """Context manager exit."""
         self.close()

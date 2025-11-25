@@ -7,6 +7,10 @@ from .client import (
     list_regions,
     get,
     list_instances,
+    close,
+    close_all,
+    list_runs,
+    heartbeat,
     account,
 )
 
@@ -17,6 +21,10 @@ from .._async.env.client import (
     list_regions_async,
     get_async,
     list_instances_async,
+    close_async,
+    close_all_async,
+    list_runs_async,
+    heartbeat_async,
     account_async,
 )
 
@@ -27,11 +35,19 @@ __all__ = [
     "list_regions",
     "list_instances",
     "get",
+    "close",
+    "close_all",
+    "list_runs",
+    "heartbeat",
     "make_async",
     "list_envs_async",
     "list_regions_async",
     "list_instances_async",
     "get_async",
+    "close_async",
+    "close_all_async",
+    "list_runs_async",
+    "heartbeat_async",
     "account",
     "account_async",
 ]
