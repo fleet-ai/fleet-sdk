@@ -232,25 +232,7 @@ Remote traceback:
     ) -> "VerifiersExecuteResponse":
         """Remote execution of the verifier function that returns the full response model."""
         args_array = list(args)
-        # Send complete environment data for remote reconstruction
-        env_data = {
-            "instance_id": env.instance_id,
-            "env_key": env.env_key,
-            "version": env.version,
-            "status": env.status,
-            "subdomain": env.subdomain,
-            "created_at": env.created_at,
-            "updated_at": env.updated_at,
-            "terminated_at": env.terminated_at,
-            "team_id": env.team_id,
-            "region": env.region,
-            "env_variables": env.env_variables,
-            "data_key": env.data_key,
-            "data_version": env.data_version,
-            "urls": env.urls.model_dump() if env.urls else None,
-            "health": env.health,
-        }
-        args_array.append({"env": env_data})
+        args_array.append({"env": env.instance_id})
         args = tuple(args_array)
 
         try:
