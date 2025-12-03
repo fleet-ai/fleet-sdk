@@ -29,7 +29,6 @@ jobs:
           ./scripts/validate-release-tag.sh "$RELEASE_TAG"
           echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
           echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
-
   build-and-publish:
     needs: validate
     runs-on: ubuntu-latest
