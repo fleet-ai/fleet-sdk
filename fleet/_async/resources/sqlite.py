@@ -761,6 +761,317 @@ class AsyncSnapshotDiff:
 
         return self
 
+    async def _expect_only_targeted_v2(self, allowed_changes: List[Dict[str, Any]]):
+        """Optimized v2 version that only queries specific rows mentioned in allowed_changes."""
+        import asyncio
+
+        # Helper functions for v2 validation (same as in _validate_diff_against_allowed_changes_v2)
+        def _parse_fields_spec(
+            fields_spec: List[Tuple[str, Any]]
+        ) -> Dict[str, Tuple[bool, Any]]:
+            """Parse a fields spec into a mapping of field_name -> (should_check_value, expected_value)."""
+            spec_map: Dict[str, Tuple[bool, Any]] = {}
+            for spec_tuple in fields_spec:
+                if len(spec_tuple) != 2:
+                    raise ValueError(
+                        f"Invalid field spec tuple: {spec_tuple}. "
+                        f"Expected 2-tuple like ('field', value), ('field', None), or ('field', ...)"
+                    )
+                field_name, expected_value = spec_tuple
+                if expected_value is ...:
+                    spec_map[field_name] = (False, None)
+                else:
+                    spec_map[field_name] = (True, expected_value)
+            return spec_map
+
+        def _validate_row_with_fields_spec(
+            table: str,
+            row_id: Any,
+            row_data: Dict[str, Any],
+            fields_spec: List[Tuple[str, Any]],
+        ) -> Optional[List[Tuple[str, Any, str]]]:
+            """Validate an inserted/deleted row against a bulk fields spec."""
+            spec_map = _parse_fields_spec(fields_spec)
+            unmatched_fields: List[Tuple[str, Any, str]] = []
+
+            for field_name, field_value in row_data.items():
+                if field_name == "rowid":
+                    continue
+                if self.ignore_config.should_ignore_field(table, field_name):
+                    continue
+
+                if field_name not in spec_map:
+                    unmatched_fields.append(
+                        (field_name, field_value, "NOT_IN_FIELDS_SPEC")
+                    )
+                else:
+                    should_check, expected_value = spec_map[field_name]
+                    if should_check and not _values_equivalent(
+                        expected_value, field_value
+                    ):
+                        unmatched_fields.append(
+                            (field_name, field_value, f"expected {repr(expected_value)}")
+                        )
+
+            return unmatched_fields if unmatched_fields else None
+
+        def _validate_modification_with_fields_spec(
+            table: str,
+            row_id: Any,
+            row_changes: Dict[str, Dict[str, Any]],
+            resulting_fields: List[Tuple[str, Any]],
+            no_other_changes: bool,
+        ) -> Optional[List[Tuple[str, Any, str]]]:
+            """Validate a modification against a resulting_fields spec."""
+            spec_map = _parse_fields_spec(resulting_fields)
+            unmatched_fields: List[Tuple[str, Any, str]] = []
+
+            for field_name, vals in row_changes.items():
+                if self.ignore_config.should_ignore_field(table, field_name):
+                    continue
+
+                after_value = vals["after"]
+
+                if field_name not in spec_map:
+                    if no_other_changes:
+                        unmatched_fields.append(
+                            (field_name, after_value, "NOT_IN_RESULTING_FIELDS")
+                        )
+                else:
+                    should_check, expected_value = spec_map[field_name]
+                    if should_check and not _values_equivalent(
+                        expected_value, after_value
+                    ):
+                        unmatched_fields.append(
+                            (field_name, after_value, f"expected {repr(expected_value)}")
+                        )
+
+            return unmatched_fields if unmatched_fields else None
+
+        # Group allowed changes by table
+        changes_by_table: Dict[str, List[Dict[str, Any]]] = {}
+        for change in allowed_changes:
+            table = change["table"]
+            if table not in changes_by_table:
+                changes_by_table[table] = []
+            changes_by_table[table].append(change)
+
+        errors = []
+
+        def _get_change_spec(table_changes: List[Dict[str, Any]], pk: Any) -> Optional[Dict[str, Any]]:
+            """Get the change spec for a given pk."""
+            for change in table_changes:
+                if str(change.get("pk")) == str(pk):
+                    return change
+            return None
+
+        async def check_row(
+            table: str,
+            pk: Any,
+            table_changes: List[Dict[str, Any]],
+            pk_columns: List[str],
+        ):
+            """Check a single row against v2 specs."""
+            try:
+                where_sql = self._build_pk_where_clause(pk_columns, pk)
+
+                # Query both snapshots
+                before_query = f"SELECT * FROM {table} WHERE {where_sql}"
+                before_response = await self.before.resource.query(before_query)
+                before_row = (
+                    dict(zip(before_response.columns, before_response.rows[0]))
+                    if before_response.rows
+                    else None
+                )
+
+                after_response = await self.after.resource.query(before_query)
+                after_row = (
+                    dict(zip(after_response.columns, after_response.rows[0]))
+                    if after_response.rows
+                    else None
+                )
+
+                # Get the spec for this pk
+                spec = _get_change_spec(table_changes, pk)
+                if spec is None:
+                    return  # No spec found, shouldn't happen
+
+                change_type = spec.get("type")
+
+                if not before_row and after_row:
+                    # Inserted row
+                    if change_type != "insert":
+                        error_msg = f"Row {pk} in table '{table}' was inserted but spec type is '{change_type}'"
+                        errors.append(AssertionError(error_msg))
+                        return
+
+                    fields_spec = spec.get("fields")
+                    if fields_spec is not None:
+                        unmatched = _validate_row_with_fields_spec(
+                            table, pk, after_row, fields_spec
+                        )
+                        if unmatched:
+                            error_msg = (
+                                f"Insert validation failed for table '{table}', row {pk}:\n"
+                                + "\n".join(
+                                    f"  - {f}: {repr(v)} ({issue})"
+                                    for f, v, issue in unmatched[:5]
+                                )
+                            )
+                            errors.append(AssertionError(error_msg))
+
+                elif before_row and not after_row:
+                    # Deleted row
+                    if change_type != "delete":
+                        error_msg = f"Row {pk} in table '{table}' was deleted but spec type is '{change_type}'"
+                        errors.append(AssertionError(error_msg))
+                        return
+
+                    fields_spec = spec.get("fields")
+                    if fields_spec is not None:
+                        unmatched = _validate_row_with_fields_spec(
+                            table, pk, before_row, fields_spec
+                        )
+                        if unmatched:
+                            error_msg = (
+                                f"Delete validation failed for table '{table}', row {pk}:\n"
+                                + "\n".join(
+                                    f"  - {f}: {repr(v)} ({issue})"
+                                    for f, v, issue in unmatched[:5]
+                                )
+                            )
+                            errors.append(AssertionError(error_msg))
+
+                elif before_row and after_row:
+                    # Modified row - compute changes
+                    row_changes = {}
+                    for field in set(before_row.keys()) | set(after_row.keys()):
+                        if self.ignore_config.should_ignore_field(table, field):
+                            continue
+                        before_val = before_row.get(field)
+                        after_val = after_row.get(field)
+                        if not _values_equivalent(before_val, after_val):
+                            row_changes[field] = {"before": before_val, "after": after_val}
+
+                    if not row_changes:
+                        # No actual changes (after ignores), this is fine
+                        return
+
+                    if change_type != "modify":
+                        error_msg = f"Row {pk} in table '{table}' was modified but spec type is '{change_type}'"
+                        errors.append(AssertionError(error_msg))
+                        return
+
+                    resulting_fields = spec.get("resulting_fields")
+                    if resulting_fields is not None:
+                        if "no_other_changes" not in spec:
+                            error_msg = (
+                                f"Modify spec for table '{table}' pk={pk} "
+                                f"has 'resulting_fields' but missing required 'no_other_changes' field."
+                            )
+                            errors.append(ValueError(error_msg))
+                            return
+
+                        no_other_changes = spec["no_other_changes"]
+                        if not isinstance(no_other_changes, bool):
+                            error_msg = (
+                                f"Modify spec for table '{table}' pk={pk} "
+                                f"has 'no_other_changes' but it must be a boolean."
+                            )
+                            errors.append(ValueError(error_msg))
+                            return
+
+                        unmatched = _validate_modification_with_fields_spec(
+                            table, pk, row_changes, resulting_fields, no_other_changes
+                        )
+                        if unmatched:
+                            error_msg = (
+                                f"Modify validation failed for table '{table}', row {pk}:\n"
+                                + "\n".join(
+                                    f"  - {f}: {repr(v)} ({issue})"
+                                    for f, v, issue in unmatched[:5]
+                                )
+                            )
+                            errors.append(AssertionError(error_msg))
+
+                else:
+                    # Row doesn't exist in either snapshot
+                    error_msg = f"Row {pk} not found in table '{table}' in either snapshot"
+                    errors.append(AssertionError(error_msg))
+
+            except Exception as e:
+                errors.append(e)
+
+        # Prepare all row checks
+        row_checks = []
+        for table, table_changes in changes_by_table.items():
+            if self.ignore_config.should_ignore_table(table):
+                continue
+
+            pk_columns = await self._get_primary_key_columns(table)
+            pks_to_check = {change["pk"] for change in table_changes}
+
+            for pk in pks_to_check:
+                row_checks.append((table, pk, table_changes, pk_columns))
+
+        # Execute row checks in parallel
+        if row_checks:
+            await asyncio.gather(
+                *[
+                    check_row(table, pk, table_changes, pk_columns)
+                    for table, pk, table_changes, pk_columns in row_checks
+                ]
+            )
+
+        if errors:
+            raise errors[0]
+
+        # Verify tables not mentioned have no changes
+        all_tables = set(await self.before.tables()) | set(await self.after.tables())
+        tables_to_verify = []
+
+        for table in all_tables:
+            if (
+                table not in changes_by_table
+                and not self.ignore_config.should_ignore_table(table)
+            ):
+                tables_to_verify.append(table)
+
+        async def verify_no_changes(table: str):
+            try:
+                before_count_response = await self.before.resource.query(
+                    f"SELECT COUNT(*) FROM {table}"
+                )
+                before_count = (
+                    before_count_response.rows[0][0]
+                    if before_count_response.rows
+                    else 0
+                )
+
+                after_count_response = await self.after.resource.query(
+                    f"SELECT COUNT(*) FROM {table}"
+                )
+                after_count = (
+                    after_count_response.rows[0][0] if after_count_response.rows else 0
+                )
+
+                if before_count != after_count:
+                    error_msg = (
+                        f"Unexpected change in table '{table}': "
+                        f"row count changed from {before_count} to {after_count}"
+                    )
+                    errors.append(AssertionError(error_msg))
+            except Exception as e:
+                errors.append(e)
+
+        if tables_to_verify:
+            await asyncio.gather(*[verify_no_changes(table) for table in tables_to_verify])
+
+        if errors:
+            raise errors[0]
+
+        return self
+
     async def _validate_diff_against_allowed_changes(
         self, diff: Dict[str, Any], allowed_changes: List[Dict[str, Any]]
     ):
@@ -1421,7 +1732,11 @@ class AsyncSnapshotDiff:
         if not allowed_changes:
             return await self._expect_no_changes()
 
-        # Fall back to full diff for v2 (no targeted optimization yet)
+        # Use targeted optimization when possible (all changes have table and pk)
+        if self._can_use_targeted_queries(allowed_changes):
+            return await self._expect_only_targeted_v2(allowed_changes)
+
+        # Fall back to full diff for complex cases
         diff = await self._collect()
         return await self._validate_diff_against_allowed_changes_v2(
             diff, allowed_changes
