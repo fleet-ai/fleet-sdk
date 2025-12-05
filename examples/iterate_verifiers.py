@@ -387,6 +387,12 @@ def apply_verifiers_to_json(json_path: str, python_path: str) -> None:
 
         if task_key in verifiers:
             new_code = verifiers[task_key]
+            
+            # Escape newlines in debug print patterns (>>> and <<<)
+            # These should be \n escape sequences, not actual newlines
+            new_code = new_code.replace(">>>\n", ">>>\\n")
+            new_code = new_code.replace("\n<<<", "\\n<<<")
+            
             old_code = task.get("verifier_func", "").strip()
 
             # Only update if the code actually changed
