@@ -1447,6 +1447,50 @@ class SyncSnapshotDiff:
         diff = self._collect()
         return self._validate_diff_against_allowed_changes_v2(diff, allowed_changes)
 
+    def _ensure_all_fetched(self):
+        """Fetch ALL data from ALL tables upfront (non-lazy loading).
+        
+        This is the old approach before lazy loading was introduced.
+        Used by expect_only_v1 for simpler, non-optimized diffing.
+        """
+        # Get all tables
+        tables_response = self.before.resource.query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+        
+        if tables_response.rows:
+            before_tables = [row[0] for row in tables_response.rows]
+            for table in before_tables:
+                self.before._ensure_table_data(table)
+        
+        # Also fetch from after snapshot
+        tables_response = self.after.resource.query(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        )
+        
+        if tables_response.rows:
+            after_tables = [row[0] for row in tables_response.rows]
+            for table in after_tables:
+                self.after._ensure_table_data(table)
+
+    def expect_only_v1(self, allowed_changes: List[Dict[str, Any]]):
+        """Ensure only specified changes occurred using the original (non-optimized) approach.
+        
+        This is the original expect_only logic before lazy loading and targeted query
+        optimizations were introduced. It fetches all data upfront and does a full diff.
+        
+        Use this when you want the simpler, more predictable behavior of the original
+        implementation without any query optimizations.
+        """
+        # Fetch all data upfront (old approach)
+        self._ensure_all_fetched()
+        
+        # Collect full diff
+        diff = self._collect()
+        
+        # Validate using the original validation logic
+        return self._validate_diff_against_allowed_changes(diff, allowed_changes)
+
 
 class SyncQueryBuilder:
     """Async query builder that translates DSL to SQL and executes through the API."""
