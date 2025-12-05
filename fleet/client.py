@@ -811,6 +811,21 @@ class Fleet:
                     if not is_embedded_error:
                         verifier_func = embedded_code
 
+            # Extract verifier metadata
+            verifier_id = task_response.verifier_id
+            if not verifier_id and task_response.verifier:
+                verifier_id = task_response.verifier.verifier_id
+            
+            verifier_sha = None
+            if task_response.verifier:
+                verifier_sha = task_response.verifier.sha256
+            
+            # Extract verifier_runtime_version from metadata if present
+            verifier_runtime_version = None
+            metadata = task_response.metadata or {}
+            if isinstance(metadata, dict):
+                verifier_runtime_version = metadata.get("verifier_runtime_version")
+
             task = Task(
                 key=task_response.key,
                 prompt=task_response.prompt,
@@ -822,7 +837,10 @@ class Fleet:
                 env_variables=task_response.env_variables or {},
                 verifier_func=verifier_func,  # Set verifier code
                 verifier=verifier,  # Use created verifier or None
-                metadata=task_response.metadata or {},
+                verifier_id=verifier_id,  # Set verifier_id
+                verifier_sha=verifier_sha,  # Set verifier_sha
+                verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
+                metadata=metadata,
                 output_json_schema=getattr(task_response, "output_json_schema", None),  # Get output_json_schema if available
             )
             tasks.append(task)
