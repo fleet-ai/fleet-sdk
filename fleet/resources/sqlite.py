@@ -1487,10 +1487,19 @@ class SyncSnapshotDiff:
         if resource.client is not None and resource._mode == "http":
             api_diff = None
             try:
+                payload = {}
+                if self.ignore_config:
+                    payload["ignore_config"] = {
+                        "tables": list(self.ignore_config.tables),
+                        "fields": list(self.ignore_config.fields),
+                        "table_fields": {
+                            table: list(fields) for table, fields in self.ignore_config.table_fields.items()
+                        }
+                    }
                 response = resource.client.request(
                     "POST",
                     "/diff/structured",
-                    json={},
+                    json=payload,
                 )
                 result = response.json()
                 if result.get("success") and "diff" in result:
