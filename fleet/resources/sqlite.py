@@ -1485,20 +1485,24 @@ class SyncSnapshotDiff:
         # Try to use the structured diff endpoint if we have an HTTP client
         resource = self.after.resource
         if resource.client is not None and resource._mode == "http":
+            api_diff = None
             try:
                 response = resource.client.request(
                     "POST",
-                    "/api/v1/env/diff/structured",
+                    "/diff/structured",
                     json={},
                 )
                 result = response.json()
                 if result.get("success") and "diff" in result:
-                    diff = result["diff"]
-                    return self._validate_diff_against_allowed_changes(diff, allowed_changes)
+                    api_diff = result["diff"]
             except Exception as e:
                 # Fall back to local diff if API call fails
                 print(f"Warning: Failed to fetch structured diff from API: {e}")
                 print("Falling back to local diff computation...")
+            
+            # Validate outside try block so AssertionError propagates
+            if api_diff is not None:
+                return self._validate_diff_against_allowed_changes(api_diff, allowed_changes)
         
         # Fall back to local diff computation
         self._ensure_all_fetched()
