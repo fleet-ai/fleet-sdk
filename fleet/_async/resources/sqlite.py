@@ -1456,19 +1456,33 @@ class AsyncSnapshotDiff:
     async def expect_only_v1(self, allowed_changes: List[Dict[str, Any]]):
         """Ensure only specified changes occurred using the original (non-optimized) approach.
         
-        This is the original expect_only logic before lazy loading and targeted query
-        optimizations were introduced. It fetches all data upfront and does a full diff.
+        This version attempts to use the /api/v1/env/diff/structured endpoint if available,
+        falling back to local diff computation if the endpoint is not available.
         
         Use this when you want the simpler, more predictable behavior of the original
         implementation without any query optimizations.
         """
-        # Fetch all data upfront (old approach)
+        # Try to use the structured diff endpoint if we have an HTTP client
+        resource = self.after.resource
+        if resource.client is not None and resource._mode == "http":
+            try:
+                response = await resource.client.request(
+                    "POST",
+                    "/api/v1/env/diff/structured",
+                    json={},
+                )
+                result = response.json()
+                if result.get("success") and "diff" in result:
+                    diff = result["diff"]
+                    return await self._validate_diff_against_allowed_changes(diff, allowed_changes)
+            except Exception as e:
+                # Fall back to local diff if API call fails
+                print(f"Warning: Failed to fetch structured diff from API: {e}")
+                print("Falling back to local diff computation...")
+        
+        # Fall back to local diff computation
         await self._ensure_all_fetched()
-        
-        # Collect full diff
         diff = await self._collect()
-        
-        # Validate using the original validation logic
         return await self._validate_diff_against_allowed_changes(diff, allowed_changes)
 
 
