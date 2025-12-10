@@ -56,44 +56,44 @@ def extract_function_info(function_code: str) -> Optional[Tuple[str, bool]]:
 def extract_leading_content(code: str) -> Tuple[Optional[str], str]:
     """
     Extract leading content (docstrings, imports, etc.) before the main function definition.
-    
+
     Args:
         code: The verifier code
-        
+
     Returns:
         Tuple of (leading_content or None, function_code)
     """
     code = code.strip()
-    
+
     # Find the first top-level function definition (def or async def at column 0)
     # We need to find "def " or "async def " that's not indented
-    lines = code.split('\n')
+    lines = code.split("\n")
     func_start_idx = None
-    
+
     for i, line in enumerate(lines):
         # Check for unindented def or async def
-        if line.startswith('def ') or line.startswith('async def '):
+        if line.startswith("def ") or line.startswith("async def "):
             func_start_idx = i
             break
-    
+
     if func_start_idx is None or func_start_idx == 0:
         # No leading content or function not found
         return (None, code)
-    
+
     # Everything before the function is leading content
     leading_lines = lines[:func_start_idx]
     func_lines = lines[func_start_idx:]
-    
+
     # Clean up leading content - remove empty lines at the end
     while leading_lines and not leading_lines[-1].strip():
         leading_lines.pop()
-    
+
     if not leading_lines:
         return (None, code)
-    
-    leading_content = '\n'.join(leading_lines)
-    function_code = '\n'.join(func_lines)
-    
+
+    leading_content = "\n".join(leading_lines)
+    function_code = "\n".join(func_lines)
+
     return (leading_content, function_code)
 
 
@@ -114,7 +114,7 @@ def clean_verifier_code(code: str) -> Tuple[str, Optional[str]]:
         fence_blocks = re.findall(r"```[a-zA-Z0-9_+-]*\n([\s\S]*?)\n```", code)
         if fence_blocks:
             code = fence_blocks[0].strip()
-    
+
     # Extract leading content (docstrings, imports, etc.) if present
     leading_content, code = extract_leading_content(code)
 
@@ -124,66 +124,66 @@ def clean_verifier_code(code: str) -> Tuple[str, Optional[str]]:
 def format_leading_content_as_comment(content: str) -> str:
     """
     Format leading content (docstrings, imports, etc.) as a comment block with markers.
-    
+
     Args:
         content: The leading content (docstrings, imports, etc.)
-        
+
     Returns:
         Formatted comment block
     """
     lines = [LEADING_CONTENT_START]
-    
-    for line in content.split('\n'):
+
+    for line in content.split("\n"):
         # Prefix each line with "# |" to preserve exact content including empty lines
         lines.append(f"# |{line}")
-    
+
     lines.append(LEADING_CONTENT_END)
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def parse_leading_content_from_comments(comment_block: str) -> str:
     """
     Parse leading content from a comment block with markers.
-    
+
     Args:
         comment_block: The comment block between markers
-        
+
     Returns:
         Reconstructed leading content
     """
     lines = []
-    for line in comment_block.split('\n'):
+    for line in comment_block.split("\n"):
         # Remove "# |" prefix (new format)
-        if line.startswith('# |'):
+        if line.startswith("# |"):
             lines.append(line[3:])
         # Legacy format: "# " prefix
-        elif line.startswith('# '):
+        elif line.startswith("# "):
             lines.append(line[2:])
-        elif line == '#':
-            lines.append('')
-    
-    return '\n'.join(lines)
+        elif line == "#":
+            lines.append("")
+
+    return "\n".join(lines)
 
 
 def parse_legacy_docstring_from_comments(comment_block: str) -> str:
     """
     Parse a docstring from legacy comment block with markers.
-    
+
     Args:
         comment_block: The comment block between markers
-        
+
     Returns:
         Reconstructed docstring with triple quotes
     """
     lines = []
-    for line in comment_block.split('\n'):
+    for line in comment_block.split("\n"):
         # Remove "# " prefix
-        if line.startswith('# '):
+        if line.startswith("# "):
             lines.append(line[2:])
-        elif line == '#':
-            lines.append('')
-    
-    return '"""' + '\n'.join(lines) + '"""'
+        elif line == "#":
+            lines.append("")
+
+    return '"""' + "\n".join(lines) + '"""'
 
 
 def extract_verifiers_to_file(json_path: str, py_path: str) -> None:
@@ -367,10 +367,10 @@ def extract_verifiers_to_file(json_path: str, py_path: str) -> None:
             f.write(
                 f"# Function: {ver['function_name']} ({'async' if ver['is_async'] else 'sync'})\n"
             )
-            
+
             # Write leading content (docstrings, imports) as comments if present
-            if ver['leading_content']:
-                f.write(format_leading_content_as_comment(ver['leading_content']))
+            if ver["leading_content"]:
+                f.write(format_leading_content_as_comment(ver["leading_content"]))
                 f.write("\n")
 
             # Write decorator - use verifier for async, verifier_sync for sync
@@ -411,7 +411,9 @@ def parse_verifiers_from_file(python_path: str) -> Dict[str, dict]:
     # Split by "# Task: " markers followed by a task key pattern (uuid or specific format)
     # This avoids splitting on "# Task: " that appears inside docstring comments
     # Task keys look like: task_uuid, task_xxx_timestamp_xxx, or send_xxx_xxx
-    task_key_pattern = r"(?:task_[a-f0-9-]+|task_[a-z0-9]+_\d+_[a-z0-9]+|[a-z_]+_[a-z0-9]+)"
+    task_key_pattern = (
+        r"(?:task_[a-f0-9-]+|task_[a-z0-9]+_\d+_[a-z0-9]+|[a-z_]+_[a-z0-9]+)"
+    )
     task_blocks = re.split(rf"\n# Task: (?={task_key_pattern})", content)
 
     for block in task_blocks[1:]:  # Skip the first block (header)
@@ -422,7 +424,7 @@ def parse_verifiers_from_file(python_path: str) -> Dict[str, dict]:
 
         # First line should be the task key
         task_key = lines[0].strip()
-        
+
         # Skip if this doesn't look like a task key (sanity check)
         if not re.match(task_key_pattern, task_key):
             continue
@@ -440,14 +442,18 @@ def parse_verifiers_from_file(python_path: str) -> Dict[str, dict]:
             start_idx = block.find(LEADING_CONTENT_START)
             end_idx = block.find(LEADING_CONTENT_END)
             if start_idx != -1 and end_idx != -1:
-                comment_block = block[start_idx + len(LEADING_CONTENT_START):end_idx].strip()
+                comment_block = block[
+                    start_idx + len(LEADING_CONTENT_START) : end_idx
+                ].strip()
                 leading_content = parse_leading_content_from_comments(comment_block)
         # Fallback: check for legacy docstring markers
         elif LEADING_DOCSTRING_START in block:
             start_idx = block.find(LEADING_DOCSTRING_START)
             end_idx = block.find(LEADING_DOCSTRING_END)
             if start_idx != -1 and end_idx != -1:
-                comment_block = block[start_idx + len(LEADING_DOCSTRING_START):end_idx].strip()
+                comment_block = block[
+                    start_idx + len(LEADING_DOCSTRING_START) : end_idx
+                ].strip()
                 leading_content = parse_legacy_docstring_from_comments(comment_block)
 
         # Find the function definition (async def or def)
@@ -458,8 +464,8 @@ def parse_verifiers_from_file(python_path: str) -> Dict[str, dict]:
         if func_match:
             function_code = func_match.group(1).strip()
             verifiers[task_key] = {
-                'code': function_code,
-                'leading_content': leading_content,
+                "code": function_code,
+                "leading_content": leading_content,
             }
 
     # If the above approach didn't work, try a direct pattern match
@@ -471,8 +477,8 @@ def parse_verifiers_from_file(python_path: str) -> Dict[str, dict]:
 
         for task_key, function_code in matches:
             verifiers[task_key] = {
-                'code': function_code.strip(),
-                'leading_content': None,
+                "code": function_code.strip(),
+                "leading_content": None,
             }
 
     print(f"✓ Found {len(verifiers)} verifier(s)")
@@ -481,7 +487,7 @@ def parse_verifiers_from_file(python_path: str) -> Dict[str, dict]:
     async_count = 0
     sync_count = 0
     for data in verifiers.values():
-        func_info = extract_function_info(data['code'])
+        func_info = extract_function_info(data["code"])
         if func_info:
             _, is_async = func_info
             if is_async:
@@ -501,9 +507,13 @@ def normalize_code_for_comparison(code: str) -> str:
     Removes leading/trailing whitespace and normalizes line endings.
     """
     # Strip and normalize line endings
-    code = code.strip().replace('\r\n', '\n')
-    # Normalize multiple blank lines to single
-    code = re.sub(r'\n{3,}', '\n\n', code)
+    code = code.strip().replace("\r\n", "\n")
+    # Normalize trailing whitespace on each line
+    lines = code.split("\n")
+    lines = [line.rstrip() for line in lines]
+    code = "\n".join(lines)
+    # Normalize multiple blank lines to single (2+ newlines → 1)
+    code = re.sub(r"\n\n+", "\n", code)
     return code
 
 
@@ -548,18 +558,39 @@ def apply_verifiers_to_json(json_path: str, python_path: str) -> None:
 
         if task_key in verifiers:
             ver_data = verifiers[task_key]
-            
+
             # Reconstruct the full verifier code with leading content if present
-            if ver_data['leading_content']:
-                new_code = ver_data['leading_content'] + '\n\n' + ver_data['code']
+            if ver_data["leading_content"]:
+                new_code = ver_data["leading_content"] + "\n" + ver_data["code"]
             else:
-                new_code = ver_data['code']
-            
+                new_code = ver_data["code"]
+
             old_code = task.get("verifier_func", "")
-            
+
             # Normalize both for comparison
             old_normalized = normalize_code_for_comparison(old_code)
             new_normalized = normalize_code_for_comparison(new_code)
+
+            # Debug: show comparison info
+            old_len = len(old_normalized)
+            new_len = len(new_normalized)
+
+            if old_normalized == new_normalized:
+                if old_code != new_code:
+                    print(
+                        f"  [DEBUG] {task_key}: Codes differ in whitespace only (normalized match)"
+                    )
+            else:
+                # Find first difference position for debugging
+                min_len = min(old_len, new_len)
+                diff_pos = min_len
+                for i in range(min_len):
+                    if old_normalized[i] != new_normalized[i]:
+                        diff_pos = i
+                        break
+                print(
+                    f"  [DEBUG] {task_key}: Code changed (old={old_len}, new={new_len}, first_diff@{diff_pos})"
+                )
 
             # Only update if the code actually changed
             if old_normalized != new_normalized:
@@ -618,12 +649,14 @@ def validate_verifiers_file(python_path: str) -> None:
     errors = []
 
     for task_key, ver_data in verifiers.items():
-        func_info = extract_function_info(ver_data['code'])
+        func_info = extract_function_info(ver_data["code"])
         if not func_info:
             errors.append(f"  - {task_key}: Could not extract function info")
         else:
             function_name, is_async = func_info
-            has_leading = " (has leading content)" if ver_data['leading_content'] else ""
+            has_leading = (
+                " (has leading content)" if ver_data["leading_content"] else ""
+            )
             print(
                 f"  ✓ {task_key}: {function_name} ({'async' if is_async else 'sync'}){has_leading}"
             )
