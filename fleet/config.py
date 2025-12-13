@@ -8,3 +8,6 @@ REGION_BASE_URL = {
     "eu-west-2": "https://eu-west-2.fleetai.com",
     "staging": "https://staging.fleetai.com",
 }
+
+# Re-export telemetry config for convenience
+from .telemetry.config import TelemetryConfig, configure_telemetry, get_config as get_telemetry_config

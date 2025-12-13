@@ -73,6 +73,14 @@ from . import env
 from . import global_client as _global_client
 from ._async import global_client as _async_global_client
 
+# Import telemetry module
+from . import telemetry
+from .telemetry import (
+    TelemetryConfig,
+    SessionTracker,
+    track_session,
+)
+
 __version__ = "0.2.79"
 
 __all__ = [
@@ -107,6 +115,11 @@ __all__ = [
     "TASK_SUCCESSFUL_SCORE",
     # Environment module
     "env",
+    # Telemetry module
+    "telemetry",
+    "TelemetryConfig",
+    "SessionTracker",
+    "track_session",
     # Global client helpers
     "configure",
     "get_client",
@@ -132,10 +145,35 @@ def configure(
     base_url: Optional[str] = None,
     max_retries: Optional[int] = None,
     timeout: Optional[float] = None,
+    # Telemetry options
+    telemetry_enabled: bool = False,
+    telemetry_backend: str = "supabase",
+    supabase_url: Optional[str] = None,
+    supabase_key: Optional[str] = None,
+    kafka_brokers: Optional[str] = None,
+    kafka_topic: str = "fleet.telemetry.events",
+    team_id: Optional[str] = None,
+    job_id: Optional[str] = None,
 ):
     """Configure global clients (sync and async) once per process.
 
     Both sync and async default clients will be (re)created with the provided settings.
+    
+    Args:
+        api_key: Fleet API key
+        base_url: Fleet API base URL
+        max_retries: Maximum retries for API calls
+        timeout: Timeout for API calls
+        
+        # Telemetry options
+        telemetry_enabled: Enable telemetry to Fleet platform
+        telemetry_backend: Backend type ("supabase", "kafka", "noop")
+        supabase_url: Supabase project URL (for Supabase backend)
+        supabase_key: Supabase service key (for Supabase backend)
+        kafka_brokers: Kafka broker addresses (for Kafka backend)
+        kafka_topic: Kafka topic for events (default: fleet.telemetry.events)
+        team_id: Fleet team ID for telemetry
+        job_id: Default job ID for grouping sessions
     """
     if max_retries is None:
         from .config import DEFAULT_MAX_RETRIES as _MR
@@ -151,6 +189,22 @@ def configure(
     _async_global_client.configure(
         api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout
     )
+    
+    # Configure telemetry if enabled
+    if telemetry_enabled or team_id:
+        from .telemetry.config import TelemetryConfig, configure_telemetry
+        
+        telemetry_config = TelemetryConfig(
+            enabled=telemetry_enabled,
+            backend=telemetry_backend,  # type: ignore
+            team_id=team_id,
+            job_id=job_id,
+            supabase_url=supabase_url,
+            supabase_key=supabase_key,
+            kafka_brokers=kafka_brokers,
+            kafka_topic=kafka_topic,
+        )
+        configure_telemetry(telemetry_config)
 
 
 def get_client() -> Fleet:
