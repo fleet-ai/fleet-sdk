@@ -38,6 +38,12 @@ from .models import (
     TaskUpdateRequest,
     Run,
     HeartbeatResponse,
+    JobCreateRequest,
+    JobResponse,
+    JobListResponse,
+    JobCreateResponse,
+    JobSessionsResponse,
+    SessionTranscriptResponse,
 )
 from .tasks import Task
 
@@ -1032,6 +1038,136 @@ class Fleet:
             "GET", f"/v1/tasks/{task_key}", params=params
         )
         return TaskResponse(**response.json())
+
+    # Jobs API methods
+
+    def list_jobs(self, team_id: Optional[str] = None) -> List[JobResponse]:
+        """List all jobs for the authenticated team.
+
+        Args:
+            team_id: Optional team_id to filter by (admin only)
+
+        Returns:
+            List[JobResponse] containing job information
+        """
+        params = {}
+        if team_id is not None:
+            params["team_id"] = team_id
+
+        response = self.client.request("GET", "/v1/jobs", params=params)
+        job_list = JobListResponse(**response.json())
+        return job_list.jobs
+
+    def create_job(
+        self,
+        models: List[str],
+        name: Optional[str] = None,
+        pass_k: int = 1,
+        env_key: Optional[str] = None,
+        project_key: Optional[str] = None,
+        task_keys: Optional[List[str]] = None,
+        excluded_task_keys: Optional[List[str]] = None,
+        max_steps: Optional[int] = None,
+        max_duration_minutes: int = 60,
+        max_concurrent_per_model: int = 30,
+        mode: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        model_prompts: Optional[Dict[str, str]] = None,
+        byok_keys: Optional[Dict[str, str]] = None,
+        byok_ttl_minutes: Optional[int] = None,
+        harness: Optional[str] = None,
+    ) -> JobCreateResponse:
+        """Create a new job.
+
+        Args:
+            models: List of model identifiers in "provider/model" format
+            name: Optional job name. Supports placeholders: {id} (UUID), {sid} (short UUID), {i} (auto-increment, must be suffix)
+            pass_k: Number of passes (default: 1)
+            env_key: Environment key (mutually exclusive with project_key/task_keys)
+            project_key: Project key (mutually exclusive with env_key/task_keys)
+            task_keys: Specific task keys (mutually exclusive with env_key/project_key)
+            excluded_task_keys: Task keys to exclude
+            max_steps: Maximum agent steps
+            max_duration_minutes: Timeout in minutes (default: 60)
+            max_concurrent_per_model: Max concurrent per model (default: 30)
+            mode: "tool-use" or "computer-use"
+            system_prompt: Custom system prompt
+            model_prompts: Per-model prompts (model -> prompt)
+            byok_keys: Bring Your Own Keys (provider -> API key)
+            byok_ttl_minutes: TTL for BYOK keys in minutes
+            harness: Harness identifier
+
+        Returns:
+            JobCreateResponse containing job_id, workflow_job_id, status, and name
+        """
+        request = JobCreateRequest(
+            name=name,
+            models=models,
+            pass_k=pass_k,
+            env_key=env_key,
+            project_key=project_key,
+            task_keys=task_keys,
+            excluded_task_keys=excluded_task_keys,
+            max_steps=max_steps,
+            max_duration_minutes=max_duration_minutes,
+            max_concurrent_per_model=max_concurrent_per_model,
+            mode=mode,
+            system_prompt=system_prompt,
+            model_prompts=model_prompts,
+            byok_keys=byok_keys,
+            byok_ttl_minutes=byok_ttl_minutes,
+            harness=harness,
+        )
+
+        response = self.client.request(
+            "POST", "/v1/jobs", json=request.model_dump(exclude_none=True)
+        )
+        return JobCreateResponse(**response.json())
+
+    def get_job(self, job_id: str, team_id: Optional[str] = None) -> JobResponse:
+        """Get a specific job by ID.
+
+        Args:
+            job_id: The job ID
+            team_id: Optional team_id to filter by (admin only)
+
+        Returns:
+            JobResponse containing job information
+        """
+        params = {}
+        if team_id is not None:
+            params["team_id"] = team_id
+
+        response = self.client.request("GET", f"/v1/jobs/{job_id}", params=params)
+        return JobResponse(**response.json())
+
+    # Sessions API methods
+
+    def list_job_sessions(self, job_id: str) -> JobSessionsResponse:
+        """List all sessions for a job, grouped by task.
+
+        Args:
+            job_id: The job ID
+
+        Returns:
+            JobSessionsResponse containing sessions grouped by task with statistics
+        """
+        response = self.client.request("GET", f"/v1/sessions/job/{job_id}")
+        return JobSessionsResponse(**response.json())
+
+    def get_session_transcript(self, session_id: str) -> SessionTranscriptResponse:
+        """Get the transcript for a specific session.
+
+        Args:
+            session_id: The session ID
+
+        Returns:
+            SessionTranscriptResponse containing task, instance, verifier result, and messages
+        """
+        response = self.client.request(
+            "GET", f"/v1/sessions/{session_id}/transcript"
+        )
+        return SessionTranscriptResponse(**response.json())
 
     def _create_verifier_from_data(
         self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str, verifier_runtime_version: Optional[str] = None
