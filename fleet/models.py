@@ -405,3 +405,137 @@ class AccountResponse(BaseModel):
     instance_count: int = Field(..., title="Instance Count")
     profile_id: Optional[str] = Field(None, title="Profile Id")
     profile_name: Optional[str] = Field(None, title="Profile Name")
+
+
+# Jobs and Sessions models
+
+
+class JobCreateRequest(BaseModel):
+    """Request payload for creating a new job.
+
+    The name field supports placeholders:
+    - {id}: Replaced with a full UUID
+    - {sid}: Replaced with the first 8 characters of a UUID (short ID)
+    - {i}: Replaced with auto-incrementing number (must be a suffix, e.g., "job-{i}")
+    """
+
+    name: Optional[str] = Field(None, title="Name", max_length=255)
+    models: List[str] = Field(..., title="Models", min_length=1)
+    pass_k: int = Field(1, title="Pass K", ge=1)
+    env_key: Optional[str] = Field(None, title="Env Key")
+    project_key: Optional[str] = Field(None, title="Project Key")
+    task_keys: Optional[List[str]] = Field(None, title="Task Keys", min_length=1)
+    excluded_task_keys: Optional[List[str]] = Field(None, title="Excluded Task Keys")
+    max_steps: Optional[int] = Field(None, title="Max Steps", ge=1)
+    max_duration_minutes: int = Field(60, title="Max Duration Minutes", ge=1)
+    max_concurrent_per_model: int = Field(30, title="Max Concurrent Per Model", ge=1)
+    mode: Optional[str] = Field(None, title="Mode")
+    system_prompt: Optional[str] = Field(None, title="System Prompt")
+    model_prompts: Optional[Dict[str, str]] = Field(None, title="Model Prompts")
+    byok_keys: Optional[Dict[str, str]] = Field(None, title="BYOK Keys")
+    byok_ttl_minutes: Optional[int] = Field(None, title="BYOK TTL Minutes", ge=1)
+
+
+class JobResponse(BaseModel):
+    """Response for a single job."""
+
+    id: str = Field(..., title="Id")
+    name: Optional[str] = Field(None, title="Name")
+    created_at: Optional[str] = Field(None, title="Created At")
+    status: Optional[str] = Field(None, title="Status")
+
+
+class JobListResponse(BaseModel):
+    """Response for listing jobs."""
+
+    jobs: List[JobResponse] = Field(..., title="Jobs")
+    total: int = Field(..., title="Total")
+
+
+class JobCreateResponse(BaseModel):
+    """Response from creating a job."""
+
+    job_id: str = Field(..., title="Job Id")
+    workflow_job_id: str = Field(..., title="Workflow Job Id")
+    status: str = Field(..., title="Status")
+    name: Optional[str] = Field(None, title="Name")
+
+
+class VerifierExecutionResult(BaseModel):
+    """Verifier execution result for a session."""
+
+    success: bool = Field(..., title="Success")
+    score: Optional[float] = Field(None, title="Score")
+    stdout: Optional[str] = Field(None, title="Stdout")
+    execution_time_ms: int = Field(..., title="Execution Time Ms")
+    result: Optional[Any] = Field(None, title="Result")
+
+
+class SessionInfo(BaseModel):
+    """Session information within a job."""
+
+    session_id: str = Field(..., title="Session Id")
+    instance: Optional[Instance] = Field(None, title="Instance")
+    model: str = Field(..., title="Model")
+    status: str = Field(..., title="Status")
+    created_at: str = Field(..., title="Created At")
+    started_at: Optional[str] = Field(None, title="Started At")
+    ended_at: Optional[str] = Field(None, title="Ended At")
+    step_count: int = Field(..., title="Step Count")
+    verifier_execution: Optional[VerifierExecutionResult] = Field(
+        None, title="Verifier Execution"
+    )
+
+
+class TaskInfo(BaseModel):
+    """Task information for session transcript."""
+
+    key: str = Field(..., title="Key")
+    prompt: str = Field(..., title="Prompt")
+    env_id: str = Field(..., title="Env Id")
+    env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
+    created_at: Optional[str] = Field(None, title="Created At")
+    version: Optional[str] = Field(None, title="Version")
+    verifier_func: Optional[str] = Field(None, title="Verifier Func")
+    verifier_id: Optional[str] = Field(None, title="Verifier Id")
+    metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
+
+
+class TaskSessionGroup(BaseModel):
+    """Sessions grouped by task."""
+
+    task_id: Optional[str] = Field(None, title="Task Id")
+    task: Optional[TaskInfo] = Field(None, title="Task")
+    total_sessions: int = Field(..., title="Total Sessions")
+    passed_sessions: int = Field(..., title="Passed Sessions")
+    pass_rate: float = Field(..., title="Pass Rate")
+    average_score: Optional[float] = Field(None, title="Average Score")
+    sessions: List[SessionInfo] = Field(..., title="Sessions")
+
+
+class JobSessionsResponse(BaseModel):
+    """Response for listing sessions for a job."""
+
+    job_id: str = Field(..., title="Job Id")
+    total_sessions: int = Field(..., title="Total Sessions")
+    tasks: List[TaskSessionGroup] = Field(..., title="Tasks")
+
+
+class TranscriptMessage(BaseModel):
+    """A message in the session transcript."""
+
+    role: str = Field(..., title="Role")
+    content: Any = Field(..., title="Content")
+    tool_calls: Optional[List[Any]] = Field(None, title="Tool Calls")
+    tool_call_id: Optional[str] = Field(None, title="Tool Call Id")
+
+
+class SessionTranscriptResponse(BaseModel):
+    """Response for a session transcript."""
+
+    task: Optional[TaskInfo] = Field(None, title="Task")
+    instance: Optional[Instance] = Field(None, title="Instance")
+    verifier_execution: Optional[VerifierExecutionResult] = Field(
+        None, title="Verifier Execution"
+    )
+    transcript: List[TranscriptMessage] = Field(..., title="Transcript")

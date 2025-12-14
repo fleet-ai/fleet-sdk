@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fleet-python"
 
-version = "0.2.74"
+version = "0.2.75"
 description = "Python SDK for Fleet environments"
 authors = [
     {name = "Fleet AI", email = "nic@fleet.so"},
@@ -33,7 +33,14 @@ dependencies = [
     "cloudpickle==3.1.1",
 ]
 
+[project.scripts]
+flt = "fleet.cli:main"
+
 [project.optional-dependencies]
+cli = [
+    "typer>=0.9.0",
+    "rich>=10.0.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -43,6 +50,8 @@ dev = [
     "ruff>=0.1.0",
     "unasync>=0.6.0",
     "python-dotenv>=1.1.1",
+    "typer>=0.9.0",
+    "rich>=10.0.0",
 ]
 playwright = [
     "playwright>=1.40.0",
