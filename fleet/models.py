@@ -434,6 +434,7 @@ class JobCreateRequest(BaseModel):
     model_prompts: Optional[Dict[str, str]] = Field(None, title="Model Prompts")
     byok_keys: Optional[Dict[str, str]] = Field(None, title="BYOK Keys")
     byok_ttl_minutes: Optional[int] = Field(None, title="BYOK TTL Minutes", ge=1)
+    harness: Optional[str] = Field(None, title="Harness")
 
 
 class JobResponse(BaseModel):

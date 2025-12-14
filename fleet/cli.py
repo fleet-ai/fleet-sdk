@@ -103,6 +103,7 @@ def create_job(
     model_prompt: Optional[List[str]] = typer.Option(None, "--model-prompt", help="Per-model prompt in 'provider/model=prompt' format (repeatable)"),
     byok: Optional[List[str]] = typer.Option(None, "--byok", help="Bring Your Own Key in 'provider=key' format (repeatable)"),
     byok_ttl: Optional[int] = typer.Option(None, "--byok-ttl", help="TTL for BYOK keys in minutes"),
+    harness: Optional[str] = typer.Option(None, "--harness", help="Harness identifier"),
     output_json: bool = typer.Option(False, "--json", help="Output as JSON"),
 ):
     """Create a new job.
@@ -163,6 +164,7 @@ def create_job(
         model_prompts=model_prompts,
         byok_keys=byok_keys,
         byok_ttl_minutes=byok_ttl,
+        harness=harness,
     )
 
     if output_json:

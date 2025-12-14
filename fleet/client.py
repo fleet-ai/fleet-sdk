@@ -1057,6 +1057,7 @@ class Fleet:
         model_prompts: Optional[Dict[str, str]] = None,
         byok_keys: Optional[Dict[str, str]] = None,
         byok_ttl_minutes: Optional[int] = None,
+        harness: Optional[str] = None,
     ) -> JobCreateResponse:
         """Create a new job.
 
@@ -1076,6 +1077,7 @@ class Fleet:
             model_prompts: Per-model prompts (model -> prompt)
             byok_keys: Bring Your Own Keys (provider -> API key)
             byok_ttl_minutes: TTL for BYOK keys in minutes
+            harness: Harness identifier
 
         Returns:
             JobCreateResponse containing job_id, workflow_job_id, status, and name
@@ -1096,6 +1098,7 @@ class Fleet:
             model_prompts=model_prompts,
             byok_keys=byok_keys,
             byok_ttl_minutes=byok_ttl_minutes,
+            harness=harness,
         )
 
         response = self.client.request(
