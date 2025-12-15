@@ -478,6 +478,7 @@ def eval_run(
     max_steps: Optional[int] = typer.Option(None, "--max-steps", help="Maximum agent steps"),
     max_duration: int = typer.Option(60, "--max-duration", help="Timeout in minutes"),
     max_concurrent: int = typer.Option(30, "--max-concurrent", help="Max concurrent per model"),
+    byok: Optional[List[str]] = typer.Option(None, "--byok", help="Bring Your Own Key: 'provider=key' (e.g., google=AIza...)"),
     no_watch: bool = typer.Option(False, "--no-watch", help="Don't watch progress, exit immediately"),
     output_json: bool = typer.Option(False, "--json", help="Output as JSON"),
 ):
@@ -491,7 +492,7 @@ def eval_run(
     \b
     Examples:
       flt eval run -m openai/gpt-4o-mini
-      flt eval run -p sre-tasks -m openai/gpt-5
+      flt eval run -p sre-tasks -m google/gemini-3-pro-preview --byok google=AIza...
       flt eval run -p my-project -m anthropic/claude-sonnet-4.5 -k 3
       flt eval run -p my-project -m google/gemini-2.5-pro --no-watch
     """
@@ -506,6 +507,20 @@ def eval_run(
         else:
             name = f"all-tasks-{model_short}"
     
+    # Parse BYOK keys
+    byok_keys = None
+    if byok:
+        byok_keys = {}
+        for b in byok:
+            if "=" not in b:
+                console.print(
+                    f"[red]Error:[/red] Invalid --byok format: {b}. Expected 'provider=key'",
+                    style="bold",
+                )
+                raise typer.Exit(1)
+            provider, key = b.split("=", 1)
+            byok_keys[provider] = key
+    
     # Create the job
     try:
         result = client.create_job(
@@ -516,6 +531,7 @@ def eval_run(
             max_steps=max_steps,
             max_duration_minutes=max_duration,
             max_concurrent_per_model=max_concurrent,
+            byok_keys=byok_keys,
         )
     except Exception as e:
         error_str = str(e)
