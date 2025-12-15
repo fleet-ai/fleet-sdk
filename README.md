@@ -1,5 +1,9 @@
 # Fleet SDK
 
+[![PyPI version](https://img.shields.io/pypi/v/fleet-python.svg)](https://pypi.org/project/fleet-python/)
+[![Python versions](https://img.shields.io/pypi/pyversions/fleet-python.svg)](https://pypi.org/project/fleet-python/)
+[![License](https://img.shields.io/pypi/l/fleet-python.svg)](https://pypi.org/project/fleet-python/)
+
 The Fleet Python SDK provides programmatic access to Fleet's environment infrastructure.
 
 ## Installation
