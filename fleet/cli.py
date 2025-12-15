@@ -469,33 +469,207 @@ def list_projects(
 # Eval commands
 
 
+def _run_local_agent(
+    project_key: Optional[str],
+    model: str,
+    agent: str,
+    max_steps: int,
+    max_duration: int,
+    max_concurrent: int,
+    byok: Optional[List[str]],
+    output_json: bool,
+    verbose: bool = False,
+    headful: bool = False,
+):
+    """Run agent locally with Docker-based browser control."""
+    import asyncio
+    import logging
+    
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format='%(name)s: %(message)s')
+    
+    # Parse API keys
+    api_keys = {}
+    if os.getenv("GEMINI_API_KEY"):
+        api_keys["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY")
+    if os.getenv("OPENAI_API_KEY"):
+        api_keys["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+    if os.getenv("ANTHROPIC_API_KEY"):
+        api_keys["ANTHROPIC_API_KEY"] = os.getenv("ANTHROPIC_API_KEY")
+    
+    # Parse BYOK and add to api_keys
+    if byok:
+        provider_to_env = {"google": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
+        for b in byok:
+            if "=" not in b:
+                console.print(f"[red]Error:[/red] Invalid --byok format: {b}")
+                raise typer.Exit(1)
+            provider, key = b.split("=", 1)
+            api_keys[provider_to_env.get(provider.lower(), f"{provider.upper()}_API_KEY")] = key
+    
+    # Check for required API key based on agent
+    if "gemini" in agent.lower() and "GEMINI_API_KEY" not in api_keys:
+        console.print("[red]Error:[/red] GEMINI_API_KEY required for gemini_cua agent")
+        console.print()
+        console.print("Set it via environment:")
+        console.print("  [cyan]export GEMINI_API_KEY=your-key[/cyan]")
+        console.print()
+        console.print("Or pass via --byok:")
+        console.print("  [cyan]flt eval run ... --byok google=your-key[/cyan]")
+        raise typer.Exit(1)
+    
+    # Display config
+    console.print()
+    console.print("[green bold]Running Agent[/green bold]")
+    console.print()
+    console.print(f"  [bold]Project[/bold]     {project_key or 'all tasks'}")
+    console.print(f"  [bold]Agent[/bold]       {agent}")
+    console.print(f"  [bold]Model[/bold]       {model}")
+    console.print(f"  [bold]Max Steps[/bold]   {max_steps}")
+    console.print(f"  [bold]Concurrent[/bold]  {max_concurrent}")
+    if headful:
+        console.print(f"  [bold]Headful[/bold]     [green]Yes[/green] (browser visible via noVNC)")
+    console.print()
+    
+    async def run():
+        from fleet.agent import run_agent
+        return await run_agent(
+            project_key=project_key,
+            agent=agent,
+            model=model,
+            max_concurrent=max_concurrent,
+            max_steps=max_steps,
+            timeout_seconds=max_duration * 60,
+            api_keys=api_keys,
+            headful=headful,
+            verbose=verbose,
+        )
+    
+    console.print("[dim]Starting agent...[/dim]")
+    console.print()
+    
+    try:
+        results = asyncio.run(run())
+    except KeyboardInterrupt:
+        console.print()
+        console.print("[yellow]Cancelled.[/yellow]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+    
+    # Display results
+    if output_json:
+        output = []
+        for r in results:
+            output.append({
+                "task_key": r.task_key,
+                "task_prompt": r.task_prompt,
+                "completed": r.agent_result.completed if r.agent_result else False,
+                "final_answer": r.agent_result.final_answer if r.agent_result else None,
+                "verification_success": r.verification_success,
+                "verification_score": r.verification_score,
+                "error": r.error or (r.agent_result.error if r.agent_result else None),
+                "steps_taken": r.agent_result.steps_taken if r.agent_result else 0,
+                "execution_time_ms": r.execution_time_ms,
+            })
+        console.print(json.dumps(output, indent=2))
+        return
+    
+    # Summary
+    console.print()
+    console.print("[bold]Results[/bold]")
+    console.print("-" * 60)
+    
+    passed = failed = errors = 0
+    
+    for r in results:
+        if r.error:
+            status = "[red]ERROR[/red]"
+            errors += 1
+        elif r.verification_success:
+            status = "[green]PASS[/green]"
+            passed += 1
+        elif r.verification_success is False:
+            status = "[red]FAIL[/red]"
+            failed += 1
+        elif r.agent_result and r.agent_result.completed:
+            status = "[yellow]DONE[/yellow]"
+            passed += 1
+        else:
+            status = "[red]INCOMPLETE[/red]"
+            failed += 1
+        
+        key = r.task_key[:40] + "..." if len(r.task_key) > 40 else r.task_key
+        score = f" ({r.verification_score:.2f})" if r.verification_score is not None else ""
+        console.print(f"  {status}{score}  {key}")
+        
+        if r.error:
+            # Show first 100 chars of error
+            err = r.error.replace('\n', ' ')[:100]
+            console.print(f"         [dim]{err}[/dim]")
+    
+    console.print("-" * 60)
+    
+    total = len(results)
+    if total > 0:
+        rate = (passed / total) * 100
+        color = "green" if rate >= 70 else "yellow" if rate >= 40 else "red"
+        console.print(f"[bold]Pass Rate:[/bold] [{color}]{passed}/{total} ({rate:.1f}%)[/{color}]")
+        if errors:
+            console.print(f"[bold]Errors:[/bold] [red]{errors}[/red]")
+
+
 @eval_app.command("run")
 def eval_run(
-    project_key: Optional[str] = typer.Option(None, "--project", "-p", help="Project key to evaluate (see fleetai.com/dashboard/tasks)"),
-    model: List[str] = typer.Option(..., "--model", "-m", help="Model in 'provider/model' format (repeatable)"),
+    project_key: Optional[str] = typer.Option(None, "--project", "-p", help="Project key to evaluate"),
+    model: List[str] = typer.Option(..., "--model", "-m", help="Model (e.g., google/gemini-2.5-pro)"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="Job name"),
     pass_k: int = typer.Option(1, "--pass-k", "-k", help="Number of passes per task"),
     max_steps: Optional[int] = typer.Option(None, "--max-steps", help="Maximum agent steps"),
     max_duration: int = typer.Option(60, "--max-duration", help="Timeout in minutes"),
     max_concurrent: int = typer.Option(30, "--max-concurrent", help="Max concurrent per model"),
-    byok: Optional[List[str]] = typer.Option(None, "--byok", help="Bring Your Own Key: 'provider=key' (e.g., google=AIza...)"),
-    no_watch: bool = typer.Option(False, "--no-watch", help="Don't watch progress, exit immediately"),
+    byok: Optional[List[str]] = typer.Option(None, "--byok", help="Bring Your Own Key: 'provider=key'"),
+    no_watch: bool = typer.Option(False, "--no-watch", help="Don't watch progress"),
     output_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+    # Local execution
+    local: Optional[str] = typer.Option(None, "--local", "-l", help="Run locally. Use 'gemini_cua' for built-in or path for custom agent"),
+    headful: bool = typer.Option(False, "--headful", help="Show browser via noVNC (local mode)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show debug output"),
 ):
     """
-    Run an evaluation on a project or all tasks.
-
-    Creates a job and watches progress. If no project is specified, runs on all tasks.
-
-    To see your projects, visit: https://www.fleetai.com/dashboard/tasks
+    Run an evaluation on a project.
 
     \b
     Examples:
-      flt eval run -m openai/gpt-4o-mini
-      flt eval run -p sre-tasks -m google/gemini-3-pro-preview --byok google=AIza...
-      flt eval run -p my-project -m anthropic/claude-sonnet-4.5 -k 3
-      flt eval run -p my-project -m google/gemini-2.5-pro --no-watch
+      # Cloud execution (default)
+      flt eval run -p my-project -m google/gemini-2.5-pro
+      
+      # Local with built-in agent
+      flt eval run -p my-project -m google/gemini-2.5-pro --local gemini_cua
+      
+      # Local with headful mode (watch the browser)
+      flt eval run -p my-project -m google/gemini-2.5-pro --local gemini_cua --headful
+      
+      # Local with custom agent
+      flt eval run -p my-project -m google/gemini-2.5-pro --local ./my-agent
     """
+    # Local mode
+    if local is not None:
+        _run_local_agent(
+            project_key=project_key,
+            model=model[0] if model else "gemini-2.5-pro",
+            agent=local if local else "gemini_cua",
+            max_steps=max_steps or 50,
+            max_duration=max_duration,
+            max_concurrent=max_concurrent,
+            byok=byok,
+            output_json=output_json,
+            verbose=verbose,
+            headful=headful,
+        )
+        return
+    
     client = get_client()
     base_url = os.getenv("FLEET_BASE_URL", CLI_DEFAULT_BASE_URL)
     
