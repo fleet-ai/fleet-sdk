@@ -2,7 +2,9 @@
 
 import json
 import os
+import signal
 import sys
+import time
 from typing import List, Optional
 
 # Load .env file if present (before other imports that might need env vars)
@@ -15,6 +17,9 @@ except ImportError:
 try:
     import typer
     from rich.console import Console
+    from rich.live import Live
+    from rich.panel import Panel
+    from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TaskProgressColumn, TimeRemainingColumn
     from rich.table import Table
 except ImportError:
     print(
@@ -34,9 +39,13 @@ app = typer.Typer(
 )
 jobs_app = typer.Typer(help="Manage jobs", no_args_is_help=True)
 sessions_app = typer.Typer(help="Manage sessions", no_args_is_help=True)
+eval_app = typer.Typer(help="Run evaluations", no_args_is_help=True)
+projects_app = typer.Typer(help="Manage projects", no_args_is_help=True)
 
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(sessions_app, name="sessions")
+app.add_typer(eval_app, name="eval")
+app.add_typer(projects_app, name="projects")
 
 console = Console()
 
@@ -402,6 +411,277 @@ def get_session_transcript(
                     console.print(f"  [dim]-> Tool call: {name}[/dim]")
 
         console.print()
+
+
+# Projects commands
+
+
+@projects_app.command("list")
+def list_projects(
+    output_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """List all active projects."""
+    client = get_client()
+    
+    # Call the projects endpoint directly since there's no SDK method yet
+    response = client.client.request("GET", "/v1/tasks/projects")
+    data = response.json()
+    
+    if output_json:
+        console.print(json.dumps(data, indent=2, default=str))
+        return
+    
+    projects = data.get("projects", [])
+    
+    if not projects:
+        console.print("No projects found.")
+        return
+    
+    table = Table(title="Projects")
+    table.add_column("Project Key", style="cyan")
+    table.add_column("Name", style="green")
+    table.add_column("Modality", style="blue")
+    table.add_column("Created At", style="dim")
+    
+    for project in projects:
+        modality = project.get("task_modality") or "-"
+        # Clean up modality display
+        if modality == "tool_use":
+            modality = "tool-use"
+        elif modality == "computer_use":
+            modality = "computer-use"
+        
+        table.add_row(
+            project.get("project_key", "-"),
+            project.get("name", "-"),
+            modality,
+            project.get("created_at", "-"),
+        )
+    
+    console.print(table)
+    
+    # Show tips
+    if projects:
+        first_project = projects[0].get("project_key", "my-project")
+        console.print()
+        console.print("[dim]Tips:[/dim]")
+        console.print(f"[dim]  flt eval run -p {first_project} -m openai/gpt-4o[/dim]")
+
+
+# Eval commands
+
+
+@eval_app.command("run")
+def eval_run(
+    project_key: Optional[str] = typer.Option(None, "--project", "-p", help="Project key to evaluate (see fleetai.com/dashboard/tasks)"),
+    model: List[str] = typer.Option(..., "--model", "-m", help="Model in 'provider/model' format (repeatable)"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="Job name"),
+    pass_k: int = typer.Option(1, "--pass-k", "-k", help="Number of passes per task"),
+    max_steps: Optional[int] = typer.Option(None, "--max-steps", help="Maximum agent steps"),
+    max_duration: int = typer.Option(60, "--max-duration", help="Timeout in minutes"),
+    max_concurrent: int = typer.Option(30, "--max-concurrent", help="Max concurrent per model"),
+    no_watch: bool = typer.Option(False, "--no-watch", help="Don't watch progress, exit immediately"),
+    output_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+):
+    """
+    Run an evaluation on a project or all tasks.
+
+    Creates a job and watches progress. If no project is specified, runs on all tasks.
+
+    To see your projects, visit: https://www.fleetai.com/dashboard/tasks
+
+    \b
+    Examples:
+      flt eval run -m openai/gpt-4o-mini
+      flt eval run -p sre-tasks -m openai/gpt-5
+      flt eval run -p my-project -m anthropic/claude-sonnet-4.5 -k 3
+      flt eval run -p my-project -m google/gemini-2.5-pro --no-watch
+    """
+    client = get_client()
+    base_url = os.getenv("FLEET_BASE_URL", CLI_DEFAULT_BASE_URL)
+    
+    # Generate a default name if not provided
+    if not name:
+        model_short = model[0].split("/")[-1].split("-")[0] if model else "eval"
+        if project_key:
+            name = f"{project_key}-{model_short}"
+        else:
+            name = f"all-tasks-{model_short}"
+    
+    # Create the job
+    try:
+        result = client.create_job(
+            models=model,
+            name=name,
+            pass_k=pass_k,
+            project_key=project_key if project_key else None,
+            max_steps=max_steps,
+            max_duration_minutes=max_duration,
+            max_concurrent_per_model=max_concurrent,
+        )
+    except Exception as e:
+        error_str = str(e)
+        # Check if it's a model not found error and format nicely
+        if "not found" in error_str.lower() and "available models" in error_str.lower():
+            console.print(f"[red]Error:[/red] Invalid model specified")
+            console.print()
+            # Extract and display available models
+            if "Available models:" in error_str:
+                try:
+                    models_part = error_str.split("Available models:")[1].strip()
+                    # Parse the list string
+                    import ast
+                    available = ast.literal_eval(models_part)
+                    console.print("[bold]Available models:[/bold]")
+                    for m in sorted(available):
+                        console.print(f"  [cyan]{m}[/cyan]")
+                except:
+                    console.print(f"[dim]{error_str}[/dim]")
+        else:
+            console.print(f"[red]Error creating job:[/red] {e}")
+        raise typer.Exit(1)
+    
+    job_id = result.job_id
+    
+    if output_json:
+        console.print(json.dumps(result.model_dump(), indent=2, default=str))
+        return
+    
+    # Display summary
+    suite_name = project_key if project_key else "all tasks"
+    console.print()
+    console.print("[green bold]Eval started[/green bold]")
+    console.print()
+    console.print(f"  [bold]Suite[/bold]     {suite_name}")
+    console.print(f"  [bold]Models[/bold]    {', '.join(model)}")
+    console.print(f"  [bold]Passes[/bold]    {pass_k}")
+    console.print(f"  [bold]Job ID[/bold]    [cyan]{job_id}[/cyan]")
+    console.print()
+    
+    # Show dashboard link
+    dashboard_host = base_url.replace("https://", "").replace("http://", "")
+    console.print(Panel(
+        f"[bold]Live agent traces[/bold]\n\n  {dashboard_host}/jobs/{job_id}",
+        border_style="cyan",
+    ))
+    console.print()
+    
+    # Show tips
+    console.print("[dim]Tips:[/dim]")
+    console.print(f"[dim]  flt jobs get {job_id}[/dim]")
+    console.print(f"[dim]  flt jobs sessions {job_id}[/dim]")
+    console.print(f"[dim]  flt sessions transcript <session-id>[/dim]")
+    console.print()
+    
+    if no_watch:
+        return
+    
+    # Watch progress
+    console.print("[dim]Press Ctrl+C to detach (eval continues in background)[/dim]")
+    console.print()
+    
+    # Terminal statuses for sessions
+    TERMINAL_SESSION_STATUSES = {"completed", "timed_out", "errored", "failed"}
+    TERMINAL_JOB_STATUSES = {"completed", "errored", "failed", "cancelled"}
+    
+    detached = False
+    
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("[cyan]Starting eval...", total=None)
+            
+            while True:
+                # Poll sessions for progress
+                try:
+                    sessions_response = client.list_job_sessions(job_id)
+                    total = sessions_response.total_sessions
+                    
+                    # Count sessions in terminal state
+                    completed = sum(
+                        1 for tg in sessions_response.tasks 
+                        for s in tg.sessions 
+                        if s.status in TERMINAL_SESSION_STATUSES
+                    )
+                    
+                    # Count passed sessions
+                    passed = sum(
+                        1 for tg in sessions_response.tasks 
+                        for s in tg.sessions 
+                        if s.verifier_execution and s.verifier_execution.success
+                    )
+                    
+                    if total > 0:
+                        progress.update(
+                            task, 
+                            completed=completed, 
+                            total=total,
+                            description=f"[cyan]Running eval ({completed}/{total}, {passed} passed)..."
+                        )
+                        
+                        # Check if all sessions are done
+                        if completed >= total:
+                            break
+                except:
+                    # Sessions endpoint might not be ready yet
+                    pass
+                
+                # Also check job status as fallback
+                try:
+                    job = client.get_job(job_id)
+                    if job.status in TERMINAL_JOB_STATUSES:
+                        break
+                except:
+                    pass
+                
+                time.sleep(3)  # Poll every 3 seconds
+        
+        # Show final status
+        console.print()
+        try:
+            job = client.get_job(job_id)
+            console.print(f"[bold]Final Status:[/bold] {format_status(job.status)}")
+            
+            # Show summary stats
+            sessions_response = client.list_job_sessions(job_id)
+            total_passed = sum(tg.passed_sessions for tg in sessions_response.tasks)
+            total_sessions = sessions_response.total_sessions
+            
+            if total_sessions > 0:
+                pass_rate = (total_passed / total_sessions) * 100
+                
+                # Color the pass rate
+                if pass_rate >= 70:
+                    rate_color = "green"
+                elif pass_rate >= 40:
+                    rate_color = "yellow"
+                else:
+                    rate_color = "red"
+                
+                console.print(f"[bold]Pass Rate:[/bold] [{rate_color}]{total_passed}/{total_sessions} ({pass_rate:.1f}%)[/{rate_color}]")
+                
+                # Show per-task breakdown if multiple tasks
+                if len(sessions_response.tasks) > 1:
+                    console.print()
+                    console.print("[bold]Per-task results:[/bold]")
+                    for tg in sessions_response.tasks:
+                        task_name = tg.task.key if tg.task else tg.task_id or "Unknown"
+                        task_rate = tg.pass_rate * 100
+                        console.print(f"  {task_name}: {tg.passed_sessions}/{tg.total_sessions} ({task_rate:.0f}%)")
+        except:
+            pass
+            
+    except KeyboardInterrupt:
+        detached = True
+        console.print()
+        console.print("[yellow]Detached. Eval continues running in background.[/yellow]")
+        console.print(f"[dim]Check status: flt jobs get {job_id}[/dim]")
 
 
 def main():
