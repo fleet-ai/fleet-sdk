@@ -5,6 +5,13 @@ import os
 import sys
 from typing import List, Optional
 
+# Load .env file if present (before other imports that might need env vars)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed, skip
+
 try:
     import typer
     from rich.console import Console
@@ -35,6 +42,32 @@ console = Console()
 
 
 CLI_DEFAULT_BASE_URL = "https://us-west-1.fleetai.com"
+
+
+def colorize_score(score: float) -> str:
+    """Color a score from red (0.0) to yellow (0.5) to green (1.0)."""
+    if score >= 0.7:
+        return f"[green]{score:.2f}[/green]"
+    elif score >= 0.4:
+        return f"[yellow]{score:.2f}[/yellow]"
+    else:
+        return f"[red]{score:.2f}[/red]"
+
+
+def format_status(status: Optional[str]) -> str:
+    """Format job status with color and clean text."""
+    if not status:
+        return "[dim]-[/dim]"
+    
+    status_map = {
+        "completed": "[green]✓ completed[/green]",
+        "in_progress": "[yellow]● running[/yellow]",
+        "pending": "[dim]○ pending[/dim]",
+        "load_tasks": "[blue]↻ loading[/blue]",
+        "failed": "[red]✗ failed[/red]",
+        "cancelled": "[dim]✗ cancelled[/dim]",
+    }
+    return status_map.get(status, f"[dim]{status}[/dim]")
 
 
 def get_client() -> Fleet:
@@ -80,11 +113,19 @@ def list_jobs(
         table.add_row(
             job.id,
             job.name or "-",
-            job.status or "-",
+            format_status(job.status),
             job.created_at or "-",
         )
 
     console.print(table)
+    
+    # Show tips with a real job ID from the results
+    first_job_id = jobs[0].id
+    console.print()
+    console.print("[dim]Tips:[/dim]")
+    console.print(f"[dim]  flt jobs get {first_job_id}[/dim]")
+    console.print(f"[dim]  flt jobs sessions {first_job_id}[/dim]")
+    console.print(f"[dim]  flt sessions transcript <session-id>[/dim]")
 
 
 @jobs_app.command("create")
@@ -174,7 +215,7 @@ def create_job(
     console.print(f"[green]Job created successfully![/green]")
     console.print(f"  Job ID: [cyan]{result.job_id}[/cyan]")
     console.print(f"  Workflow ID: {result.workflow_job_id}")
-    console.print(f"  Status: [yellow]{result.status}[/yellow]")
+    console.print(f"  Status: {format_status(result.status)}")
     if result.name:
         console.print(f"  Name: {result.name}")
 
@@ -196,8 +237,14 @@ def get_job(
     console.print(f"[bold]Job Details[/bold]")
     console.print(f"  ID: [cyan]{job.id}[/cyan]")
     console.print(f"  Name: {job.name or '-'}")
-    console.print(f"  Status: [yellow]{job.status or '-'}[/yellow]")
+    console.print(f"  Status: {format_status(job.status)}")
     console.print(f"  Created At: {job.created_at or '-'}")
+    
+    # Show tips
+    console.print()
+    console.print("[dim]Tips:[/dim]")
+    console.print(f"[dim]  flt jobs sessions {job.id}[/dim]")
+    console.print(f"[dim]  flt sessions transcript <session-id>[/dim]")
 
 
 @jobs_app.command("sessions")
@@ -216,6 +263,7 @@ def list_job_sessions(
     console.print(f"[bold]Sessions for Job:[/bold] [cyan]{result.job_id}[/cyan]")
     console.print(f"Total Sessions: {result.total_sessions}\n")
 
+    first_session_id = None
     for task_group in result.tasks:
         task_name = task_group.task.key if task_group.task else task_group.task_id or "Unknown"
         pass_rate_pct = task_group.pass_rate * 100
@@ -233,25 +281,33 @@ def list_job_sessions(
         table.add_column("Result")
 
         for session in task_group.sessions:
+            if first_session_id is None:
+                first_session_id = session.session_id
             result_str = "-"
             if session.verifier_execution:
                 if session.verifier_execution.success:
                     result_str = "[green]PASS[/green]"
                     if session.verifier_execution.score is not None:
-                        result_str += f" ({session.verifier_execution.score:.2f})"
+                        score_colored = colorize_score(session.verifier_execution.score)
+                        result_str += f" ({score_colored})"
                 else:
                     result_str = "[red]FAIL[/red]"
 
             table.add_row(
-                session.session_id[:8] + "...",
+                session.session_id,
                 session.model,
-                session.status,
+                format_status(session.status),
                 str(session.step_count),
                 result_str,
             )
 
         console.print(table)
         console.print()
+
+    # Show tips with a real session ID
+    if first_session_id:
+        console.print("[dim]Tips:[/dim]")
+        console.print(f"[dim]  flt sessions transcript {first_session_id}[/dim]")
 
 
 # Sessions commands
@@ -272,6 +328,8 @@ def get_session_transcript(
 
     # Header
     console.print(f"[bold]Session Transcript[/bold]")
+    if result.instance:
+        console.print(f"  Status: {format_status(result.instance.status)}")
     console.print()
 
     # Task info
@@ -282,7 +340,7 @@ def get_session_transcript(
             console.print(f"  Version: {result.task.version}")
         console.print()
         console.print(f"[bold]Prompt:[/bold]")
-        console.print(f"  {result.task.prompt[:200]}{'...' if len(result.task.prompt) > 200 else ''}")
+        console.print(f"  {result.task.prompt}")
         console.print()
 
     # Verifier result
@@ -290,7 +348,8 @@ def get_session_transcript(
         status = "[green]PASS[/green]" if result.verifier_execution.success else "[red]FAIL[/red]"
         console.print(f"[bold]Verifier Result:[/bold] {status}")
         if result.verifier_execution.score is not None:
-            console.print(f"  Score: {result.verifier_execution.score}")
+            score_colored = colorize_score(result.verifier_execution.score)
+            console.print(f"  Score: {score_colored}")
         console.print(f"  Execution Time: {result.verifier_execution.execution_time_ms}ms")
         console.print()
 
