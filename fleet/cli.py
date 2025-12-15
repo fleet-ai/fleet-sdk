@@ -132,9 +132,9 @@ def list_jobs(
     first_job_id = jobs[0].id
     console.print()
     console.print("[dim]Tips:[/dim]")
-    console.print(f"[dim]  flt jobs get {first_job_id}[/dim]")
-    console.print(f"[dim]  flt jobs sessions {first_job_id}[/dim]")
-    console.print(f"[dim]  flt sessions transcript <session-id>[/dim]")
+    console.print(f"[dim]  Job details:       flt jobs get {first_job_id}[/dim]")
+    console.print(f"[dim]  Job sessions:      flt jobs sessions {first_job_id}[/dim]")
+    console.print(f"[dim]  Session transcript: flt sessions transcript <session-id>[/dim]")
 
 
 @jobs_app.command("create")
@@ -252,8 +252,8 @@ def get_job(
     # Show tips
     console.print()
     console.print("[dim]Tips:[/dim]")
-    console.print(f"[dim]  flt jobs sessions {job.id}[/dim]")
-    console.print(f"[dim]  flt sessions transcript <session-id>[/dim]")
+    console.print(f"[dim]  Job sessions:      flt jobs sessions {job.id}[/dim]")
+    console.print(f"[dim]  Session transcript: flt sessions transcript <session-id>[/dim]")
 
 
 @jobs_app.command("sessions")
@@ -316,7 +316,7 @@ def list_job_sessions(
     # Show tips with a real session ID
     if first_session_id:
         console.print("[dim]Tips:[/dim]")
-        console.print(f"[dim]  flt sessions transcript {first_session_id}[/dim]")
+        console.print(f"[dim]  Session transcript: flt sessions transcript {first_session_id}[/dim]")
 
 
 # Sessions commands
@@ -438,8 +438,7 @@ def list_projects(
         return
     
     table = Table(title="Projects")
-    table.add_column("Project Key", style="cyan")
-    table.add_column("Name", style="green")
+    table.add_column("Project Key", style="cyan", no_wrap=True)
     table.add_column("Modality", style="blue")
     table.add_column("Created At", style="dim")
     
@@ -453,7 +452,6 @@ def list_projects(
         
         table.add_row(
             project.get("project_key", "-"),
-            project.get("name", "-"),
             modality,
             project.get("created_at", "-"),
         )
@@ -465,7 +463,7 @@ def list_projects(
         first_project = projects[0].get("project_key", "my-project")
         console.print()
         console.print("[dim]Tips:[/dim]")
-        console.print(f"[dim]  flt eval run -p {first_project} -m openai/gpt-4o[/dim]")
+        console.print(f"[dim]  Run eval: flt eval run -p {first_project} -m openai/gpt-4o-mini[/dim]")
 
 
 # Eval commands
@@ -559,18 +557,17 @@ def eval_run(
     console.print()
     
     # Show dashboard link
-    dashboard_host = base_url.replace("https://", "").replace("http://", "")
     console.print(Panel(
-        f"[bold]Live agent traces[/bold]\n\n  {dashboard_host}/jobs/{job_id}",
+        f"[bold]Live agent traces[/bold]\n\n  https://www.fleetai.com/dashboard/jobs/{job_id}",
         border_style="cyan",
     ))
     console.print()
     
     # Show tips
     console.print("[dim]Tips:[/dim]")
-    console.print(f"[dim]  flt jobs get {job_id}[/dim]")
-    console.print(f"[dim]  flt jobs sessions {job_id}[/dim]")
-    console.print(f"[dim]  flt sessions transcript <session-id>[/dim]")
+    console.print(f"[dim]  Job details:       flt jobs get {job_id}[/dim]")
+    console.print(f"[dim]  Job sessions:      flt jobs sessions {job_id}[/dim]")
+    console.print(f"[dim]  Session transcript: flt sessions transcript <session-id>[/dim]")
     console.print()
     
     if no_watch:
@@ -610,19 +607,32 @@ def eval_run(
                         if s.status in TERMINAL_SESSION_STATUSES
                     )
                     
-                    # Count passed sessions
-                    passed = sum(
-                        1 for tg in sessions_response.tasks 
-                        for s in tg.sessions 
-                        if s.verifier_execution and s.verifier_execution.success
-                    )
+                    # Count passed sessions and collect scores
+                    passed = 0
+                    scores = []
+                    for tg in sessions_response.tasks:
+                        for s in tg.sessions:
+                            if s.verifier_execution:
+                                if s.verifier_execution.success:
+                                    passed += 1
+                                if s.verifier_execution.score is not None:
+                                    scores.append(s.verifier_execution.score)
+                    
+                    # Calculate average score
+                    avg_score = sum(scores) / len(scores) if scores else None
                     
                     if total > 0:
+                        # Build description with score if available
+                        if avg_score is not None:
+                            desc = f"[cyan]Running ({completed}/{total}) | {passed} passed | avg: {avg_score:.2f}[/cyan]"
+                        else:
+                            desc = f"[cyan]Running ({completed}/{total}) | {passed} passed[/cyan]"
+                        
                         progress.update(
                             task, 
                             completed=completed, 
                             total=total,
-                            description=f"[cyan]Running eval ({completed}/{total}, {passed} passed)..."
+                            description=desc
                         )
                         
                         # Check if all sessions are done
