@@ -147,9 +147,17 @@ class AgentOrchestrator:
         
         image_name = f"fleet-cua-{agent_path.name}"
         
+        # Use fleet SDK root as build context (so Dockerfile can access fleet/utils)
+        # agent_path is like: .../fleet-sdk/fleet/agent/gemini_cua
+        # We want: .../fleet-sdk
+        fleet_root = agent_path.parent.parent.parent
+        
         with Live(Spinner("dots", text=f"Building Docker image {image_name}..."), console=console, transient=True):
             proc = await asyncio.create_subprocess_exec(
-                "docker", "build", "-t", image_name, str(agent_path),
+                "docker", "build",
+                "-t", image_name,
+                "-f", str(dockerfile),
+                str(fleet_root),  # Build context is repo root
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
