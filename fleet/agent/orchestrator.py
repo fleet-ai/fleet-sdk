@@ -28,6 +28,8 @@ from typing import Dict, List, Optional, Tuple
 
 from .utils import get_agent_path
 from .types import AgentConfig, AgentResult, TaskResult
+from fleet.proxy import ProxyManager
+from fleet.eval import TrafficUploader
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,11 @@ class AgentOrchestrator:
         self._docker_image: Optional[str] = None
         # Track available ports (recycled when tasks complete)
         self._available_ports: List[Tuple[int, int]] = []
+        # MITM proxy for traffic capture
+        self._proxy: Optional[ProxyManager] = None
+        self._proxy_env: Dict[str, str] = {}
+        # Traffic uploader (tails proxy log, ships to backend)
+        self._uploader: Optional[TrafficUploader] = None
     
     async def _get_next_ports(self) -> Tuple[int, int]:
         """Get next available MCP port and VNC port."""
@@ -68,8 +75,33 @@ class AgentOrchestrator:
         from rich.console import Console
         from rich.live import Live
         from rich.spinner import Spinner
+        import uuid
         
         console = Console()
+        
+        # Generate job ID for this run
+        job_id = f"eval_{uuid.uuid4().hex[:12]}"
+        console.print(f"[green]✓[/green] Eval job: {job_id}")
+        
+        # Start MITM proxy for traffic capture
+        self._proxy = ProxyManager()
+        try:
+            self._proxy_env = await self._proxy.start()
+            console.print(f"[green]✓[/green] Proxy started, logging to: {self._proxy.log_path}")
+            
+            # Start traffic uploader (tails proxy log, ships raw to backend)
+            self._uploader = TrafficUploader(
+                job_id=job_id,
+                log_file=self._proxy.log_path,
+                whitelist=None,  # No filter - upload everything
+            )
+            await self._uploader.start()
+        except Exception as e:
+            console.print(f"[yellow]⚠[/yellow] Proxy failed to start: {e}")
+            console.print("[dim]  Proxy requires aiohttp: pip install aiohttp[/dim]")
+            self._proxy = None
+            self._proxy_env = {}
+            self._uploader = None
         
         # Load tasks with spinner
         with Live(Spinner("dots", text=f"Loading tasks from {self.config.project_key}..."), console=console, transient=True):
@@ -131,6 +163,17 @@ class AgentOrchestrator:
                 ))
             else:
                 final.append(r)
+        
+        # Stop uploader first (flushes remaining entries)
+        if self._uploader:
+            await self._uploader.stop()
+            stats = self._uploader.stats
+            console.print(f"[green]✓[/green] Traffic: {stats['read']} read, {stats['uploaded']} uploaded")
+        
+        # Stop proxy
+        if self._proxy:
+            await self._proxy.stop()
+            console.print(f"[green]✓[/green] Log: {self._proxy.log_path}")
         
         return final
     
@@ -372,6 +415,8 @@ class AgentOrchestrator:
             "FLEET_VERBOSE": "true" if self.config.verbose else "false",
         })
         env.update(self.config.api_keys)
+        # Add proxy env vars for traffic capture
+        env.update(self._proxy_env)
         
         proc = await asyncio.create_subprocess_exec(
             "python", str(agent_script),
@@ -398,9 +443,15 @@ class AgentOrchestrator:
         stdout_str = stdout.decode()
         stderr_str = stderr.decode()
         
-        logger.debug(f"Agent stdout: {stdout_str[:500]}")
-        if stderr_str:
-            logger.debug(f"Agent stderr: {stderr_str[:500]}")
+        # Show full output in verbose mode
+        if self.config.verbose:
+            logger.info(f"Agent stdout:\n{stdout_str}")
+            if stderr_str:
+                logger.info(f"Agent stderr:\n{stderr_str}")
+        else:
+            logger.debug(f"Agent stdout: {stdout_str[:500]}")
+            if stderr_str:
+                logger.debug(f"Agent stderr: {stderr_str[:500]}")
         
         result_json = None
         for line in stdout_str.split("\n"):
@@ -440,7 +491,7 @@ async def run_agent(
     agent: str = "gemini_cua",
     model: str = "gemini-2.5-pro",
     max_concurrent: int = 4,
-    max_steps: int = 50,
+    max_steps: int = 100,
     timeout_seconds: int = 600,
     api_keys: Optional[Dict[str, str]] = None,
     headful: bool = False,

@@ -20,6 +20,7 @@ from .exceptions import (
     FleetVersionNotFoundError,
     FleetBadRequestError,
     FleetPermissionError,
+    FleetConflictError,
 )
 
 # Import version
@@ -244,6 +245,15 @@ class SyncWrapper(BaseWrapper):
         elif status_code == 429:
             # Rate limit errors (not instance limit which is now 403)
             raise FleetRateLimitError(error_message)
+        elif status_code == 409:
+            # Conflict errors (resource already exists)
+            resource_name = None
+            # Try to extract resource name from error message
+            if "'" in error_message:
+                parts = error_message.split("'")
+                if len(parts) >= 2:
+                    resource_name = parts[1]
+            raise FleetConflictError(error_message, resource_name=resource_name)
         else:
             raise FleetAPIError(
                 error_message,

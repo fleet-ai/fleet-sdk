@@ -12,7 +12,7 @@ class AgentConfig(BaseModel):
     agent: str = "gemini_cua"
     model: str = "gemini-2.5-pro"
     max_concurrent: int = 4
-    max_steps: int = 50
+    max_steps: int = 100
     timeout_seconds: int = 600
     screen_width: int = 1366
     screen_height: int = 768

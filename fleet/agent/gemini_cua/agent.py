@@ -378,7 +378,7 @@ async def main():
         "prompt": os.environ.get("FLEET_TASK_PROMPT", ""),
         "task_key": os.environ.get("FLEET_TASK_KEY", ""),
         "model": os.environ.get("FLEET_MODEL", "gemini-2.5-pro"),
-        "max_steps": int(os.environ.get("FLEET_MAX_STEPS", "50")),
+        "max_steps": int(os.environ.get("FLEET_MAX_STEPS", "100")),
     }
     
     print(f"Gemini CUA Agent")

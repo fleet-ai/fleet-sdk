@@ -2,8 +2,10 @@
 
 import json
 import os
+import random
 import signal
 import sys
+import threading
 import time
 from typing import List, Optional
 
@@ -31,6 +33,36 @@ except ImportError:
 
 from .client import Fleet
 from .models import JobCreateRequest
+from .exceptions import FleetConflictError
+
+# Word lists for random job name prefixes
+_ADJECTIVES = [
+    "happy", "sunny", "swift", "bright", "calm", "brave", "clever", "cosmic",
+    "crystal", "dancing", "daring", "eager", "electric", "epic", "fancy",
+    "fierce", "flying", "friendly", "fuzzy", "gentle", "glowing", "golden",
+    "grand", "hidden", "humble", "icy", "jolly", "jumping", "kind", "lively",
+    "lucky", "magic", "mighty", "misty", "noble", "peaceful", "proud", "quick",
+    "quiet", "racing", "radiant", "rapid", "royal", "shiny", "silent", "smooth",
+    "snappy", "sneaky", "solar", "speedy", "starry", "steady", "stellar", "stormy",
+    "super", "swift", "turbo", "vibrant", "vivid", "wild", "witty", "zesty",
+]
+_NOUNS = [
+    "falcon", "tiger", "phoenix", "dragon", "panther", "wolf", "eagle", "hawk",
+    "bear", "lion", "fox", "owl", "raven", "dolphin", "whale", "shark",
+    "comet", "nebula", "galaxy", "quasar", "pulsar", "nova", "meteor", "cosmos",
+    "rocket", "shuttle", "orbit", "laser", "photon", "prism", "crystal", "spark",
+    "thunder", "storm", "blaze", "frost", "wave", "breeze", "flame", "aurora",
+    "summit", "peak", "canyon", "river", "ocean", "forest", "meadow", "garden",
+    "castle", "tower", "bridge", "beacon", "compass", "anchor", "helm", "voyage",
+]
+
+
+def _generate_random_prefix() -> str:
+    """Generate a random two-word prefix like 'sunny_falcon'."""
+    adj = random.choice(_ADJECTIVES)
+    noun = random.choice(_NOUNS)
+    return f"{adj}_{noun}"
+
 
 app = typer.Typer(
     name="flt",
@@ -199,23 +231,61 @@ def create_job(
             byok_keys[provider] = key
 
     client = get_client()
-    result = client.create_job(
-        models=model,
-        name=name,
-        pass_k=pass_k,
-        env_key=env_key,
-        project_key=project_key,
-        task_keys=task_keys,
-        max_steps=max_steps,
-        max_duration_minutes=max_duration,
-        max_concurrent_per_model=max_concurrent,
-        mode=mode,
-        system_prompt=system_prompt,
-        model_prompts=model_prompts,
-        byok_keys=byok_keys,
-        byok_ttl_minutes=byok_ttl,
-        harness=harness,
-    )
+    
+    # Create job with retry on name collision
+    result = None
+    original_name = name
+    max_retries = 5
+    
+    for attempt in range(max_retries + 1):
+        try:
+            result = client.create_job(
+                models=model,
+                name=name,
+                pass_k=pass_k,
+                env_key=env_key,
+                project_key=project_key,
+                task_keys=task_keys,
+                max_steps=max_steps,
+                max_duration_minutes=max_duration,
+                max_concurrent_per_model=max_concurrent,
+                mode=mode,
+                system_prompt=system_prompt,
+                model_prompts=model_prompts,
+                byok_keys=byok_keys,
+                byok_ttl_minutes=byok_ttl,
+                harness=harness,
+            )
+            break  # Success
+        except FleetConflictError:
+            # Name collision - retry with random prefix
+            if attempt < max_retries:
+                prefix = _generate_random_prefix()
+                if original_name:
+                    name = f"{prefix}-{original_name}"
+                else:
+                    name = prefix
+                continue
+            console.print(f"[red]Error:[/red] Job name collision after {max_retries} retries")
+            raise typer.Exit(1)
+        except Exception as e:
+            error_str = str(e)
+            
+            # Fallback: check for name collision via string matching
+            if "already exists" in error_str.lower() and attempt < max_retries:
+                prefix = _generate_random_prefix()
+                if original_name:
+                    name = f"{prefix}-{original_name}"
+                else:
+                    name = prefix
+                continue
+            
+            console.print(f"[red]Error creating job:[/red] {e}")
+            raise typer.Exit(1)
+    
+    if result is None:
+        console.print(f"[red]Error:[/red] Failed to create job after {max_retries} retries")
+        raise typer.Exit(1)
 
     if output_json:
         console.print(json.dumps(result.model_dump(), indent=2, default=str))
@@ -471,6 +541,7 @@ def list_projects(
 
 def _run_local_agent(
     project_key: Optional[str],
+    task_keys: Optional[List[str]],
     model: str,
     agent: str,
     max_steps: int,
@@ -518,11 +589,17 @@ def _run_local_agent(
         console.print("  [cyan]flt eval run ... --byok google=your-key[/cyan]")
         raise typer.Exit(1)
     
+    if verbose:
+        console.print(f"[dim]API keys configured: {list(api_keys.keys())}[/dim]")
+    
     # Display config
     console.print()
     console.print("[green bold]Running Agent[/green bold]")
     console.print()
-    console.print(f"  [bold]Project[/bold]     {project_key or 'all tasks'}")
+    if task_keys:
+        console.print(f"  [bold]Tasks[/bold]       {', '.join(task_keys)}")
+    else:
+        console.print(f"  [bold]Project[/bold]     {project_key or 'all tasks'}")
     console.print(f"  [bold]Agent[/bold]       {agent}")
     console.print(f"  [bold]Model[/bold]       {model}")
     console.print(f"  [bold]Max Steps[/bold]   {max_steps}")
@@ -535,6 +612,7 @@ def _run_local_agent(
         from fleet.agent import run_agent
         return await run_agent(
             project_key=project_key,
+            task_keys=task_keys,
             agent=agent,
             model=model,
             max_concurrent=max_concurrent,
@@ -620,9 +698,46 @@ def _run_local_agent(
             console.print(f"[bold]Errors:[/bold] [red]{errors}[/red]")
 
 
+def _listen_for_detach_key(stop_event: threading.Event):
+    """Listen for Ctrl+B in a background thread to signal detachment."""
+    try:
+        # Platform-specific keyboard input handling
+        if sys.platform == 'win32':
+            import msvcrt
+            while not stop_event.is_set():
+                if msvcrt.kbhit():
+                    ch = msvcrt.getch()
+                    if ch == b'\x02':  # Ctrl+B
+                        stop_event.set()
+                        break
+                time.sleep(0.1)
+        else:
+            # Unix-like systems
+            import select
+            import tty
+            import termios
+
+            old_settings = termios.tcgetattr(sys.stdin)
+            try:
+                tty.setcbreak(sys.stdin.fileno())
+                while not stop_event.is_set():
+                    # Check if input is available with timeout
+                    if select.select([sys.stdin], [], [], 0.1)[0]:
+                        ch = sys.stdin.read(1)
+                        if ch == '\x02':  # Ctrl+B
+                            stop_event.set()
+                            break
+            finally:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+    except Exception:
+        # If we can't set up keyboard listening, just exit gracefully
+        pass
+
+
 @eval_app.command("run")
 def eval_run(
     project_key: Optional[str] = typer.Option(None, "--project", "-p", help="Project key to evaluate"),
+    task_keys: Optional[List[str]] = typer.Option(None, "--task", "-t", help="Specific task key(s) to run (repeatable)"),
     model: List[str] = typer.Option(..., "--model", "-m", help="Model (e.g., google/gemini-2.5-pro)"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="Job name"),
     pass_k: int = typer.Option(1, "--pass-k", "-k", help="Number of passes per task"),
@@ -638,12 +753,15 @@ def eval_run(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show debug output"),
 ):
     """
-    Run an evaluation on a project.
+    Run an evaluation on a project or specific tasks.
 
     \b
     Examples:
       # Cloud execution (default)
       flt eval run -p my-project -m google/gemini-2.5-pro
+      
+      # Run specific task(s)
+      flt eval run -t task_abc123 -m google/gemini-2.5-pro --local gemini_cua
       
       # Local with built-in agent
       flt eval run -p my-project -m google/gemini-2.5-pro --local gemini_cua
@@ -654,13 +772,19 @@ def eval_run(
       # Local with custom agent
       flt eval run -p my-project -m google/gemini-2.5-pro --local ./my-agent
     """
+    # Validate: need either project or task keys
+    if not project_key and not task_keys:
+        console.print("[red]Error:[/red] Either --project (-p) or --task (-t) must be specified")
+        raise typer.Exit(1)
+    
     # Local mode
     if local is not None:
         _run_local_agent(
             project_key=project_key,
+            task_keys=task_keys,
             model=model[0] if model else "gemini-2.5-pro",
             agent=local if local else "gemini_cua",
-            max_steps=max_steps or 50,
+            max_steps=max_steps or 100,
             max_duration=max_duration,
             max_concurrent=max_concurrent,
             byok=byok,
@@ -695,38 +819,63 @@ def eval_run(
             provider, key = b.split("=", 1)
             byok_keys[provider] = key
     
-    # Create the job
-    try:
-        result = client.create_job(
-            models=model,
-            name=name,
-            pass_k=pass_k,
-            project_key=project_key if project_key else None,
-            max_steps=max_steps,
-            max_duration_minutes=max_duration,
-            max_concurrent_per_model=max_concurrent,
-            byok_keys=byok_keys,
-        )
-    except Exception as e:
-        error_str = str(e)
-        # Check if it's a model not found error and format nicely
-        if "not found" in error_str.lower() and "available models" in error_str.lower():
-            console.print(f"[red]Error:[/red] Invalid model specified")
-            console.print()
-            # Extract and display available models
-            if "Available models:" in error_str:
-                try:
-                    models_part = error_str.split("Available models:")[1].strip()
-                    # Parse the list string
-                    import ast
-                    available = ast.literal_eval(models_part)
-                    console.print("[bold]Available models:[/bold]")
-                    for m in sorted(available):
-                        console.print(f"  [cyan]{m}[/cyan]")
-                except:
-                    console.print(f"[dim]{error_str}[/dim]")
-        else:
-            console.print(f"[red]Error creating job:[/red] {e}")
+    # Create the job with retry on name collision
+    result = None
+    original_name = name
+    max_retries = 5
+    
+    for attempt in range(max_retries + 1):
+        try:
+            result = client.create_job(
+                models=model,
+                name=name,
+                pass_k=pass_k,
+                project_key=project_key if project_key else None,
+                max_steps=max_steps,
+                max_duration_minutes=max_duration,
+                max_concurrent_per_model=max_concurrent,
+                byok_keys=byok_keys,
+            )
+            break  # Success
+        except FleetConflictError:
+            # Name collision - retry with random prefix
+            if attempt < max_retries:
+                prefix = _generate_random_prefix()
+                name = f"{prefix}-{original_name}"
+                continue
+            console.print(f"[red]Error:[/red] Job name collision after {max_retries} retries")
+            raise typer.Exit(1)
+        except Exception as e:
+            error_str = str(e)
+            
+            # Fallback: check for name collision via string matching
+            if "already exists" in error_str.lower() and attempt < max_retries:
+                prefix = _generate_random_prefix()
+                name = f"{prefix}-{original_name}"
+                continue
+            
+            # Check if it's a model not found error and format nicely
+            if "not found" in error_str.lower() and "available models" in error_str.lower():
+                console.print(f"[red]Error:[/red] Invalid model specified")
+                console.print()
+                # Extract and display available models
+                if "Available models:" in error_str:
+                    try:
+                        models_part = error_str.split("Available models:")[1].strip()
+                        # Parse the list string
+                        import ast
+                        available = ast.literal_eval(models_part)
+                        console.print("[bold]Available models:[/bold]")
+                        for m in sorted(available):
+                            console.print(f"  [cyan]{m}[/cyan]")
+                    except:
+                        console.print(f"[dim]{error_str}[/dim]")
+            else:
+                console.print(f"[red]Error creating job:[/red] {e}")
+            raise typer.Exit(1)
+    
+    if result is None:
+        console.print(f"[red]Error:[/red] Failed to create job after {max_retries} retries")
         raise typer.Exit(1)
     
     job_id = result.job_id
@@ -764,15 +913,20 @@ def eval_run(
         return
     
     # Watch progress
-    console.print("[dim]Press Ctrl+C to detach (eval continues in background)[/dim]")
+    console.print("[dim]Watching progress... (Press Ctrl+B to detach, job continues running)[/dim]")
     console.print()
-    
+
     # Terminal statuses for sessions
     TERMINAL_SESSION_STATUSES = {"completed", "timed_out", "errored", "failed"}
     TERMINAL_JOB_STATUSES = {"completed", "errored", "failed", "cancelled"}
-    
+
     detached = False
-    
+    detach_event = threading.Event()
+
+    # Start keyboard listener thread
+    listener_thread = threading.Thread(target=_listen_for_detach_key, args=(detach_event,), daemon=True)
+    listener_thread.start()
+
     try:
         with Progress(
             SpinnerColumn(),
@@ -839,7 +993,12 @@ def eval_run(
                         break
                 except:
                     pass
-                
+
+                # Check if user pressed Ctrl+B to detach
+                if detach_event.is_set():
+                    detached = True
+                    break
+
                 time.sleep(3)  # Poll every 3 seconds
         
         # Show final status
@@ -876,12 +1035,16 @@ def eval_run(
                         console.print(f"  {task_name}: {tg.passed_sessions}/{tg.total_sessions} ({task_rate:.0f}%)")
         except:
             pass
-            
-    except KeyboardInterrupt:
-        detached = True
-        console.print()
-        console.print("[yellow]Detached. Eval continues running in background.[/yellow]")
-        console.print(f"[dim]Check status: flt jobs get {job_id}[/dim]")
+
+    finally:
+        # Signal the keyboard listener thread to stop
+        detach_event.set()
+
+        # Show detached message if user pressed Ctrl+B
+        if detached:
+            console.print()
+            console.print("[yellow]Detached. Eval continues running in background.[/yellow]")
+            console.print(f"[dim]Check status: flt jobs get {job_id}[/dim]")
 
 
 def main():

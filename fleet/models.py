@@ -540,3 +540,49 @@ class SessionTranscriptResponse(BaseModel):
         None, title="Verifier Execution"
     )
     transcript: List[TranscriptMessage] = Field(..., title="Transcript")
+
+
+# Eval Job models (for local CLI runs with remote logging)
+
+
+class EvalJobCreateRequest(BaseModel):
+    """Request to create an eval job for local CLI runs."""
+
+    project_key: Optional[str] = Field(None, title="Project Key")
+    task_keys: Optional[List[str]] = Field(None, title="Task Keys")
+    model: str = Field(..., title="Model")
+    agent: str = Field(..., title="Agent")
+    source: str = Field("local_cli", title="Source")
+    metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
+
+
+class EvalJobCreateResponse(BaseModel):
+    """Response from creating an eval job."""
+
+    job_id: str = Field(..., title="Job Id")
+    status: str = Field(..., title="Status")
+
+
+class EvalEvent(BaseModel):
+    """A single eval event."""
+
+    type: str = Field(..., title="Event Type")
+    timestamp: str = Field(..., title="Timestamp")
+    task_key: Optional[str] = Field(None, title="Task Key")
+    session_id: Optional[str] = Field(None, title="Session Id")
+    data: Dict[str, Any] = Field(default_factory=dict, title="Data")
+    duration_ms: Optional[int] = Field(None, title="Duration Ms")
+
+
+class EvalEventsRequest(BaseModel):
+    """Request to upload eval events."""
+
+    job_id: str = Field(..., title="Job Id")
+    events: List[EvalEvent] = Field(..., title="Events")
+
+
+class EvalEventsResponse(BaseModel):
+    """Response from uploading eval events."""
+
+    received: int = Field(..., title="Received Count")
+    status: str = Field(..., title="Status")
