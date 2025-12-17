@@ -21,29 +21,17 @@ import subprocess
 import sys
 import time
 from typing import Any, Dict, List, Optional
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
+from google import genai
+from google.genai import types
+from fleet.utils.logging import log_verbose, VERBOSE
 
-# Verbose logging flag
-VERBOSE = os.environ.get("FLEET_VERBOSE", "false").lower() in ("true", "1", "yes")
-
-def log_verbose(*args, **kwargs):
-    """Print only if VERBOSE is enabled."""
-    if VERBOSE:
-        print(*args, **kwargs)
-
-try:
-    from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
-except ImportError:
-    print(json.dumps({"completed": False, "error": "Missing mcp. Run: pip install mcp"}))
-    sys.exit(1)
-
-try:
-    from google import genai
-    from google.genai import types
-except ImportError:
-    print(json.dumps({"completed": False, "error": "Missing google-genai. Run: pip install google-genai"}))
-    sys.exit(1)
-
+# Whitelist hooks for auto-detecting model endpoints (optional)
+_register_endpoint = lambda url: None
+if os.environ.get("FLEET_PROXY_ENABLED"):
+    from fleet.proxy.whitelist import install_hooks, register_endpoint as _register_endpoint
+    install_hooks()
 
 # OAuth configuration
 GOOG_PROJECT = os.environ.get("GOOG_PROJECT", "gemini-agents-area")
@@ -63,38 +51,50 @@ def get_oauth_token() -> str:
 def get_gemini_client() -> genai.Client:
     """Create Gemini client with appropriate auth."""
     api_key = os.environ.get("GEMINI_API_KEY")
+    custom_endpoint = os.environ.get("FLEET_MODEL_ENDPOINT")
     
-    if USE_OAUTH:
-        log_verbose(f"Using OAuth authentication (project: {GOOG_PROJECT})")
-        return genai.Client(
-            api_key=api_key,
-            http_options=types.HttpOptions(
-                headers={
-                    "Authorization": "Bearer " + get_oauth_token(),
-                    "X-Goog-User-Project": GOOG_PROJECT,
-                },
-                api_version="v1alpha",
-            )
-        )
-    else:
-        log_verbose("Using API key authentication")
-        return genai.Client(api_key=api_key)
+    # Register endpoint for proxy whitelist
+    _register_endpoint(custom_endpoint or "generativelanguage.googleapis.com")
+    
+    # Build http_options
+    http_opts = None
+    if USE_OAUTH or custom_endpoint:
+        opts = {}
+        if custom_endpoint:
+            opts["base_url"] = custom_endpoint
+            log_verbose(f"Using custom endpoint: {custom_endpoint}")
+        if USE_OAUTH:
+            opts["headers"] = {
+                "Authorization": f"Bearer {get_oauth_token()}",
+                "X-Goog-User-Project": GOOG_PROJECT,
+            }
+            opts["api_version"] = "v1alpha"
+            log_verbose(f"Using OAuth (project: {GOOG_PROJECT})")
+        http_opts = types.HttpOptions(**opts)
+    
+    return genai.Client(api_key=api_key, http_options=http_opts)
 
 
 
 class MCP:
     """MCP client using streamable-http transport."""
     
-    def __init__(self, url: str):
+    def __init__(self, url: str, log_file: Optional[str] = None):
         # Ensure URL ends with /mcp/ for streamable-http
         self.url = url.rstrip("/") + "/mcp/"
         self._session: Optional[ClientSession] = None
         self._client = None
         self._tools: List[Dict] = []
+        self._log_file = log_file or os.environ.get("FLEET_SESSION_LOG")
+        self._log_handle = None
+        if self._log_file:
+            from pathlib import Path
+            Path(self._log_file).parent.mkdir(parents=True, exist_ok=True)
+            self._log_handle = open(self._log_file, "a")
     
     async def __aenter__(self):
         # Connect using streamable-http transport
-        self._client = streamablehttp_client(self.url)
+        self._client = streamable_http_client(self.url)
         read, write, _ = await self._client.__aenter__()
         self._session = ClientSession(read, write)
         await self._session.__aenter__()
@@ -117,10 +117,25 @@ class MCP:
             await self._session.__aexit__(*args)
         if self._client:
             await self._client.__aexit__(*args)
+        if self._log_handle:
+            self._log_handle.close()
+    
+    def _log(self, entry: dict):
+        """Log an entry to the traffic file."""
+        if self._log_handle:
+            import json
+            from datetime import datetime
+            entry["timestamp"] = datetime.now().isoformat()
+            entry["url"] = self.url
+            self._log_handle.write(json.dumps(entry) + "\n")
+            self._log_handle.flush()
     
     async def call(self, name: str, args: Dict = None) -> Dict:
         """Call a tool and return the result."""
+        start_time = time.time()
         result = await self._session.call_tool(name, args or {})
+        duration_ms = int((time.time() - start_time) * 1000)
+        
         # Convert MCP result to dict format expected by agent
         content = []
         for item in result.content:
@@ -128,12 +143,35 @@ class MCP:
                 if item.type == "image":
                     content.append({
                         "type": "image",
-                        "data": item.data,
+                        "data": item.data[:100] + "..." if len(item.data) > 100 else item.data,  # Truncate for logging
                         "mimeType": getattr(item, "mimeType", "image/png"),
                     })
                 elif item.type == "text":
                     content.append({"type": "text", "text": item.text})
-        return {"content": content, "isError": result.isError if hasattr(result, "isError") else False}
+        
+        # Log the call
+        self._log({
+            "type": "mcp_call",
+            "tool": name,
+            "args": args or {},
+            "duration_ms": duration_ms,
+            "response_content_types": [c.get("type") for c in content],
+            "is_error": result.isError if hasattr(result, "isError") else False,
+        })
+        
+        # Return full content (not truncated)
+        full_content = []
+        for item in result.content:
+            if hasattr(item, "type"):
+                if item.type == "image":
+                    full_content.append({
+                        "type": "image",
+                        "data": item.data,
+                        "mimeType": getattr(item, "mimeType", "image/png"),
+                    })
+                elif item.type == "text":
+                    full_content.append({"type": "text", "text": item.text})
+        return {"content": full_content, "isError": result.isError if hasattr(result, "isError") else False}
     
     def get_tools(self) -> List[Dict]:
         """Return the list of tools from the server."""

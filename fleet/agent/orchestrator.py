@@ -80,18 +80,22 @@ class AgentOrchestrator:
         console = Console()
         
         # Generate job ID for this run
-        job_id = f"eval_{uuid.uuid4().hex[:12]}"
-        console.print(f"[green]✓[/green] Eval job: {job_id}")
+        self._job_id = f"eval_{uuid.uuid4().hex[:12]}"
+        console.print(f"Eval job: {self._job_id}")
+        
+        # Create log directory: ~/.fleet/logs/{job_id}/
+        self._log_dir = Path.home() / ".fleet" / "logs" / self._job_id
+        self._log_dir.mkdir(parents=True, exist_ok=True)
         
         # Start MITM proxy for traffic capture
         self._proxy = ProxyManager()
         try:
             self._proxy_env = await self._proxy.start()
-            console.print(f"[green]✓[/green] Proxy started, logging to: {self._proxy.log_path}")
+            console.print(f"Proxy started, logging to: {self._proxy.log_path}")
             
             # Start traffic uploader (tails proxy log, ships raw to backend)
             self._uploader = TrafficUploader(
-                job_id=job_id,
+                job_id=self._job_id,
                 log_file=self._proxy.log_path,
                 whitelist=None,  # No filter - upload everything
             )
@@ -112,7 +116,7 @@ class AgentOrchestrator:
             else:
                 raise ValueError("Either project_key or task_keys required")
         
-        console.print(f"[green]✓[/green] Loaded {len(tasks)} tasks")
+        console.print(f"Loaded {len(tasks)} tasks")
         
         # Build Docker image
         agent_path = get_agent_path(self.config.agent)
@@ -168,12 +172,16 @@ class AgentOrchestrator:
         if self._uploader:
             await self._uploader.stop()
             stats = self._uploader.stats
-            console.print(f"[green]✓[/green] Traffic: {stats['read']} read, {stats['uploaded']} uploaded")
+            console.print(f"Traffic: {stats['read']} read, {stats['uploaded']} uploaded")
         
         # Stop proxy
         if self._proxy:
             await self._proxy.stop()
-            console.print(f"[green]✓[/green] Log: {self._proxy.log_path}")
+        
+        # Show logs location
+        if hasattr(self, '_log_dir') and self._log_dir.exists():
+            session_logs = list(self._log_dir.glob("*.jsonl"))
+            console.print(f"Logs: {self._log_dir}/ ({len(session_logs)} sessions)")
         
         return final
     
@@ -212,7 +220,7 @@ class AgentOrchestrator:
             raise RuntimeError(f"Docker build failed: {stderr.decode()}")
         
         self._docker_image = image_name
-        console.print(f"[green]✓[/green] Docker image ready: {image_name}")
+        console.print(f"Docker image ready: {image_name}")
     
     async def _run_task(self, task) -> TaskResult:
         """Run agent on a single task."""
@@ -413,8 +421,14 @@ class AgentOrchestrator:
         
         # Set up environment
         env = os.environ.copy()
+        
+        # Session log file: ~/.fleet/logs/{job_id}/{task_key}.jsonl
+        session_log_file = self._log_dir / f"{task_key}.jsonl"
+        
         env.update({
             "FLEET_MCP_URL": f"http://localhost:{port}",
+            "FLEET_SESSION_LOG": str(session_log_file),  # Unified session log (MCP + HTTP)
+            "FLEET_JOB_ID": self._job_id,
             "FLEET_TASK_PROMPT": task_prompt,
             "FLEET_TASK_KEY": task_key,
             "FLEET_MODEL": self.config.model,

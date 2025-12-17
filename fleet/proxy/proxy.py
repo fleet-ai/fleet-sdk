@@ -1,7 +1,11 @@
 """Simple HTTP proxy for capturing traffic during eval runs.
 
-Captures all requests/responses and writes them to a JSONL file.
+Captures requests/responses to whitelisted endpoints and writes them to a JSONL file.
 Uses aiohttp as a simple HTTP proxy (no SSL interception, just tunneling for HTTPS).
+
+Whitelist tiers:
+1. Static: Known public LLM endpoints (googleapis.com, openai.com, etc.)
+2. Runtime: Dynamically detected from SDK client initialization
 """
 
 import asyncio
@@ -12,13 +16,21 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Set
+from urllib.parse import urlparse
 import ssl
 
 logger = logging.getLogger(__name__)
 
 # Output directory
 DEFAULT_LOG_DIR = Path.home() / ".fleet" / "proxy_logs"
+
+# Import whitelist utilities
+try:
+    from .whitelist import is_whitelisted, get_full_whitelist, STATIC_WHITELIST
+except ImportError:
+    # Fallback for subprocess execution
+    from fleet.proxy.whitelist import is_whitelisted, get_full_whitelist, STATIC_WHITELIST
 
 # Headers to redact (case-insensitive)
 SENSITIVE_HEADERS = {
@@ -53,56 +65,86 @@ def redact_headers(headers: dict) -> dict:
     return redacted
 
 
+def extract_host(url: str) -> str:
+    """Extract host from URL."""
+    if "://" not in url:
+        url = "http://" + url
+    parsed = urlparse(url)
+    return parsed.netloc.split(":")[0]  # Remove port if present
+
+
 class TrafficLogger:
-    """Logs HTTP traffic to a JSONL file."""
+    """Logs HTTP traffic to a JSONL file with whitelist filtering."""
     
-    def __init__(self, log_file: Path):
+    def __init__(self, log_file: Path, use_whitelist: bool = True):
         self.log_file = log_file
         self.log_file.parent.mkdir(parents=True, exist_ok=True)
         self._file = open(log_file, "a")
         self._lock = asyncio.Lock()
+        self._use_whitelist = use_whitelist
+        self._logged_count = 0
+        self._skipped_count = 0
+        
+        # Log active whitelist at startup
+        whitelist = get_full_whitelist()
         logger.info(f"Traffic logging to: {log_file}")
+        logger.info(f"Whitelist active: {sorted(whitelist)}")
         print(f"Traffic logging to: {log_file}")
+        print(f"Whitelist ({len(whitelist)} endpoints): {', '.join(sorted(whitelist)[:5])}{'...' if len(whitelist) > 5 else ''}")
     
-    async def log(self, entry: dict):
-        """Log a traffic entry."""
+    def should_log(self, host: str) -> bool:
+        """Check if traffic to this host should be logged."""
+        if not self._use_whitelist:
+            return True
+        return is_whitelisted(host)
+    
+    async def log(self, entry: dict, host: Optional[str] = None):
+        """Log a traffic entry if it passes whitelist filter."""
+        # Check whitelist
+        if host and not self.should_log(host):
+            self._skipped_count += 1
+            return
+        
         entry["logged_at"] = datetime.now().isoformat()
         async with self._lock:
             self._file.write(json.dumps(entry) + "\n")
             self._file.flush()
+            self._logged_count += 1
     
     def close(self):
+        logger.info(f"Traffic logger closed. Logged: {self._logged_count}, Skipped: {self._skipped_count}")
         self._file.close()
+    
+    @property
+    def logged_count(self) -> int:
+        return self._logged_count
+    
+    @property
+    def skipped_count(self) -> int:
+        return self._skipped_count
 
 
 async def run_proxy_server(
     host: str = "127.0.0.1",
     port: int = 8888,
     log_file: Optional[Path] = None,
+    use_whitelist: bool = True,
 ):
-    """Run a simple HTTP proxy server.
+    """Run a simple HTTP proxy server with whitelist filtering.
     
     This proxy:
-    - Logs all HTTP requests/responses
+    - Logs requests/responses to whitelisted endpoints (LLM APIs)
     - Tunnels HTTPS via CONNECT (logs URL but not content)
+    - Filters out non-whitelisted traffic (reduces noise)
     """
     import aiohttp
     from aiohttp import web
     
     log_file = log_file or (DEFAULT_LOG_DIR / f"traffic_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl")
-    traffic_logger = TrafficLogger(log_file)
+    traffic_logger = TrafficLogger(log_file, use_whitelist=use_whitelist)
     
     async def handle_connect(request: web.Request):
         """Handle CONNECT for HTTPS tunneling."""
-        # Log the CONNECT request (we can see the host but not the content)
-        await traffic_logger.log({
-            "type": "https_connect",
-            "timestamp": datetime.now().isoformat(),
-            "method": "CONNECT",
-            "host": request.host,
-            "path": request.path_qs,
-        })
-        
         # Parse host:port from request.path
         target = request.path_qs
         if ":" in target:
@@ -111,6 +153,17 @@ async def run_proxy_server(
         else:
             target_host = target
             target_port = 443
+        
+        # Log the CONNECT request (we can see the host but not the content)
+        # Only log if host is whitelisted
+        await traffic_logger.log({
+            "type": "https_connect",
+            "timestamp": datetime.now().isoformat(),
+            "method": "CONNECT",
+            "host": target_host,
+            "port": target_port,
+            "path": request.path_qs,
+        }, host=target_host)
         
         # Connect to target
         try:
@@ -122,7 +175,7 @@ async def run_proxy_server(
                 "host": target_host,
                 "port": target_port,
                 "error": str(e),
-            })
+            }, host=target_host)
             return web.Response(status=502, text=f"Failed to connect: {e}")
         
         # Send 200 Connection Established
@@ -160,7 +213,7 @@ async def run_proxy_server(
             "timestamp": datetime.now().isoformat(),
             "host": target_host,
             "port": target_port,
-        })
+        }, host=target_host)
         
         return response
     
@@ -172,8 +225,11 @@ async def run_proxy_server(
         url = str(request.url)
         if not url.startswith("http"):
             # Relative URL - reconstruct from Host header
-            host = request.headers.get("Host", "")
-            url = f"http://{host}{request.path_qs}"
+            host_header = request.headers.get("Host", "")
+            url = f"http://{host_header}{request.path_qs}"
+        
+        # Extract host for whitelist filtering
+        target_host = extract_host(url)
         
         # Log request (redact sensitive headers)
         request_entry = {
@@ -233,14 +289,15 @@ async def run_proxy_server(
                         except:
                             pass
                     
-                    # Log complete entry
+                    # Log complete entry (only if host is whitelisted)
                     await traffic_logger.log({
                         "type": "http",
                         "timestamp": datetime.now().isoformat(),
                         "duration_ms": duration_ms,
+                        "host": target_host,
                         "request": request_entry,
                         "response": response_entry,
-                    })
+                    }, host=target_host)
                     
                     # Return response to client
                     return web.Response(
@@ -253,9 +310,10 @@ async def run_proxy_server(
             await traffic_logger.log({
                 "type": "http_error",
                 "timestamp": datetime.now().isoformat(),
+                "host": target_host,
                 "request": request_entry,
                 "error": str(e),
-            })
+            }, host=target_host)
             return web.Response(status=502, text=f"Proxy error: {e}")
     
     async def handler(request: web.Request):
@@ -369,10 +427,12 @@ def main():
     """CLI entry point."""
     import argparse
     
-    parser = argparse.ArgumentParser(description="Fleet HTTP Proxy")
+    parser = argparse.ArgumentParser(description="Fleet HTTP Proxy with LLM endpoint whitelist")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8888, help="Port to listen on")
     parser.add_argument("--log-file", type=Path, default=None, help="Log file path")
+    parser.add_argument("--no-whitelist", action="store_true", 
+                       help="Disable whitelist filtering (log ALL traffic)")
     args = parser.parse_args()
     
     logging.basicConfig(level=logging.INFO)
@@ -382,6 +442,7 @@ def main():
             host=args.host,
             port=args.port,
             log_file=args.log_file,
+            use_whitelist=not args.no_whitelist,
         ))
     except KeyboardInterrupt:
         print("\nProxy stopped")

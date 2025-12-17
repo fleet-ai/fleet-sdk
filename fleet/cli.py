@@ -2,7 +2,6 @@
 
 import json
 import os
-import random
 import signal
 import sys
 import threading
@@ -33,35 +32,6 @@ except ImportError:
 
 from .client import Fleet
 from .models import JobCreateRequest
-from .exceptions import FleetConflictError
-
-# Word lists for random job name prefixes
-_ADJECTIVES = [
-    "happy", "sunny", "swift", "bright", "calm", "brave", "clever", "cosmic",
-    "crystal", "dancing", "daring", "eager", "electric", "epic", "fancy",
-    "fierce", "flying", "friendly", "fuzzy", "gentle", "glowing", "golden",
-    "grand", "hidden", "humble", "icy", "jolly", "jumping", "kind", "lively",
-    "lucky", "magic", "mighty", "misty", "noble", "peaceful", "proud", "quick",
-    "quiet", "racing", "radiant", "rapid", "royal", "shiny", "silent", "smooth",
-    "snappy", "sneaky", "solar", "speedy", "starry", "steady", "stellar", "stormy",
-    "super", "swift", "turbo", "vibrant", "vivid", "wild", "witty", "zesty",
-]
-_NOUNS = [
-    "falcon", "tiger", "phoenix", "dragon", "panther", "wolf", "eagle", "hawk",
-    "bear", "lion", "fox", "owl", "raven", "dolphin", "whale", "shark",
-    "comet", "nebula", "galaxy", "quasar", "pulsar", "nova", "meteor", "cosmos",
-    "rocket", "shuttle", "orbit", "laser", "photon", "prism", "crystal", "spark",
-    "thunder", "storm", "blaze", "frost", "wave", "breeze", "flame", "aurora",
-    "summit", "peak", "canyon", "river", "ocean", "forest", "meadow", "garden",
-    "castle", "tower", "bridge", "beacon", "compass", "anchor", "helm", "voyage",
-]
-
-
-def _generate_random_prefix() -> str:
-    """Generate a random two-word prefix like 'sunny_falcon'."""
-    adj = random.choice(_ADJECTIVES)
-    noun = random.choice(_NOUNS)
-    return f"{adj}_{noun}"
 
 
 app = typer.Typer(
@@ -232,59 +202,26 @@ def create_job(
 
     client = get_client()
     
-    # Create job with retry on name collision
-    result = None
-    original_name = name
-    max_retries = 5
-    
-    for attempt in range(max_retries + 1):
-        try:
-            result = client.create_job(
-                models=model,
-                name=name,
-                pass_k=pass_k,
-                env_key=env_key,
-                project_key=project_key,
-                task_keys=task_keys,
-                max_steps=max_steps,
-                max_duration_minutes=max_duration,
-                max_concurrent_per_model=max_concurrent,
-                mode=mode,
-                system_prompt=system_prompt,
-                model_prompts=model_prompts,
-                byok_keys=byok_keys,
-                byok_ttl_minutes=byok_ttl,
-                harness=harness,
-            )
-            break  # Success
-        except FleetConflictError:
-            # Name collision - retry with random prefix
-            if attempt < max_retries:
-                prefix = _generate_random_prefix()
-                if original_name:
-                    name = f"{prefix}-{original_name}"
-                else:
-                    name = prefix
-                continue
-            console.print(f"[red]Error:[/red] Job name collision after {max_retries} retries")
-            raise typer.Exit(1)
-        except Exception as e:
-            error_str = str(e)
-            
-            # Fallback: check for name collision via string matching
-            if "already exists" in error_str.lower() and attempt < max_retries:
-                prefix = _generate_random_prefix()
-                if original_name:
-                    name = f"{prefix}-{original_name}"
-                else:
-                    name = prefix
-                continue
-            
-            console.print(f"[red]Error creating job:[/red] {e}")
-            raise typer.Exit(1)
-    
-    if result is None:
-        console.print(f"[red]Error:[/red] Failed to create job after {max_retries} retries")
+    try:
+        result = client.create_job(
+            models=model,
+            name=name,
+            pass_k=pass_k,
+            env_key=env_key,
+            project_key=project_key,
+            task_keys=task_keys,
+            max_steps=max_steps,
+            max_duration_minutes=max_duration,
+            max_concurrent_per_model=max_concurrent,
+            mode=mode,
+            system_prompt=system_prompt,
+            model_prompts=model_prompts,
+            byok_keys=byok_keys,
+            byok_ttl_minutes=byok_ttl,
+            harness=harness,
+        )
+    except Exception as e:
+        console.print(f"[red]Error creating job:[/red] {e}")
         raise typer.Exit(1)
 
     if output_json:
@@ -819,63 +756,38 @@ def eval_run(
             provider, key = b.split("=", 1)
             byok_keys[provider] = key
     
-    # Create the job with retry on name collision
-    result = None
-    original_name = name
-    max_retries = 5
-    
-    for attempt in range(max_retries + 1):
-        try:
-            result = client.create_job(
-                models=model,
-                name=name,
-                pass_k=pass_k,
-                project_key=project_key if project_key else None,
-                max_steps=max_steps,
-                max_duration_minutes=max_duration,
-                max_concurrent_per_model=max_concurrent,
-                byok_keys=byok_keys,
-            )
-            break  # Success
-        except FleetConflictError:
-            # Name collision - retry with random prefix
-            if attempt < max_retries:
-                prefix = _generate_random_prefix()
-                name = f"{prefix}-{original_name}"
-                continue
-            console.print(f"[red]Error:[/red] Job name collision after {max_retries} retries")
-            raise typer.Exit(1)
-        except Exception as e:
-            error_str = str(e)
-            
-            # Fallback: check for name collision via string matching
-            if "already exists" in error_str.lower() and attempt < max_retries:
-                prefix = _generate_random_prefix()
-                name = f"{prefix}-{original_name}"
-                continue
-            
-            # Check if it's a model not found error and format nicely
-            if "not found" in error_str.lower() and "available models" in error_str.lower():
-                console.print(f"[red]Error:[/red] Invalid model specified")
-                console.print()
-                # Extract and display available models
-                if "Available models:" in error_str:
-                    try:
-                        models_part = error_str.split("Available models:")[1].strip()
-                        # Parse the list string
-                        import ast
-                        available = ast.literal_eval(models_part)
-                        console.print("[bold]Available models:[/bold]")
-                        for m in sorted(available):
-                            console.print(f"  [cyan]{m}[/cyan]")
-                    except:
-                        console.print(f"[dim]{error_str}[/dim]")
-            else:
-                console.print(f"[red]Error creating job:[/red] {e}")
-            raise typer.Exit(1)
-    
-    if result is None:
-        console.print(f"[red]Error:[/red] Failed to create job after {max_retries} retries")
+    try:
+        result = client.create_job(
+            models=model,
+            name=name,
+            pass_k=pass_k,
+            project_key=project_key if project_key else None,
+            max_steps=max_steps,
+            max_duration_minutes=max_duration,
+            max_concurrent_per_model=max_concurrent,
+            byok_keys=byok_keys,
+        )
+    except Exception as e:
+        error_str = str(e)
+        
+        # Check if it's a model not found error and format nicely
+        if "not found" in error_str.lower() and "available models" in error_str.lower():
+            console.print(f"[red]Error:[/red] Invalid model specified")
+            console.print()
+            # Extract and display available models
+            if "Available models:" in error_str:
+                try:
+                    models_part = error_str.split("Available models:")[1].strip()
+                    # Parse the list string
+                    import ast
+                    available = ast.literal_eval(models_part)
+                    console.print("[bold]Available models:[/bold]")
+                    for m in sorted(available):
+                        console.print(f"  [cyan]{m}[/cyan]")
+                except:
+                    console.print(f"[dim]{error_str}[/dim]")
+        else:
+            console.print(f"[red]Error creating job:[/red] {e}")
         raise typer.Exit(1)
     
     job_id = result.job_id
