@@ -19,12 +19,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install Python deps
-COPY requirements.txt .
+COPY fleet/agent/gemini_cua/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && playwright install chromium
 
+# Copy utils from fleet package (build context must be repo root)
+COPY fleet/utils/playwright.py ./playwright_utils.py
+
 # Copy server
-COPY mcp_server.py .
-COPY start.sh .
+COPY fleet/agent/gemini_cua/mcp_server.py .
+COPY fleet/agent/gemini_cua/start.sh .
 RUN chmod +x start.sh
 
 # Environment
