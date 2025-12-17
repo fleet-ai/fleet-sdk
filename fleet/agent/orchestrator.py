@@ -244,7 +244,8 @@ class AgentOrchestrator:
                         final_answer=agent_result.final_answer,
                     )
                     verification_success = v.success
-                    verification_score = v.score
+                    # Score is in v.result (the verifier function's return value)
+                    verification_score = v.result if isinstance(v.result, (int, float)) else None
                     logger.info(f"[{task_key}] Verification: {verification_success}")
                 except Exception as e:
                     logger.error(f"[{task_key}] Verification error: {e}")
