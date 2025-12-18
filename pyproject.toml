@@ -70,6 +70,9 @@ Issues = "https://github.com/fleet-ai/fleet-sdk/issues"
 [tool.setuptools.packages.find]
 where = ["."]
 
+[tool.setuptools.package-data]
+"fleet.agent.gemini_cua" = ["Dockerfile", "requirements.txt", "start.sh", "playwright_utils.py"]
+
 [tool.black]
 line-length = 88
 target-version = ['py39']
