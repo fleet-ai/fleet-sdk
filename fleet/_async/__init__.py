@@ -24,7 +24,7 @@ from ..exceptions import (
     FleetInstanceLimitError,
     FleetConfigurationError,
 )
-from .client import AsyncFleet, AsyncEnv
+from .client import AsyncFleet, AsyncEnv, AsyncSession
 from ..models import InstanceResponse, Environment, AccountResponse, Run
 from ..instance.models import Resource, ResetResponse
 

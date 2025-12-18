@@ -76,6 +76,110 @@ from .resources.mcp import AsyncMCPResource
 logger = logging.getLogger(__name__)
 
 
+class AsyncSession:
+    """A session for logging agent interactions to Fleet.
+
+    This provides a simple interface for streaming messages during an agent run.
+    Messages are sent one-by-one as they happen.
+
+    Usage:
+        session = await fleet.start_session(
+            model="anthropic/claude-sonnet-4",
+            task_key="my_task",
+            instance_id=env.instance_id,
+        )
+
+        # Log messages as they happen
+        await session.log({"role": "user", "content": "Hello"})
+        await session.log({"role": "assistant", "content": "Hi there!"})
+
+        # Complete when done
+        await session.complete()  # or session.fail()
+    """
+
+    def __init__(
+        self,
+        session_id: str,
+        client: "AsyncFleet",
+    ):
+        self.session_id = session_id
+        self._client = client
+        self._message_count = 0
+
+    async def log(self, message: Dict[str, Any]) -> SessionIngestResponse:
+        """Log a message to the session.
+
+        Args:
+            message: Message dict with 'role' and 'content' keys.
+                Optional keys: 'tool_calls', 'tool_call_id', 'timestamp', 'tokens', 'metadata'
+
+        Returns:
+            SessionIngestResponse with updated message count
+        """
+        response = await self._client.ingest_session(
+            messages=[message],
+            session_id=self.session_id,
+        )
+        self._message_count = response.message_count
+        return response
+
+    async def complete(self, metadata: Optional[Dict[str, Any]] = None) -> SessionIngestResponse:
+        """Mark the session as completed successfully.
+
+        Args:
+            metadata: Optional final metadata to include
+
+        Returns:
+            SessionIngestResponse with final state
+        """
+        from datetime import datetime
+
+        final_content = {"status": "completed"}
+        if metadata:
+            final_content.update(metadata)
+
+        response = await self._client.ingest_session(
+            messages=[{"role": "system", "content": json.dumps(final_content)}],
+            session_id=self.session_id,
+            status="completed",
+            ended_at=datetime.now().isoformat(),
+        )
+        self._message_count = response.message_count
+        return response
+
+    async def fail(self, error: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> SessionIngestResponse:
+        """Mark the session as failed.
+
+        Args:
+            error: Optional error message
+            metadata: Optional final metadata to include
+
+        Returns:
+            SessionIngestResponse with final state
+        """
+        from datetime import datetime
+
+        final_content = {"status": "failed"}
+        if error:
+            final_content["error"] = error
+        if metadata:
+            final_content.update(metadata)
+
+        response = await self._client.ingest_session(
+            messages=[{"role": "system", "content": json.dumps(final_content)}],
+            session_id=self.session_id,
+            status="failed",
+            ended_at=datetime.now().isoformat(),
+        )
+        self._message_count = response.message_count
+        return response
+
+    @property
+    def message_count(self) -> int:
+        """Get the current message count."""
+        return self._message_count
+
+
 class AsyncEnv(EnvironmentBase):
     def __init__(self, client: Optional[AsyncWrapper], **kwargs):
         super().__init__(**kwargs)
@@ -1059,82 +1163,63 @@ class AsyncFleet:
         )
         return SessionTranscriptResponse(**response.json())
 
-    async def ingest_session(
+    async def start_session(
         self,
-        messages: List[Dict[str, Any]],
-        session_id: Optional[str] = None,
         model: Optional[str] = None,
         task_key: Optional[str] = None,
         job_id: Optional[str] = None,
         instance_id: Optional[str] = None,
-        status: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        started_at: Optional[str] = None,
-        ended_at: Optional[str] = None,
-    ) -> SessionIngestResponse:
-        """Ingest session data (create new or append to existing).
+    ) -> AsyncSession:
+        """Start a new session for logging agent interactions.
 
-        This endpoint allows you to upload session transcripts, either creating
-        a new session or appending messages to an existing one.
+        This is the recommended way to log agent runs. It returns a Session
+        object with simple `log()` and `complete()` methods.
 
         Args:
-            messages: List of message dictionaries with 'role' and 'content' keys.
-                Optional keys: 'tool_calls', 'tool_call_id', 'timestamp', 'tokens', 'metadata'
-            session_id: Existing session ID to append to. If omitted, creates new session.
             model: Model identifier (e.g., "anthropic/claude-sonnet-4")
             task_key: Task key to associate with the session
             job_id: Job ID to associate with the session
-            instance_id: Instance ID to associate with the session
-            status: Session status ("pending", "running", "completed", "failed", "cancelled")
+            instance_id: Instance ID the session is running on
             metadata: Additional metadata for the session
-            started_at: ISO timestamp when session started
-            ended_at: ISO timestamp when session ended
 
         Returns:
-            SessionIngestResponse containing session_id, status, message_count, and created flag
+            AsyncSession object with log(), complete(), and fail() methods
 
         Example:
-            # Create a new session
-            response = await fleet.ingest_session(
-                messages=[
-                    {"role": "user", "content": "Hello"},
-                    {"role": "assistant", "content": "Hi there!"}
-                ],
+            session = await fleet.start_session(
                 model="anthropic/claude-sonnet-4",
-                status="completed"
+                task_key="my_task",
+                instance_id=env.instance_id,
             )
 
-            # Append to existing session
-            response = await fleet.ingest_session(
-                session_id=response.session_id,
-                messages=[
-                    {"role": "user", "content": "Follow-up question"}
-                ]
-            )
+            # Log messages during agent run
+            await session.log({"role": "user", "content": "Hello"})
+            await session.log({"role": "assistant", "content": "Hi!"})
+
+            # Complete when done
+            await session.complete()
         """
-        # Convert message dicts to SessionIngestMessage objects
-        message_objects = [SessionIngestMessage(**msg) for msg in messages]
+        from datetime import datetime
 
-        # Build request
-        request = SessionIngestRequest(
-            messages=message_objects,
-            session_id=session_id,
+        # Create session with a placeholder message
+        response = await self.ingest_session(
+            messages=[{"role": "system", "content": "[session started]"}],
             model=model,
             task_key=task_key,
             job_id=job_id,
             instance_id=instance_id,
-            status=SessionStatus(status) if status else None,
+            status="running",
             metadata=metadata,
-            started_at=started_at,
-            ended_at=ended_at,
+            started_at=datetime.now().isoformat(),
         )
 
-        response = await self.client.request(
-            "POST",
-            "/v1/sessions/ingest",
-            json=request.model_dump(exclude_none=True),
+        session = AsyncSession(
+            session_id=response.session_id,
+            client=self,
         )
-        return SessionIngestResponse(**response.json())
+        session._message_count = response.message_count
+        return session
 
     async def create_session(
         self,
