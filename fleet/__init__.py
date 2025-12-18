@@ -14,7 +14,7 @@
 
 """Fleet Python SDK - Environment-based AI agent interactions."""
 
-from typing import Optional, List
+from typing import Any, Optional, List
 
 from .exceptions import (
     FleetError,
@@ -173,84 +173,82 @@ def reset_client():
 
 
 def session(
+    session_id: Optional[str] = None,
+    job_id: Optional[str] = None,
+    config: Optional[Any] = None,
     model: Optional[str] = None,
     task_key: Optional[str] = None,
-    job_id: Optional[str] = None,
     instance_id: Optional[str] = None,
-    metadata: Optional[dict] = None,
 ) -> Session:
     """Start a new session for logging agent interactions (sync).
 
-    This is the recommended way to log agent runs. It returns a Session
-    object with simple `log()` and `complete()` methods.
+    This returns a Session object. The session is created on the backend
+    when you call log() for the first time.
 
     Args:
-        model: Model identifier (e.g., "anthropic/claude-sonnet-4")
-        task_key: Task key to associate with the session
-        job_id: Job ID to associate with the session
-        instance_id: Instance ID the session is running on
-        metadata: Additional metadata for the session
+        session_id: Optional existing session ID to resume
+        job_id: Optional job ID to associate with the session
+        config: Optional config object (e.g., GenerateContentConfig) to log
+        model: Optional model name to log
+        task_key: Optional Fleet task key
+        instance_id: Optional Fleet instance ID
 
     Returns:
         Session object with log(), complete(), and fail() methods
 
     Example:
-        session = fleet.session(
-            model="anthropic/claude-sonnet-4",
-            task_key="my_task",
-        )
-        session.log({"role": "user", "content": "Hello"})
-        session.log({"role": "assistant", "content": "Hi!"})
+        session = fleet.session(config=config, model="gpt-4", task_key="task_123")
+        session.log(history, response)
         session.complete()
     """
     client = _global_client.get_client()
     return client.start_session(
+        session_id=session_id,
+        job_id=job_id,
+        config=config,
         model=model,
         task_key=task_key,
-        job_id=job_id,
         instance_id=instance_id,
-        metadata=metadata,
     )
 
 
-async def session_async(
+def session_async(
+    session_id: Optional[str] = None,
+    job_id: Optional[str] = None,
+    config: Optional[Any] = None,
     model: Optional[str] = None,
     task_key: Optional[str] = None,
-    job_id: Optional[str] = None,
     instance_id: Optional[str] = None,
-    metadata: Optional[dict] = None,
 ) -> AsyncSession:
     """Start a new session for logging agent interactions (async).
 
-    This is the recommended way to log agent runs. It returns an AsyncSession
-    object with simple `log()` and `complete()` methods.
+    This returns an AsyncSession object. The session is created on the backend
+    when you call log() for the first time.
 
     Args:
-        model: Model identifier (e.g., "anthropic/claude-sonnet-4")
-        task_key: Task key to associate with the session
-        job_id: Job ID to associate with the session
-        instance_id: Instance ID the session is running on
-        metadata: Additional metadata for the session
+        session_id: Optional existing session ID to resume
+        job_id: Optional job ID to associate with the session
+        config: Optional config object (e.g., GenerateContentConfig) to log
+        model: Optional model name to log
+        task_key: Optional Fleet task key
+        instance_id: Optional Fleet instance ID
 
     Returns:
         AsyncSession object with log(), complete(), and fail() methods
 
     Example:
-        session = await fleet.session_async(
-            model="anthropic/claude-sonnet-4",
-            task_key="my_task",
-        )
-        await session.log({"role": "user", "content": "Hello"})
-        await session.log({"role": "assistant", "content": "Hi!"})
+        session = fleet.session_async(config=config, model="gpt-4", task_key="task_123")
+        await session.log(history, response)
         await session.complete()
     """
     client = _async_global_client.get_client()
-    return await client.start_session(
+    return client.start_session(
+        session_id=session_id,
+        job_id=job_id,
+        config=config,
         model=model,
         task_key=task_key,
-        job_id=job_id,
         instance_id=instance_id,
-        metadata=metadata,
     )
 
 

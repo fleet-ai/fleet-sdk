@@ -17,12 +17,18 @@
 import base64
 import cloudpickle
 import concurrent.futures
+import dataclasses
 import httpx
 import json
 import logging
 import os
+from datetime import date, datetime
+from decimal import Decimal
+from enum import Enum
+from pathlib import Path
 from typing import List, Optional, Dict, Any, TYPE_CHECKING, Union
 from urllib.parse import urlparse
+from uuid import UUID
 
 from .base import EnvironmentBase, SyncWrapper
 from .models import (
@@ -53,6 +59,101 @@ from .tasks import Task
 
 if TYPE_CHECKING:
     from .verifiers import SyncVerifierFunction
+
+
+def _json_default(x: Any) -> Any:
+    """Default JSON serializer for non-native types."""
+    if isinstance(x, (datetime, date)):
+        return x.isoformat()
+    if isinstance(x, (UUID, Path)):
+        return str(x)
+    if isinstance(x, Decimal):
+        return float(x)
+    if isinstance(x, Enum):
+        return x.value
+    if isinstance(x, bytes):
+        return base64.b64encode(x).decode("utf-8")
+    if isinstance(x, set):
+        return list(x)
+    if dataclasses.is_dataclass(x) and not isinstance(x, type):
+        return dataclasses.asdict(x)
+    # Handle objects with __dict__ (generic objects)
+    if hasattr(x, "__dict__"):
+        return x.__dict__
+    raise TypeError(f"Not JSON serializable: {type(x)}")
+
+
+def _to_dict(obj: Any) -> Any:
+    """Convert any object to a JSON-serializable dict/value.
+
+    Handles:
+    - Pydantic v2 models (model_dump)
+    - Pydantic v1 models (.dict())
+    - dataclasses (asdict)
+    - TypedDict (just dict at runtime)
+    - Objects with __dict__
+    - Primitives pass through
+    """
+    if obj is None:
+        return None
+
+    # Pydantic v2
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+
+    # Pydantic v1
+    if hasattr(obj, "dict") and callable(obj.dict):
+        return obj.dict()
+
+    # dataclass
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return dataclasses.asdict(obj)
+
+    # Already a dict or list - recursively convert
+    if isinstance(obj, dict):
+        return {k: _to_dict(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_dict(v) for v in obj]
+
+    # Primitives
+    if isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+
+    # bytes -> base64
+    if isinstance(obj, bytes):
+        return base64.b64encode(obj).decode("utf-8")
+
+    # datetime/date
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+
+    # UUID, Path
+    if isinstance(obj, (UUID, Path)):
+        return str(obj)
+
+    # Enum
+    if isinstance(obj, Enum):
+        return obj.value
+
+    # Decimal
+    if isinstance(obj, Decimal):
+        return float(obj)
+
+    # set
+    if isinstance(obj, set):
+        return list(obj)
+
+    # Generic object with __dict__
+    if hasattr(obj, "__dict__"):
+        return {k: _to_dict(v) for k, v in obj.__dict__.items() if not k.startswith("_")}
+
+    # Fallback - try to convert, or return string representation
+    try:
+        json.dumps(obj)
+        return obj
+    except (TypeError, ValueError):
+        return str(obj)
+
 
 from .instance import (
     InstanceClient,
@@ -88,15 +189,10 @@ class Session:
     Messages are sent one-by-one as they happen.
 
     Usage:
-        session = fleet.start_session(
-            model="anthropic/claude-sonnet-4",
-            task_key="my_task",
-            instance_id=env.instance_id,
-        )
+        session = fleet.session(job_id=job_id)
 
-        # Log messages as they happen
-        session.log({"role": "user", "content": "Hello"})
-        session.log({"role": "assistant", "content": "Hi there!"})
+        # Log LLM calls
+        session.log(history, response)
 
         # Complete when done
         session.complete()  # or session.fail()
@@ -104,19 +200,31 @@ class Session:
 
     def __init__(
         self,
-        session_id: str,
         client: "Fleet",
+        session_id: Optional[str] = None,
+        job_id: Optional[str] = None,
+        config: Optional[Any] = None,
+        model: Optional[str] = None,
+        task_key: Optional[str] = None,
+        instance_id: Optional[str] = None,
     ):
         self.session_id = session_id
+        self.job_id = job_id
+        self.config = config
+        self.model = model
+        self.task_key = task_key
+        self.instance_id = instance_id
         self._client = client
         self._message_count = 0
         self._logged_count = 0  # Track how many messages from history have been logged
+        self._config_sent = False  # Only send config/model/task_key/instance_id on first log
 
     def log(self, history: List[Any], response: Any) -> "SessionIngestResponse":
         """Log an LLM call to the session.
 
         Pass the input history and the model response. The session tracks what's
-        already been logged and only sends new messages.
+        already been logged and only sends new messages. Objects are automatically
+        serialized to JSON (supports Pydantic, dataclasses, TypedDict, etc.).
 
         Example:
             response = model.generate(history)
@@ -124,150 +232,70 @@ class Session:
 
         Args:
             history: The input messages sent to the model
-            response: The model's response (Content object, dict, etc.)
+            response: The model's response (any serializable object)
 
         Returns:
             SessionIngestResponse with updated message count
         """
         from .models import SessionIngestResponse
 
-        messages_to_log = []
-
-        # Log any new history messages since last call
+        # Collect new history messages since last call
         new_history = history[self._logged_count:]
-        for msg in new_history:
-            messages_to_log.append(self._normalize_message(msg))
-
-        # Log the response
-        messages_to_log.append(self._normalize_message(response))
 
         # Update tracked count (history length, not including response)
         self._logged_count = len(history)
 
-        if not messages_to_log:
+        # Build the payload - serialize history + response to JSON
+        payload: Dict[str, Any] = {
+            "history": [_to_dict(msg) for msg in new_history],
+            "response": _to_dict(response),
+        }
+        if self.session_id:
+            payload["session_id"] = self.session_id
+        if self.job_id:
+            payload["job_id"] = self.job_id
+        # Include config, model, task_key, instance_id on first log only
+        if not self._config_sent:
+            if self.config is not None:
+                payload["config"] = _to_dict(self.config)
+            if self.model is not None:
+                payload["model"] = self.model
+            if self.task_key is not None:
+                payload["task_key"] = self.task_key
+            if self.instance_id is not None:
+                payload["instance_id"] = self.instance_id
+            self._config_sent = True
+
+        # Save payload to JSON file for debugging
+        log_num = self._message_count + 1
+        session_prefix = self.session_id[:8] if self.session_id else "new"
+        filepath = f"/tmp/fleet_session_{session_prefix}_log_{log_num}.json"
+        with open(filepath, "w") as f:
+            json.dump(payload, f, indent=2, default=_json_default)
+        print(f"Saved session log to {filepath}")
+
+        if not new_history and response is None:
             return SessionIngestResponse(
                 success=True,
-                session_id=self.session_id,
+                session_id=self.session_id or "",
                 message_count=self._message_count,
                 created_new_session=False,
             )
 
-        result = self._client._ingest(
-            messages=messages_to_log,
-            session_id=self.session_id,
-        )
+        result = self._client._ingest_raw(payload=payload)
         self._message_count = result.message_count
-        return result
-
-    def _normalize_message(self, message: Any) -> Dict[str, Any]:
-        """Convert any message format to standard ingest format."""
-        # If it's already a simple dict with role/content, use as-is
-        if isinstance(message, dict) and "role" in message and "content" in message:
-            # Just normalize the role
-            msg = dict(message)
-            if msg["role"] == "model":
-                msg["role"] = "assistant"
-            return msg
-
-        # Handle Gemini Content objects or dicts with 'parts'
-        if hasattr(message, "parts") or (isinstance(message, dict) and "parts" in message):
-            return self._convert_gemini_content(message)
-
-        # Fallback: wrap as system message
-        return {"role": "system", "content": str(message)}
-
-    def _convert_gemini_content(self, content: Any) -> Dict[str, Any]:
-        """Convert Gemini Content object/dict to standard format."""
-        import base64
-
-        # Get parts and role (handle both object and dict)
-        if hasattr(content, "parts"):
-            parts = content.parts
-            role = getattr(content, "role", "user")
-        else:
-            parts = content.get("parts", [])
-            role = content.get("role", "user")
-
-        content_parts = []
-        tool_calls = []
-        thinking_parts = []
-
-        for part in parts:
-            # Handle both object attributes and dict keys
-            text = getattr(part, "text", None) or (part.get("text") if isinstance(part, dict) else None)
-            thought = getattr(part, "thought", None) or (part.get("thought") if isinstance(part, dict) else None)
-            func_call = getattr(part, "function_call", None) or (part.get("function_call") if isinstance(part, dict) else None)
-            func_resp = getattr(part, "function_response", None) or (part.get("function_response") if isinstance(part, dict) else None)
-            inline_data = getattr(part, "inline_data", None) or (part.get("inline_data") if isinstance(part, dict) else None)
-
-            if thought and isinstance(thought, str):
-                # Capture thinking/reasoning traces
-                thinking_parts.append(thought)
-            elif text and isinstance(text, str):
-                content_parts.append(text)
-            elif func_call:
-                # Extract function call details
-                name = getattr(func_call, "name", None) or (func_call.get("name") if isinstance(func_call, dict) else None)
-                args = getattr(func_call, "args", None) or (func_call.get("args") if isinstance(func_call, dict) else {})
-                tool_calls.append({
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "arguments": json.dumps(dict(args) if args else {}),
-                    },
-                })
-            elif func_resp:
-                # Extract function response details
-                name = getattr(func_resp, "name", None) or (func_resp.get("name") if isinstance(func_resp, dict) else None)
-                response = getattr(func_resp, "response", None) or (func_resp.get("response") if isinstance(func_resp, dict) else None)
-                content_parts.append({
-                    "type": "function_response",
-                    "name": name,
-                    "response": json.dumps(dict(response) if response else {}),
-                })
-            elif inline_data:
-                # Handle image data
-                mime_type = getattr(inline_data, "mime_type", None) or (inline_data.get("mime_type") if isinstance(inline_data, dict) else "image/png")
-                data = getattr(inline_data, "data", None) or (inline_data.get("data") if isinstance(inline_data, dict) else None)
-                if data:
-                    if isinstance(data, bytes):
-                        data = base64.b64encode(data).decode("utf-8")
-                    content_parts.append({"type": "image", "mime_type": mime_type, "data": data})
-
-        # Normalize role
-        normalized_role = "assistant" if role == "model" else role
-
-        # Build content - string for text-only, list for multimodal
-        text_parts = [p for p in content_parts if isinstance(p, str)]
-        image_parts = [p for p in content_parts if isinstance(p, dict)]
-
-        if image_parts:
-            content_list = []
-            if text_parts:
-                content_list.append({"type": "text", "text": "\n".join(text_parts)})
-            content_list.extend(image_parts)
-            content_value = content_list
-        else:
-            content_value = "\n".join(text_parts) if text_parts else None
-
-        result = {"role": normalized_role}
-        if content_value is not None:
-            result["content"] = content_value
-        if tool_calls:
-            result["tool_calls"] = tool_calls
-        if thinking_parts:
-            result["thinking"] = "\n".join(thinking_parts)
+        # Update session_id if this was the first log (new session created)
+        if not self.session_id and result.session_id:
+            self.session_id = result.session_id
         return result
 
     def complete(
         self,
-        metadata: Optional[Dict[str, Any]] = None,
         verifier_execution_id: Optional[str] = None,
     ) -> "SessionIngestResponse":
         """Mark the session as completed successfully.
 
         Args:
-            metadata: Optional final metadata to include
             verifier_execution_id: Optional ID of the verifier execution record
 
         Returns:
@@ -275,31 +303,25 @@ class Session:
         """
         from datetime import datetime
 
-        final_content = {"status": "completed"}
-        if metadata:
-            final_content.update(metadata)
+        payload: Dict[str, Any] = {
+            "session_id": self.session_id,
+            "status": "completed",
+            "ended_at": datetime.now().isoformat(),
+        }
+        if verifier_execution_id:
+            payload["verifier_execution_id"] = verifier_execution_id
 
-        response = self._client._ingest(
-            messages=[{"role": "system", "content": json.dumps(final_content)}],
-            session_id=self.session_id,
-            status="completed",
-            ended_at=datetime.now().isoformat(),
-            verifier_execution_id=verifier_execution_id,
-        )
+        response = self._client._ingest_raw(payload)
         self._message_count = response.message_count
         return response
 
     def fail(
         self,
-        error: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
         verifier_execution_id: Optional[str] = None,
     ) -> "SessionIngestResponse":
         """Mark the session as failed.
 
         Args:
-            error: Optional error message
-            metadata: Optional final metadata to include
             verifier_execution_id: Optional ID of the verifier execution record
 
         Returns:
@@ -307,19 +329,15 @@ class Session:
         """
         from datetime import datetime
 
-        final_content = {"status": "failed"}
-        if error:
-            final_content["error"] = error
-        if metadata:
-            final_content.update(metadata)
+        payload: Dict[str, Any] = {
+            "session_id": self.session_id,
+            "status": "failed",
+            "ended_at": datetime.now().isoformat(),
+        }
+        if verifier_execution_id:
+            payload["verifier_execution_id"] = verifier_execution_id
 
-        response = self._client._ingest(
-            messages=[{"role": "system", "content": json.dumps(final_content)}],
-            session_id=self.session_id,
-            status="failed",
-            ended_at=datetime.now().isoformat(),
-            verifier_execution_id=verifier_execution_id,
-        )
+        response = self._client._ingest_raw(payload)
         self._message_count = response.message_count
         return response
 
@@ -1457,63 +1475,69 @@ class Fleet:
         )
         return SessionIngestResponse(**response.json())
 
+    def _ingest_raw(
+        self,
+        payload: Dict[str, Any],
+    ) -> SessionIngestResponse:
+        """Internal method to ingest raw session data as JSON.
+
+        This sends the history and response as-is to the backend,
+        letting the backend handle format normalization.
+        """
+        # Pre-serialize with our custom handler to ensure all types are JSON-safe
+        json_str = json.dumps(payload, default=_json_default)
+        clean_payload = json.loads(json_str)
+
+        response = self.client.request(
+            "POST",
+            "/v1/traces/logs",
+            json=clean_payload,
+        )
+        return SessionIngestResponse(**response.json())
+
     def start_session(
         self,
+        session_id: Optional[str] = None,
+        job_id: Optional[str] = None,
+        config: Optional[Any] = None,
         model: Optional[str] = None,
         task_key: Optional[str] = None,
-        job_id: Optional[str] = None,
         instance_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
     ) -> Session:
         """Start a new session for logging agent interactions.
 
-        This is the recommended way to log agent runs. It returns a Session
-        object with simple `log()` and `complete()` methods.
+        This returns a Session object. The session is created on the backend
+        when you call log() for the first time.
 
         Args:
-            model: Model identifier (e.g., "anthropic/claude-sonnet-4")
-            task_key: Task key to associate with the session
-            job_id: Job ID to associate with the session
-            instance_id: Instance ID the session is running on
-            metadata: Additional metadata for the session
+            session_id: Optional existing session ID to resume
+            job_id: Optional job ID to associate with the session
+            config: Optional config object (e.g., GenerateContentConfig) to log
+            model: Optional model name to log
+            task_key: Optional Fleet task key
+            instance_id: Optional Fleet instance ID
 
         Returns:
             Session object with log(), complete(), and fail() methods
 
         Example:
-            session = fleet.start_session(
-                model="anthropic/claude-sonnet-4",
-                task_key="my_task",
-                instance_id=env.instance_id,
-            )
+            session = fleet_client.start_session(config=config, model="gpt-4", task_key="task_123")
 
-            # Log messages during agent run
-            session.log({"role": "user", "content": "Hello"})
-            session.log({"role": "assistant", "content": "Hi!"})
+            # Log LLM calls during agent run
+            session.log(history, response)
 
             # Complete when done
             session.complete()
         """
-        from datetime import datetime
-
-        # Create session with a placeholder message
-        response = self._ingest(
-            messages=[{"role": "system", "content": "[session started]"}],
+        return Session(
+            client=self,
+            session_id=session_id,
+            job_id=job_id,
+            config=config,
             model=model,
             task_key=task_key,
-            job_id=job_id,
             instance_id=instance_id,
-            status="running",
-            metadata=metadata,
-            started_at=datetime.now().isoformat(),
         )
-
-        session = Session(
-            session_id=response.session_id,
-            client=self,
-        )
-        session._message_count = response.message_count
-        return session
 
     def trace_job(self, name: str) -> str:
         """Create a new trace job.
