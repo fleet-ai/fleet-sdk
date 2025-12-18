@@ -44,6 +44,10 @@ from .models import (
     JobCreateResponse,
     JobSessionsResponse,
     SessionTranscriptResponse,
+    SessionIngestRequest,
+    SessionIngestMessage,
+    SessionIngestResponse,
+    SessionStatus,
 )
 from .tasks import Task
 
@@ -1168,6 +1172,218 @@ class Fleet:
             "GET", f"/v1/sessions/{session_id}/transcript"
         )
         return SessionTranscriptResponse(**response.json())
+
+    def ingest_session(
+        self,
+        messages: List[Dict[str, Any]],
+        session_id: Optional[str] = None,
+        model: Optional[str] = None,
+        task_key: Optional[str] = None,
+        job_id: Optional[str] = None,
+        instance_id: Optional[str] = None,
+        status: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        started_at: Optional[str] = None,
+        ended_at: Optional[str] = None,
+    ) -> SessionIngestResponse:
+        """Ingest session data (create new or append to existing).
+
+        This endpoint allows you to upload session transcripts, either creating
+        a new session or appending messages to an existing one.
+
+        Args:
+            messages: List of message dictionaries with 'role' and 'content' keys.
+                Optional keys: 'tool_calls', 'tool_call_id', 'timestamp', 'tokens', 'metadata'
+            session_id: Existing session ID to append to. If omitted, creates new session.
+            model: Model identifier (e.g., "anthropic/claude-sonnet-4")
+            task_key: Task key to associate with the session
+            job_id: Job ID to associate with the session
+            instance_id: Instance ID to associate with the session
+            status: Session status ("pending", "running", "completed", "failed", "cancelled")
+            metadata: Additional metadata for the session
+            started_at: ISO timestamp when session started
+            ended_at: ISO timestamp when session ended
+
+        Returns:
+            SessionIngestResponse containing session_id, status, message_count, and created flag
+
+        Example:
+            # Create a new session
+            response = fleet.ingest_session(
+                messages=[
+                    {"role": "user", "content": "Hello"},
+                    {"role": "assistant", "content": "Hi there!"}
+                ],
+                model="anthropic/claude-sonnet-4",
+                status="completed"
+            )
+
+            # Append to existing session
+            response = fleet.ingest_session(
+                session_id=response.session_id,
+                messages=[
+                    {"role": "user", "content": "Follow-up question"}
+                ]
+            )
+        """
+        # Convert message dicts to SessionIngestMessage objects
+        message_objects = [SessionIngestMessage(**msg) for msg in messages]
+
+        # Build request
+        request = SessionIngestRequest(
+            messages=message_objects,
+            session_id=session_id,
+            model=model,
+            task_key=task_key,
+            job_id=job_id,
+            instance_id=instance_id,
+            status=SessionStatus(status) if status else None,
+            metadata=metadata,
+            started_at=started_at,
+            ended_at=ended_at,
+        )
+
+        response = self.client.request(
+            "POST",
+            "/v1/sessions/ingest",
+            json=request.model_dump(exclude_none=True),
+        )
+        return SessionIngestResponse(**response.json())
+
+    def create_session(
+        self,
+        model: Optional[str] = None,
+        task_key: Optional[str] = None,
+        job_id: Optional[str] = None,
+        instance_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        started_at: Optional[str] = None,
+        initial_message: Optional[Dict[str, Any]] = None,
+    ) -> SessionIngestResponse:
+        """Create a new session, optionally with an initial message.
+
+        This is useful for streaming scenarios where you want to create
+        a session first and then append messages one by one.
+
+        Args:
+            model: Model identifier (e.g., "anthropic/claude-sonnet-4")
+            task_key: Task key to associate with the session
+            job_id: Job ID to associate with the session
+            instance_id: Instance ID to associate with the session
+            metadata: Additional metadata for the session
+            started_at: ISO timestamp when session started
+            initial_message: Optional first message dict with 'role' and 'content'
+
+        Returns:
+            SessionIngestResponse containing session_id
+
+        Example:
+            # Create session and get ID
+            session = fleet.create_session(
+                model="anthropic/claude-sonnet-4",
+                task_key="my_task",
+                started_at=datetime.now().isoformat()
+            )
+            
+            # Append messages as they happen
+            fleet.append_message(session.session_id, {"role": "user", "content": "Hello"})
+            fleet.append_message(session.session_id, {"role": "assistant", "content": "Hi!"})
+        """
+        # Use a placeholder message if none provided
+        if initial_message:
+            messages = [initial_message]
+        else:
+            messages = [{"role": "system", "content": "[session created]"}]
+
+        return self.ingest_session(
+            messages=messages,
+            model=model,
+            task_key=task_key,
+            job_id=job_id,
+            instance_id=instance_id,
+            status="running",
+            metadata=metadata,
+            started_at=started_at,
+        )
+
+    def append_message(
+        self,
+        session_id: str,
+        message: Dict[str, Any],
+        status: Optional[str] = None,
+        ended_at: Optional[str] = None,
+    ) -> SessionIngestResponse:
+        """Append a single message to an existing session.
+
+        This is useful for streaming scenarios where you want to send
+        messages one by one as they happen.
+
+        Args:
+            session_id: The session ID to append to
+            message: Message dict with 'role' and 'content' keys.
+                Optional keys: 'tool_calls', 'tool_call_id', 'timestamp', 'tokens', 'metadata'
+            status: Optional status update ("running", "completed", "failed")
+            ended_at: ISO timestamp when session ended (set when completing)
+
+        Returns:
+            SessionIngestResponse with updated message count
+
+        Example:
+            # Append user message
+            fleet.append_message(session_id, {"role": "user", "content": "What's 2+2?"})
+            
+            # Append assistant response
+            fleet.append_message(session_id, {"role": "assistant", "content": "4"})
+            
+            # Complete the session
+            fleet.append_message(
+                session_id,
+                {"role": "assistant", "content": "Done!"},
+                status="completed",
+                ended_at=datetime.now().isoformat()
+            )
+        """
+        return self.ingest_session(
+            messages=[message],
+            session_id=session_id,
+            status=status,
+            ended_at=ended_at,
+        )
+
+    def complete_session(
+        self,
+        session_id: str,
+        status: str = "completed",
+        ended_at: Optional[str] = None,
+        final_message: Optional[Dict[str, Any]] = None,
+    ) -> SessionIngestResponse:
+        """Mark a session as complete.
+
+        Args:
+            session_id: The session ID to complete
+            status: Final status ("completed", "failed", "cancelled")
+            ended_at: ISO timestamp when session ended (defaults to now)
+            final_message: Optional final message to append
+
+        Returns:
+            SessionIngestResponse with final state
+        """
+        from datetime import datetime as dt
+        
+        if ended_at is None:
+            ended_at = dt.now().isoformat()
+        
+        if final_message:
+            messages = [final_message]
+        else:
+            messages = [{"role": "system", "content": f"[session {status}]"}]
+
+        return self.ingest_session(
+            messages=messages,
+            session_id=session_id,
+            status=status,
+            ended_at=ended_at,
+        )
 
     def _create_verifier_from_data(
         self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str, verifier_runtime_version: Optional[str] = None

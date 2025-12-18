@@ -586,3 +586,58 @@ class EvalEventsResponse(BaseModel):
 
     received: int = Field(..., title="Received Count")
     status: str = Field(..., title="Status")
+
+
+# Session Ingest models
+
+
+class SessionStatus(str, Enum):
+    """Status of a session."""
+
+    pending = "pending"
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+    cancelled = "cancelled"
+
+
+class SessionIngestMessage(BaseModel):
+    """A message to ingest into a session."""
+
+    role: str = Field(..., title="Role", description="Message role (user, assistant, tool, etc.)")
+    content: Any = Field(..., title="Content", description="Message content (string or structured)")
+    tool_calls: Optional[List[Dict[str, Any]]] = Field(None, title="Tool Calls")
+    tool_call_id: Optional[str] = Field(None, title="Tool Call Id")
+    timestamp: Optional[str] = Field(None, title="Timestamp")
+    tokens: Optional[int] = Field(None, title="Tokens")
+    metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
+
+
+class SessionIngestRequest(BaseModel):
+    """Request to ingest session data.
+
+    Can be used to:
+    - Create a new session (omit session_id)
+    - Append to an existing session (provide session_id)
+    """
+
+    messages: List[SessionIngestMessage] = Field(..., title="Messages", min_length=1)
+    session_id: Optional[str] = Field(None, title="Session Id", description="Existing session ID to append to")
+    team_id: Optional[str] = Field(None, title="Team Id")
+    model: Optional[str] = Field(None, title="Model", description="Model identifier (e.g., anthropic/claude-sonnet-4)")
+    task_key: Optional[str] = Field(None, title="Task Key")
+    job_id: Optional[str] = Field(None, title="Job Id")
+    instance_id: Optional[str] = Field(None, title="Instance Id")
+    status: Optional[SessionStatus] = Field(None, title="Status")
+    metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
+    started_at: Optional[str] = Field(None, title="Started At")
+    ended_at: Optional[str] = Field(None, title="Ended At")
+
+
+class SessionIngestResponse(BaseModel):
+    """Response from ingesting session data."""
+
+    success: bool = Field(..., title="Success")
+    session_id: str = Field(..., title="Session Id")
+    message_count: int = Field(..., title="Message Count", description="Total messages in session")
+    created_new_session: bool = Field(..., title="Created New Session", description="True if a new session was created")
