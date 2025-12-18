@@ -26,7 +26,7 @@ from .exceptions import (
 try:
     from .. import __version__
 except ImportError:
-    __version__ = "0.2.79"
+    __version__ = "0.2.82"
 
 logger = logging.getLogger(__name__)
 
