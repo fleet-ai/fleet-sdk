@@ -661,7 +661,7 @@ wheels = [
 
 [[package]]
 name = "fleet-python"
-version = "0.2.87"
+version = "0.2.88"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -715,7 +715,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "httpx-retries", specifier = ">=0.4.0" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.0.0" },
-    { name = "mcp", marker = "python_full_version >= '3.10' and extra == 'eval'", specifier = ">=0.1.0" },
+    { name = "mcp", marker = "python_full_version >= '3.10' and extra == 'eval'", specifier = "==1.24.0" },
     { name = "modulegraph2", specifier = ">=0.2.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "playwright", marker = "extra == 'playwright'", specifier = ">=1.40.0" },
