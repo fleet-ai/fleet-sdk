@@ -238,8 +238,9 @@ class AsyncSession:
         # Collect new history messages since last call
         new_history = history[self._logged_count:]
 
-        # Update tracked count (history length, not including response)
-        self._logged_count = len(history)
+        # Update tracked count to include the response we're about to send
+        # This prevents the response from being sent again as "new history" in the next call
+        self._logged_count = len(history) + (1 if response is not None else 0)
 
         # Build the payload - serialize history + response to JSON
         payload: Dict[str, Any] = {
@@ -261,14 +262,6 @@ class AsyncSession:
             if self.instance_id is not None:
                 payload["instance_id"] = self.instance_id
             self._config_sent = True
-
-        # Save payload to JSON file for debugging
-        log_num = self._message_count + 1
-        session_prefix = self.session_id[:8] if self.session_id else "new"
-        filepath = f"/tmp/fleet_session_{session_prefix}_log_{log_num}.json"
-        with open(filepath, "w") as f:
-            json.dump(payload, f, indent=2, default=_json_default)
-        print(f"Saved session log to {filepath}")
 
         if not new_history and response is None:
             return SessionIngestResponse(
