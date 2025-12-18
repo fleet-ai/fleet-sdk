@@ -732,15 +732,6 @@ def eval_run(
         return
     
     client = get_client()
-    base_url = os.getenv("FLEET_BASE_URL", CLI_DEFAULT_BASE_URL)
-    
-    # Generate a default name if not provided
-    if not name:
-        model_short = model[0].split("/")[-1].split("-")[0] if model else "eval"
-        if project_key:
-            name = f"{project_key}-{model_short}"
-        else:
-            name = f"all-tasks-{model_short}"
     
     # Parse BYOK keys
     byok_keys = None

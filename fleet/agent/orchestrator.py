@@ -25,7 +25,6 @@ import os
 import signal
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -197,11 +196,8 @@ class AgentOrchestrator:
 
         console = Console()
 
-        # Create job via Fleet API
-        job_name = (
-            f"eval-{self.config.agent}-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        )
-        self._job_id = await fleet.job_async(name=job_name)
+        # Create job via Fleet API (name generated server-side)
+        self._job_id = await fleet.job_async()
         console.print(f"Job: https://fleetai.com/dashboard/jobs/{self._job_id}")
 
         # Create log directory: ~/.fleet/logs/{job_id}/
