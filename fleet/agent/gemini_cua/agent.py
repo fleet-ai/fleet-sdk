@@ -451,24 +451,33 @@ async def main():
         print(json.dumps(result))
         return result
     
-    # Create Fleet session for live logging
-    session = None
-    if os.environ.get("FLEET_API_KEY"):
-        session = fleet.session_async(
-            job_id=config["job_id"],
-            model=config["model"],
-            task_key=config["task_key"],
-            instance_id=config["instance_id"],
-        )
-    
-    async with MCP(config["url"]) as mcp:
-        agent = GeminiAgent(mcp, config["model"], session=session)
-        result = await agent.run(config["prompt"], config["max_steps"])
-        result["task_key"] = config["task_key"]
-        # Include session_id in result so orchestrator can complete it after verification
-        if session and session.session_id:
-            result["session_id"] = session.session_id
+    try:
+        # Create Fleet session for live logging
+        session = None
+        if os.environ.get("FLEET_API_KEY"):
+            session = fleet.session_async(
+                job_id=config["job_id"],
+                model=config["model"],
+                task_key=config["task_key"],
+                instance_id=config["instance_id"],
+            )
         
+        async with MCP(config["url"]) as mcp:
+            agent = GeminiAgent(mcp, config["model"], session=session)
+            result = await agent.run(config["prompt"], config["max_steps"])
+            result["task_key"] = config["task_key"]
+            # Include session_id in result so orchestrator can complete it after verification
+            if session and session.session_id:
+                result["session_id"] = session.session_id
+            
+            print(json.dumps(result))
+            return result
+    except Exception as e:
+        import traceback
+        error_msg = f"{type(e).__name__}: {e}"
+        print(f"Agent exception: {error_msg}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
+        result = {"task_key": config["task_key"], "completed": False, "error": error_msg}
         print(json.dumps(result))
         return result
 

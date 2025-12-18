@@ -453,6 +453,12 @@ class AgentOrchestrator:
             if stderr_str:
                 logger.debug(f"Agent stderr: {stderr_str[:500]}")
         
+        # Always show stderr if agent crashed (non-zero exit or has stderr)
+        if proc.returncode != 0 or stderr_str:
+            short_key = task_key[:20]
+            if stderr_str:
+                print(f"[{short_key}] Agent stderr: {stderr_str[:500]}")
+        
         result_json = None
         for line in stdout_str.split("\n"):
             line = line.strip()
