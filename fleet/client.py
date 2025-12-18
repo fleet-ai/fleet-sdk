@@ -171,15 +171,20 @@ class Session:
 
         content_parts = []
         tool_calls = []
+        thinking_parts = []
 
         for part in parts:
             # Handle both object attributes and dict keys
             text = getattr(part, "text", None) or (part.get("text") if isinstance(part, dict) else None)
+            thought = getattr(part, "thought", None) or (part.get("thought") if isinstance(part, dict) else None)
             func_call = getattr(part, "function_call", None) or (part.get("function_call") if isinstance(part, dict) else None)
             func_resp = getattr(part, "function_response", None) or (part.get("function_response") if isinstance(part, dict) else None)
             inline_data = getattr(part, "inline_data", None) or (part.get("inline_data") if isinstance(part, dict) else None)
 
-            if text:
+            if thought and isinstance(thought, str):
+                # Capture thinking/reasoning traces
+                thinking_parts.append(thought)
+            elif text and isinstance(text, str):
                 content_parts.append(text)
             elif func_call:
                 # Extract function call details
@@ -224,18 +229,27 @@ class Session:
             content_list.extend(image_parts)
             content_value = content_list
         else:
-            content_value = "\n".join(text_parts) if text_parts else ""
+            content_value = "\n".join(text_parts) if text_parts else None
 
-        result = {"role": normalized_role, "content": content_value}
+        result = {"role": normalized_role}
+        if content_value is not None:
+            result["content"] = content_value
         if tool_calls:
             result["tool_calls"] = tool_calls
+        if thinking_parts:
+            result["thinking"] = "\n".join(thinking_parts)
         return result
 
-    def complete(self, metadata: Optional[Dict[str, Any]] = None) -> "SessionIngestResponse":
+    def complete(
+        self,
+        metadata: Optional[Dict[str, Any]] = None,
+        verifier_execution_id: Optional[str] = None,
+    ) -> "SessionIngestResponse":
         """Mark the session as completed successfully.
 
         Args:
             metadata: Optional final metadata to include
+            verifier_execution_id: Optional ID of the verifier execution record
 
         Returns:
             SessionIngestResponse with final state
@@ -251,16 +265,23 @@ class Session:
             session_id=self.session_id,
             status="completed",
             ended_at=datetime.now().isoformat(),
+            verifier_execution_id=verifier_execution_id,
         )
         self._message_count = response.message_count
         return response
 
-    def fail(self, error: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> "SessionIngestResponse":
+    def fail(
+        self,
+        error: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        verifier_execution_id: Optional[str] = None,
+    ) -> "SessionIngestResponse":
         """Mark the session as failed.
 
         Args:
             error: Optional error message
             metadata: Optional final metadata to include
+            verifier_execution_id: Optional ID of the verifier execution record
 
         Returns:
             SessionIngestResponse with final state
@@ -278,6 +299,7 @@ class Session:
             session_id=self.session_id,
             status="failed",
             ended_at=datetime.now().isoformat(),
+            verifier_execution_id=verifier_execution_id,
         )
         self._message_count = response.message_count
         return response
@@ -1392,6 +1414,7 @@ class Fleet:
         metadata: Optional[Dict[str, Any]] = None,
         started_at: Optional[str] = None,
         ended_at: Optional[str] = None,
+        verifier_execution_id: Optional[str] = None,
     ) -> SessionIngestResponse:
         """Internal method to ingest session data."""
         message_objects = [SessionIngestMessage(**msg) for msg in messages]
@@ -1406,6 +1429,7 @@ class Fleet:
             metadata=metadata,
             started_at=started_at,
             ended_at=ended_at,
+            verifier_execution_id=verifier_execution_id,
         )
         response = self.client.request(
             "POST",

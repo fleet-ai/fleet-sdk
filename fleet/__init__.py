@@ -122,6 +122,11 @@ __all__ = [
     "import_tasks_async",
     "get_task",
     "get_task_async",
+    # Session helpers
+    "session",
+    "session_async",
+    "Session",
+    "AsyncSession",
     # Version
     "__version__",
 ]
@@ -162,3 +167,85 @@ def reset_client():
     """Reset both sync and async global clients."""
     _global_client.reset_client()
     _async_global_client.reset_client()
+
+
+def session(
+    model: Optional[str] = None,
+    task_key: Optional[str] = None,
+    job_id: Optional[str] = None,
+    instance_id: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> Session:
+    """Start a new session for logging agent interactions (sync).
+
+    This is the recommended way to log agent runs. It returns a Session
+    object with simple `log()` and `complete()` methods.
+
+    Args:
+        model: Model identifier (e.g., "anthropic/claude-sonnet-4")
+        task_key: Task key to associate with the session
+        job_id: Job ID to associate with the session
+        instance_id: Instance ID the session is running on
+        metadata: Additional metadata for the session
+
+    Returns:
+        Session object with log(), complete(), and fail() methods
+
+    Example:
+        session = fleet.session(
+            model="anthropic/claude-sonnet-4",
+            task_key="my_task",
+        )
+        session.log({"role": "user", "content": "Hello"})
+        session.log({"role": "assistant", "content": "Hi!"})
+        session.complete()
+    """
+    client = _global_client.get_client()
+    return client.start_session(
+        model=model,
+        task_key=task_key,
+        job_id=job_id,
+        instance_id=instance_id,
+        metadata=metadata,
+    )
+
+
+async def session_async(
+    model: Optional[str] = None,
+    task_key: Optional[str] = None,
+    job_id: Optional[str] = None,
+    instance_id: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> AsyncSession:
+    """Start a new session for logging agent interactions (async).
+
+    This is the recommended way to log agent runs. It returns an AsyncSession
+    object with simple `log()` and `complete()` methods.
+
+    Args:
+        model: Model identifier (e.g., "anthropic/claude-sonnet-4")
+        task_key: Task key to associate with the session
+        job_id: Job ID to associate with the session
+        instance_id: Instance ID the session is running on
+        metadata: Additional metadata for the session
+
+    Returns:
+        AsyncSession object with log(), complete(), and fail() methods
+
+    Example:
+        session = await fleet.session_async(
+            model="anthropic/claude-sonnet-4",
+            task_key="my_task",
+        )
+        await session.log({"role": "user", "content": "Hello"})
+        await session.log({"role": "assistant", "content": "Hi!"})
+        await session.complete()
+    """
+    client = _async_global_client.get_client()
+    return await client.start_session(
+        model=model,
+        task_key=task_key,
+        job_id=job_id,
+        instance_id=instance_id,
+        metadata=metadata,
+    )

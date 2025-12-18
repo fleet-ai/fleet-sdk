@@ -605,7 +605,8 @@ class SessionIngestMessage(BaseModel):
     """A message to ingest into a session."""
 
     role: str = Field(..., title="Role", description="Message role (user, assistant, tool, etc.)")
-    content: Any = Field(..., title="Content", description="Message content (string or structured)")
+    content: Optional[Any] = Field(None, title="Content", description="Message content (string or structured)")
+    thinking: Optional[str] = Field(None, title="Thinking", description="Model reasoning/thinking trace")
     tool_calls: Optional[List[Dict[str, Any]]] = Field(None, title="Tool Calls")
     tool_call_id: Optional[str] = Field(None, title="Tool Call Id")
     timestamp: Optional[str] = Field(None, title="Timestamp")
@@ -632,6 +633,7 @@ class SessionIngestRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
     started_at: Optional[str] = Field(None, title="Started At")
     ended_at: Optional[str] = Field(None, title="Ended At")
+    verifier_execution_id: Optional[str] = Field(None, title="Verifier Execution Id", description="ID of the verifier execution record")
 
 
 class SessionIngestResponse(BaseModel):
