@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ImageContent, TextContent
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -227,9 +228,10 @@ def _dy(y: int) -> int:
 
 
 def _screenshot_response(img: bytes) -> list:
+    """Return screenshot as proper MCP content types."""
     return [
-        {"type": "image", "data": base64.b64encode(img).decode(), "mimeType": "image/png"},
-        {"type": "text", "text": f"URL: {computer.current_url}"}
+        ImageContent(type="image", data=base64.b64encode(img).decode(), mimeType="image/png"),
+        TextContent(type="text", text=f"URL: {computer.current_url}"),
     ]
 
 

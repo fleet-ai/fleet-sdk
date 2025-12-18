@@ -21,15 +21,14 @@ import asyncio
 import json
 import logging
 import os
-import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import fleet
 from .utils import get_agent_path
 from .types import AgentConfig, AgentResult, TaskResult
-from fleet.proxy import ProxyManager
-from fleet.eval import TrafficUploader
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +44,6 @@ class AgentOrchestrator:
         self._docker_image: Optional[str] = None
         # Track available ports (recycled when tasks complete)
         self._available_ports: List[Tuple[int, int]] = []
-        # MITM proxy for traffic capture
-        self._proxy: Optional[ProxyManager] = None
-        self._proxy_env: Dict[str, str] = {}
-        # Traffic uploader (tails proxy log, ships to backend)
-        self._uploader: Optional[TrafficUploader] = None
     
     async def _get_next_ports(self) -> Tuple[int, int]:
         """Get next available MCP port and VNC port."""
@@ -75,37 +69,17 @@ class AgentOrchestrator:
         from rich.console import Console
         from rich.live import Live
         from rich.spinner import Spinner
-        import uuid
         
         console = Console()
         
-        # Generate job ID for this run
-        self._job_id = f"eval_{uuid.uuid4().hex[:12]}"
-        console.print(f"Eval job: {self._job_id}")
+        # Create job via Fleet API
+        job_name = f"eval-{self.config.agent}-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self._job_id = await fleet.job_async(name=job_name)
+        console.print(f"Job: https://fleetai.com/dashboard/jobs/{self._job_id}")
         
         # Create log directory: ~/.fleet/logs/{job_id}/
         self._log_dir = Path.home() / ".fleet" / "logs" / self._job_id
         self._log_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Start MITM proxy for traffic capture
-        self._proxy = ProxyManager()
-        try:
-            self._proxy_env = await self._proxy.start()
-            console.print(f"Proxy started, logging to: {self._proxy.log_path}")
-            
-            # Start traffic uploader (tails proxy log, ships raw to backend)
-            self._uploader = TrafficUploader(
-                job_id=self._job_id,
-                log_file=self._proxy.log_path,
-                whitelist=None,  # No filter - upload everything
-            )
-            await self._uploader.start()
-        except Exception as e:
-            console.print(f"[yellow]⚠[/yellow] Proxy failed to start: {e}")
-            console.print("[dim]  Proxy requires aiohttp: pip install aiohttp[/dim]")
-            self._proxy = None
-            self._proxy_env = {}
-            self._uploader = None
         
         # Load tasks with spinner
         with Live(Spinner("dots", text=f"Loading tasks from {self.config.project_key}..."), console=console, transient=True):
@@ -167,16 +141,6 @@ class AgentOrchestrator:
                 ))
             else:
                 final.append(r)
-        
-        # Stop uploader first (flushes remaining entries)
-        if self._uploader:
-            await self._uploader.stop()
-            stats = self._uploader.stats
-            console.print(f"Traffic: {stats['read']} read, {stats['uploaded']} uploaded")
-        
-        # Stop proxy
-        if self._proxy:
-            await self._proxy.stop()
         
         # Show logs location
         if hasattr(self, '_log_dir') and self._log_dir.exists():
@@ -280,12 +244,14 @@ class AgentOrchestrator:
                 port=port,
                 task_prompt=task_prompt,
                 task_key=task_key,
+                instance_id=env.instance_id,
             )
             logger.debug(f"[{short_key}] Agent done: completed={agent_result.completed}")
             
             # 4. Run verification
             verification_success = None
             verification_score = None
+            verifier_execution_id = None
             
             if agent_result.completed and task.verifier:
                 logger.info(f"[{task_key}] Running verification...")
@@ -295,11 +261,26 @@ class AgentOrchestrator:
                         final_answer=agent_result.final_answer,
                     )
                     verification_success = v.success
+                    verifier_execution_id = v.execution_id
                     # Score is in v.result (the verifier function's return value)
                     verification_score = v.result if isinstance(v.result, (int, float)) else None
                     logger.info(f"[{task_key}] Verification: {verification_success}")
                 except Exception as e:
                     logger.error(f"[{task_key}] Verification error: {e}")
+            
+            # 5. Complete/fail session (session was created by agent, we just complete it)
+            session_id = getattr(agent_result, 'session_id', None)
+            if session_id:
+                try:
+                    # Create session object to complete it
+                    session = fleet.session_async(session_id=session_id)
+                    if verification_success:
+                        await session.complete(verifier_execution_id=verifier_execution_id)
+                    else:
+                        await session.fail(verifier_execution_id=verifier_execution_id)
+                    logger.info(f"[{task_key}] Session: https://fleetai.com/dashboard/sessions/{session_id}")
+                except Exception as e:
+                    logger.error(f"[{task_key}] Session complete error: {e}")
             
             return TaskResult(
                 task_key=task_key,
@@ -414,6 +395,7 @@ class AgentOrchestrator:
         port: int,
         task_prompt: str,
         task_key: str,
+        instance_id: Optional[str] = None,
     ) -> AgentResult:
         """Run agent process."""
         agent_path = get_agent_path(self.config.agent)
@@ -431,6 +413,7 @@ class AgentOrchestrator:
             "FLEET_JOB_ID": self._job_id,
             "FLEET_TASK_PROMPT": task_prompt,
             "FLEET_TASK_KEY": task_key,
+            "FLEET_INSTANCE_ID": instance_id or "",
             "FLEET_MODEL": self.config.model,
             "FLEET_MAX_STEPS": str(self.config.max_steps),
             "FLEET_SCREEN_WIDTH": str(self.config.screen_width),
@@ -438,8 +421,6 @@ class AgentOrchestrator:
             "FLEET_VERBOSE": "true" if self.config.verbose else "false",
         })
         env.update(self.config.api_keys)
-        # Add proxy env vars for traffic capture
-        env.update(self._proxy_env)
         
         proc = await asyncio.create_subprocess_exec(
             "python", str(agent_script),
@@ -494,6 +475,7 @@ class AgentOrchestrator:
                 steps_taken=result_json.get("steps_taken", 0),
                 execution_time_ms=result_json.get("execution_time_ms", 0),
                 transcript=result_json.get("transcript", []),
+                session_id=result_json.get("session_id"),
             )
         
         # Include stderr in error message

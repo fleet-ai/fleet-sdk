@@ -33,6 +33,7 @@ class AgentResult(BaseModel):
     steps_taken: int = 0
     execution_time_ms: int = 0
     transcript: List[Dict[str, Any]] = Field(default_factory=list)
+    session_id: Optional[str] = None  # Fleet session ID for completion
 
 
 class TaskResult(BaseModel):

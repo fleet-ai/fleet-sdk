@@ -25,6 +25,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from google import genai
 from google.genai import types
+import fleet
 from fleet.utils.logging import log_verbose, VERBOSE
 
 # Whitelist hooks for auto-detecting model endpoints (optional)
@@ -136,20 +137,36 @@ class MCP:
         result = await self._session.call_tool(name, args or {})
         duration_ms = int((time.time() - start_time) * 1000)
         
+        # Debug: log raw MCP result structure
+        log_verbose(f"    MCP result.content ({len(result.content)} items):")
+        for i, item in enumerate(result.content):
+            log_verbose(f"      [{i}] type={type(item).__name__}, attrs={dir(item)[:10]}...")
+            if hasattr(item, "type"):
+                log_verbose(f"          .type = {repr(item.type)}")
+            if hasattr(item, "data"):
+                data_preview = str(item.data)[:50] if item.data else "None"
+                log_verbose(f"          .data = {data_preview}...")
+        
+        # Helper to get attribute or dict key
+        def _get(item, key, default=None):
+            if isinstance(item, dict):
+                return item.get(key, default)
+            return getattr(item, key, default)
+        
         # Convert MCP result to dict format expected by agent
         content = []
         for item in result.content:
-            if hasattr(item, "type"):
-                if item.type == "image":
-                    content.append({
-                        "type": "image",
-                        "data": item.data[:100] + "..." if len(item.data) > 100 else item.data,  # Truncate for logging
-                        "mimeType": getattr(item, "mimeType", "image/png"),
-                    })
-                elif item.type == "text":
-                    content.append({"type": "text", "text": item.text})
+            item_type = _get(item, "type")
+            if item_type == "image":
+                content.append({
+                    "type": "image",
+                    "data": _get(item, "data", ""),
+                    "mimeType": _get(item, "mimeType", "image/png"),
+                })
+            elif item_type == "text":
+                content.append({"type": "text", "text": _get(item, "text", "")})
         
-        # Log the call
+        # Log the call (just types, not data)
         self._log({
             "type": "mcp_call",
             "tool": name,
@@ -158,20 +175,7 @@ class MCP:
             "response_content_types": [c.get("type") for c in content],
             "is_error": result.isError if hasattr(result, "isError") else False,
         })
-        
-        # Return full content (not truncated)
-        full_content = []
-        for item in result.content:
-            if hasattr(item, "type"):
-                if item.type == "image":
-                    full_content.append({
-                        "type": "image",
-                        "data": item.data,
-                        "mimeType": getattr(item, "mimeType", "image/png"),
-                    })
-                elif item.type == "text":
-                    full_content.append({"type": "text", "text": item.text})
-        return {"content": full_content, "isError": result.isError if hasattr(result, "isError") else False}
+        return {"content": content, "isError": result.isError if hasattr(result, "isError") else False}
     
     def get_tools(self) -> List[Dict]:
         """Return the list of tools from the server."""
@@ -201,12 +205,13 @@ def get_image_data(result: Dict) -> Optional[str]:
 class GeminiAgent:
     """Gemini Computer Use Agent."""
     
-    def __init__(self, mcp: MCP, model: str):
+    def __init__(self, mcp: MCP, model: str, session=None):
         self.mcp = mcp
         # Strip provider prefix if present
         self.model = model.split("/")[-1] if "/" in model else model
         self.client = get_gemini_client()
         self.transcript: List[Dict] = []
+        self.session = session  # Fleet session for live logging
     
     async def _execute_tool(self, name: str, args: Dict) -> Dict:
         return await self.mcp.call(name, args)
@@ -251,7 +256,12 @@ STRICT RULES:
             max_output_tokens=4096,
             system_instruction=system_prompt,
             tools=[types.Tool(function_declarations=gemini_tools)],
+            thinking_config=types.ThinkingConfig(include_thoughts=True),
         )
+        
+        # Set config on session for logging (if session exists)
+        if self.session:
+            self.session.config = config
         
         history: List[types.Content] = []
         
@@ -291,6 +301,15 @@ STRICT RULES:
                 print("[WARN] Empty response, retrying...")
                 log_verbose(f"  Candidate: {candidate}")
                 continue
+            
+            # Log to Fleet session (live)
+            if self.session:
+                try:
+                    await self.session.log(history, response)
+                    if step == 1 and self.session.session_id:
+                        print(f"Session: https://fleetai.com/dashboard/sessions/{self.session.session_id}")
+                except Exception as e:
+                    log_verbose(f"  [WARN] Session log failed: {e}")
             
             # Log all parts for debugging
             log_verbose(f"\n  Response parts ({len(candidate.content.parts)}):")
@@ -415,6 +434,8 @@ async def main():
         "url": os.environ.get("FLEET_MCP_URL", "http://localhost:8765"),
         "prompt": os.environ.get("FLEET_TASK_PROMPT", ""),
         "task_key": os.environ.get("FLEET_TASK_KEY", ""),
+        "job_id": os.environ.get("FLEET_JOB_ID"),
+        "instance_id": os.environ.get("FLEET_INSTANCE_ID"),
         "model": os.environ.get("FLEET_MODEL", "gemini-2.5-pro"),
         "max_steps": int(os.environ.get("FLEET_MAX_STEPS", "100")),
     }
@@ -430,10 +451,24 @@ async def main():
         print(json.dumps(result))
         return result
     
+    # Create Fleet session for live logging
+    session = None
+    if os.environ.get("FLEET_API_KEY"):
+        session = fleet.session_async(
+            job_id=config["job_id"],
+            model=config["model"],
+            task_key=config["task_key"],
+            instance_id=config["instance_id"],
+        )
+    
     async with MCP(config["url"]) as mcp:
-        agent = GeminiAgent(mcp, config["model"])
+        agent = GeminiAgent(mcp, config["model"], session=session)
         result = await agent.run(config["prompt"], config["max_steps"])
         result["task_key"] = config["task_key"]
+        # Include session_id in result so orchestrator can complete it after verification
+        if session and session.session_id:
+            result["session_id"] = session.session_id
+        
         print(json.dumps(result))
         return result
 
