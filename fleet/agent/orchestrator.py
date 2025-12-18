@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -418,7 +419,7 @@ class AgentOrchestrator:
         env.update(self.config.api_keys)
         
         proc = await asyncio.create_subprocess_exec(
-            "python", str(agent_script),
+            sys.executable, str(agent_script),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fleet-python"
 
-version = "0.2.85"
+version = "0.2.86"
 description = "Python SDK for Fleet environments"
 authors = [
     {name = "Fleet AI", email = "nic@fleet.so"},
@@ -59,6 +59,7 @@ playwright = [
 eval = [
     "aiohttp>=3.9.0",
     "google-genai>=1.0.0",
+    "mcp>=0.1.0; python_version >= '3.10'"
 ]
 
 [project.urls]
