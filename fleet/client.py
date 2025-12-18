@@ -111,24 +111,125 @@ class Session:
         self._client = client
         self._message_count = 0
 
-    def log(self, message: Dict[str, Any]) -> "SessionIngestResponse":
+    def log(self, message: Any) -> "SessionIngestResponse":
         """Log a message to the session.
 
+        Accepts various message formats and normalizes them:
+        - Standard dict with 'role' and 'content' keys
+        - Gemini Content objects (with 'parts' and 'role')
+        - OpenAI/Anthropic style messages
+
+        Automatically handles:
+        - Multimodal content (images)
+        - Tool calls (function_call)
+        - Role normalization ('model' -> 'assistant')
+
         Args:
-            message: Message dict with 'role' and 'content' keys.
-                Optional keys: 'tool_calls', 'tool_call_id', 'timestamp', 'tokens', 'metadata'
+            message: Message in any supported format
 
         Returns:
             SessionIngestResponse with updated message count
         """
         from .models import SessionIngestResponse
 
+        normalized = self._normalize_message(message)
         response = self._client._ingest(
-            messages=[message],
+            messages=[normalized],
             session_id=self.session_id,
         )
         self._message_count = response.message_count
         return response
+
+    def _normalize_message(self, message: Any) -> Dict[str, Any]:
+        """Convert any message format to standard ingest format."""
+        # If it's already a simple dict with role/content, use as-is
+        if isinstance(message, dict) and "role" in message and "content" in message:
+            # Just normalize the role
+            msg = dict(message)
+            if msg["role"] == "model":
+                msg["role"] = "assistant"
+            return msg
+
+        # Handle Gemini Content objects or dicts with 'parts'
+        if hasattr(message, "parts") or (isinstance(message, dict) and "parts" in message):
+            return self._convert_gemini_content(message)
+
+        # Fallback: wrap as system message
+        return {"role": "system", "content": str(message)}
+
+    def _convert_gemini_content(self, content: Any) -> Dict[str, Any]:
+        """Convert Gemini Content object/dict to standard format."""
+        import base64
+
+        # Get parts and role (handle both object and dict)
+        if hasattr(content, "parts"):
+            parts = content.parts
+            role = getattr(content, "role", "user")
+        else:
+            parts = content.get("parts", [])
+            role = content.get("role", "user")
+
+        content_parts = []
+        tool_calls = []
+
+        for part in parts:
+            # Handle both object attributes and dict keys
+            text = getattr(part, "text", None) or (part.get("text") if isinstance(part, dict) else None)
+            func_call = getattr(part, "function_call", None) or (part.get("function_call") if isinstance(part, dict) else None)
+            func_resp = getattr(part, "function_response", None) or (part.get("function_response") if isinstance(part, dict) else None)
+            inline_data = getattr(part, "inline_data", None) or (part.get("inline_data") if isinstance(part, dict) else None)
+
+            if text:
+                content_parts.append(text)
+            elif func_call:
+                # Extract function call details
+                name = getattr(func_call, "name", None) or (func_call.get("name") if isinstance(func_call, dict) else None)
+                args = getattr(func_call, "args", None) or (func_call.get("args") if isinstance(func_call, dict) else {})
+                tool_calls.append({
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(dict(args) if args else {}),
+                    },
+                })
+            elif func_resp:
+                # Extract function response details
+                name = getattr(func_resp, "name", None) or (func_resp.get("name") if isinstance(func_resp, dict) else None)
+                response = getattr(func_resp, "response", None) or (func_resp.get("response") if isinstance(func_resp, dict) else None)
+                content_parts.append({
+                    "type": "function_response",
+                    "name": name,
+                    "response": json.dumps(dict(response) if response else {}),
+                })
+            elif inline_data:
+                # Handle image data
+                mime_type = getattr(inline_data, "mime_type", None) or (inline_data.get("mime_type") if isinstance(inline_data, dict) else "image/png")
+                data = getattr(inline_data, "data", None) or (inline_data.get("data") if isinstance(inline_data, dict) else None)
+                if data:
+                    if isinstance(data, bytes):
+                        data = base64.b64encode(data).decode("utf-8")
+                    content_parts.append({"type": "image", "mime_type": mime_type, "data": data})
+
+        # Normalize role
+        normalized_role = "assistant" if role == "model" else role
+
+        # Build content - string for text-only, list for multimodal
+        text_parts = [p for p in content_parts if isinstance(p, str)]
+        image_parts = [p for p in content_parts if isinstance(p, dict)]
+
+        if image_parts:
+            content_list = []
+            if text_parts:
+                content_list.append({"type": "text", "text": "\n".join(text_parts)})
+            content_list.extend(image_parts)
+            content_value = content_list
+        else:
+            content_value = "\n".join(text_parts) if text_parts else ""
+
+        result = {"role": normalized_role, "content": content_value}
+        if tool_calls:
+            result["tool_calls"] = tool_calls
+        return result
 
     def complete(self, metadata: Optional[Dict[str, Any]] = None) -> "SessionIngestResponse":
         """Mark the session as completed successfully.
