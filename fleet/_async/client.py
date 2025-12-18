@@ -1419,11 +1419,11 @@ class AsyncFleet:
             instance_id=instance_id,
         )
 
-    async def trace_job(self, name: str) -> str:
+    async def trace_job(self, name: Optional[str] = None) -> str:
         """Create a new trace job.
 
         Args:
-            name: Name of the job
+            name: Name of the job (generated server-side if not provided)
 
         Returns:
             The job_id string

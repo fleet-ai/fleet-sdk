@@ -73,7 +73,7 @@ from . import env
 from . import global_client as _global_client
 from ._async import global_client as _async_global_client
 
-__version__ = "0.2.90"
+__version__ = "0.2.91"
 
 __all__ = [
     # Core classes
@@ -252,11 +252,11 @@ def session_async(
     )
 
 
-def job(name: str) -> str:
+def job(name: Optional[str] = None) -> str:
     """Create a new trace job (sync).
 
     Args:
-        name: Name of the job
+        name: Name of the job (generated server-side if not provided)
 
     Returns:
         The job_id string
@@ -269,11 +269,11 @@ def job(name: str) -> str:
     return client.trace_job(name=name)
 
 
-async def job_async(name: str) -> str:
+async def job_async(name: Optional[str] = None) -> str:
     """Create a new trace job (async).
 
     Args:
-        name: Name of the job
+        name: Name of the job (generated server-side if not provided)
 
     Returns:
         The job_id string

@@ -648,7 +648,7 @@ class SessionIngestResponse(BaseModel):
 class TraceJobRequest(BaseModel):
     """Request to create a new trace job."""
 
-    name: str = Field(..., title="Name", description="Name of the job")
+    name: Optional[str] = Field(None, title="Name", description="Name of the job (generated server-side if not provided)")
 
 
 class TraceJobResponse(BaseModel):
