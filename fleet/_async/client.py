@@ -1428,7 +1428,7 @@ class AsyncFleet:
         Returns:
             The job_id string
         """
-        from .models import TraceJobRequest, TraceJobResponse
+        from fleet.models import TraceJobRequest, TraceJobResponse
 
         request = TraceJobRequest(name=name)
         response = await self.client.request(
