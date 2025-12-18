@@ -116,7 +116,7 @@ class AsyncSession:
         Returns:
             SessionIngestResponse with updated message count
         """
-        response = await self._client.ingest_session(
+        response = await self._client._ingest(
             messages=[message],
             session_id=self.session_id,
         )
@@ -138,7 +138,7 @@ class AsyncSession:
         if metadata:
             final_content.update(metadata)
 
-        response = await self._client.ingest_session(
+        response = await self._client._ingest(
             messages=[{"role": "system", "content": json.dumps(final_content)}],
             session_id=self.session_id,
             status="completed",
@@ -165,7 +165,7 @@ class AsyncSession:
         if metadata:
             final_content.update(metadata)
 
-        response = await self._client.ingest_session(
+        response = await self._client._ingest(
             messages=[{"role": "system", "content": json.dumps(final_content)}],
             session_id=self.session_id,
             status="failed",
@@ -1163,6 +1163,40 @@ class AsyncFleet:
         )
         return SessionTranscriptResponse(**response.json())
 
+    async def _ingest(
+        self,
+        messages: List[Dict[str, Any]],
+        session_id: Optional[str] = None,
+        model: Optional[str] = None,
+        task_key: Optional[str] = None,
+        job_id: Optional[str] = None,
+        instance_id: Optional[str] = None,
+        status: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        started_at: Optional[str] = None,
+        ended_at: Optional[str] = None,
+    ) -> SessionIngestResponse:
+        """Internal method to ingest session data."""
+        message_objects = [SessionIngestMessage(**msg) for msg in messages]
+        request = SessionIngestRequest(
+            messages=message_objects,
+            session_id=session_id,
+            model=model,
+            task_key=task_key,
+            job_id=job_id,
+            instance_id=instance_id,
+            status=SessionStatus(status) if status else None,
+            metadata=metadata,
+            started_at=started_at,
+            ended_at=ended_at,
+        )
+        response = await self.client.request(
+            "POST",
+            "/v1/sessions/ingest",
+            json=request.model_dump(exclude_none=True),
+        )
+        return SessionIngestResponse(**response.json())
+
     async def start_session(
         self,
         model: Optional[str] = None,
@@ -1203,15 +1237,14 @@ class AsyncFleet:
         from datetime import datetime
 
         # Create session with a placeholder message
-        response = await self.ingest_session(
-            messages=[{"role": "system", "content": "[session started]"}],
+        response = await self.create_session(
             model=model,
             task_key=task_key,
             job_id=job_id,
             instance_id=instance_id,
-            status="running",
             metadata=metadata,
             started_at=datetime.now().isoformat(),
+            initial_message={"role": "system", "content": "[session started]"},
         )
 
         session = AsyncSession(
@@ -1266,7 +1299,7 @@ class AsyncFleet:
         else:
             messages = [{"role": "system", "content": "[session created]"}]
 
-        return await self.ingest_session(
+        return await self._ingest(
             messages=messages,
             model=model,
             task_key=task_key,
@@ -1314,7 +1347,7 @@ class AsyncFleet:
                 ended_at=datetime.now().isoformat()
             )
         """
-        return await self.ingest_session(
+        return await self._ingest(
             messages=[message],
             session_id=session_id,
             status=status,
@@ -1349,7 +1382,7 @@ class AsyncFleet:
         else:
             messages = [{"role": "system", "content": f"[session {status}]"}]
 
-        return await self.ingest_session(
+        return await self._ingest(
             messages=messages,
             session_id=session_id,
             status=status,

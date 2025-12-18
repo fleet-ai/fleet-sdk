@@ -123,7 +123,7 @@ class Session:
         """
         from .models import SessionIngestResponse
 
-        response = self._client.ingest_session(
+        response = self._client._ingest(
             messages=[message],
             session_id=self.session_id,
         )
@@ -145,7 +145,7 @@ class Session:
         if metadata:
             final_content.update(metadata)
 
-        response = self._client.ingest_session(
+        response = self._client._ingest(
             messages=[{"role": "system", "content": json.dumps(final_content)}],
             session_id=self.session_id,
             status="completed",
@@ -172,7 +172,7 @@ class Session:
         if metadata:
             final_content.update(metadata)
 
-        response = self._client.ingest_session(
+        response = self._client._ingest(
             messages=[{"role": "system", "content": json.dumps(final_content)}],
             session_id=self.session_id,
             status="failed",
@@ -1279,6 +1279,40 @@ class Fleet:
         )
         return SessionTranscriptResponse(**response.json())
 
+    def _ingest(
+        self,
+        messages: List[Dict[str, Any]],
+        session_id: Optional[str] = None,
+        model: Optional[str] = None,
+        task_key: Optional[str] = None,
+        job_id: Optional[str] = None,
+        instance_id: Optional[str] = None,
+        status: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        started_at: Optional[str] = None,
+        ended_at: Optional[str] = None,
+    ) -> SessionIngestResponse:
+        """Internal method to ingest session data."""
+        message_objects = [SessionIngestMessage(**msg) for msg in messages]
+        request = SessionIngestRequest(
+            messages=message_objects,
+            session_id=session_id,
+            model=model,
+            task_key=task_key,
+            job_id=job_id,
+            instance_id=instance_id,
+            status=SessionStatus(status) if status else None,
+            metadata=metadata,
+            started_at=started_at,
+            ended_at=ended_at,
+        )
+        response = self.client.request(
+            "POST",
+            "/v1/sessions/ingest",
+            json=request.model_dump(exclude_none=True),
+        )
+        return SessionIngestResponse(**response.json())
+
     def start_session(
         self,
         model: Optional[str] = None,
@@ -1319,7 +1353,7 @@ class Fleet:
         from datetime import datetime
 
         # Create session with a placeholder message
-        response = self.ingest_session(
+        response = self._ingest(
             messages=[{"role": "system", "content": "[session started]"}],
             model=model,
             task_key=task_key,
@@ -1382,7 +1416,7 @@ class Fleet:
         else:
             messages = [{"role": "system", "content": "[session created]"}]
 
-        return self.ingest_session(
+        return self._ingest(
             messages=messages,
             model=model,
             task_key=task_key,
@@ -1430,7 +1464,7 @@ class Fleet:
                 ended_at=datetime.now().isoformat()
             )
         """
-        return self.ingest_session(
+        return self._ingest(
             messages=[message],
             session_id=session_id,
             status=status,
@@ -1465,7 +1499,7 @@ class Fleet:
         else:
             messages = [{"role": "system", "content": f"[session {status}]"}]
 
-        return self.ingest_session(
+        return self._ingest(
             messages=messages,
             session_id=session_id,
             status=status,
