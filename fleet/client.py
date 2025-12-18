@@ -110,35 +110,54 @@ class Session:
         self.session_id = session_id
         self._client = client
         self._message_count = 0
+        self._logged_count = 0  # Track how many messages from history have been logged
 
-    def log(self, message: Any) -> "SessionIngestResponse":
-        """Log a message to the session.
+    def log(self, history: List[Any], response: Any) -> "SessionIngestResponse":
+        """Log an LLM call to the session.
 
-        Accepts various message formats and normalizes them:
-        - Standard dict with 'role' and 'content' keys
-        - Gemini Content objects (with 'parts' and 'role')
-        - OpenAI/Anthropic style messages
+        Pass the input history and the model response. The session tracks what's
+        already been logged and only sends new messages.
 
-        Automatically handles:
-        - Multimodal content (images)
-        - Tool calls (function_call)
-        - Role normalization ('model' -> 'assistant')
+        Example:
+            response = model.generate(history)
+            session.log(history, response.content)
 
         Args:
-            message: Message in any supported format
+            history: The input messages sent to the model
+            response: The model's response (Content object, dict, etc.)
 
         Returns:
             SessionIngestResponse with updated message count
         """
         from .models import SessionIngestResponse
 
-        normalized = self._normalize_message(message)
-        response = self._client._ingest(
-            messages=[normalized],
+        messages_to_log = []
+
+        # Log any new history messages since last call
+        new_history = history[self._logged_count:]
+        for msg in new_history:
+            messages_to_log.append(self._normalize_message(msg))
+
+        # Log the response
+        messages_to_log.append(self._normalize_message(response))
+
+        # Update tracked count (history length, not including response)
+        self._logged_count = len(history)
+
+        if not messages_to_log:
+            return SessionIngestResponse(
+                success=True,
+                session_id=self.session_id,
+                message_count=self._message_count,
+                created_new_session=False,
+            )
+
+        result = self._client._ingest(
+            messages=messages_to_log,
             session_id=self.session_id,
         )
-        self._message_count = response.message_count
-        return response
+        self._message_count = result.message_count
+        return result
 
     def _normalize_message(self, message: Any) -> Dict[str, Any]:
         """Convert any message format to standard ingest format."""
