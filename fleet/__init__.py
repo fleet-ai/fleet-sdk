@@ -127,6 +127,9 @@ __all__ = [
     "session_async",
     "Session",
     "AsyncSession",
+    # Job helpers
+    "job",
+    "job_async",
     # Version
     "__version__",
 ]
@@ -249,3 +252,37 @@ async def session_async(
         instance_id=instance_id,
         metadata=metadata,
     )
+
+
+def job(name: str) -> str:
+    """Create a new trace job (sync).
+
+    Args:
+        name: Name of the job
+
+    Returns:
+        The job_id string
+
+    Example:
+        job_id = fleet.job("my-agent-run")
+        session = fleet.session(job_id=job_id, ...)
+    """
+    client = _global_client.get_client()
+    return client.trace_job(name=name)
+
+
+async def job_async(name: str) -> str:
+    """Create a new trace job (async).
+
+    Args:
+        name: Name of the job
+
+    Returns:
+        The job_id string
+
+    Example:
+        job_id = await fleet.job_async("my-agent-run")
+        session = await fleet.session_async(job_id=job_id, ...)
+    """
+    client = _async_global_client.get_client()
+    return await client.trace_job(name=name)

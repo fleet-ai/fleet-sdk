@@ -1397,6 +1397,26 @@ class AsyncFleet:
         session._message_count = response.message_count
         return session
 
+    async def trace_job(self, name: str) -> str:
+        """Create a new trace job.
+
+        Args:
+            name: Name of the job
+
+        Returns:
+            The job_id string
+        """
+        from .models import TraceJobRequest, TraceJobResponse
+
+        request = TraceJobRequest(name=name)
+        response = await self.client.request(
+            "POST",
+            "/v1/traces/jobs",
+            json=request.model_dump(),
+        )
+        result = TraceJobResponse(**response.json())
+        return result.job_id
+
     async def create_session(
         self,
         model: Optional[str] = None,

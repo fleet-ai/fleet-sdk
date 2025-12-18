@@ -643,3 +643,17 @@ class SessionIngestResponse(BaseModel):
     session_id: str = Field(..., title="Session Id")
     message_count: int = Field(..., title="Message Count", description="Total messages in session")
     created_new_session: bool = Field(..., title="Created New Session", description="True if a new session was created")
+
+
+class TraceJobRequest(BaseModel):
+    """Request to create a new trace job."""
+
+    name: str = Field(..., title="Name", description="Name of the job")
+
+
+class TraceJobResponse(BaseModel):
+    """Response from creating a trace job."""
+
+    job_id: str = Field(..., title="Job Id")
+    name: str = Field(..., title="Name")
+    status: str = Field(..., title="Status")

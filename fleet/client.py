@@ -1515,6 +1515,26 @@ class Fleet:
         session._message_count = response.message_count
         return session
 
+    def trace_job(self, name: str) -> str:
+        """Create a new trace job.
+
+        Args:
+            name: Name of the job
+
+        Returns:
+            The job_id string
+        """
+        from .models import TraceJobRequest, TraceJobResponse
+
+        request = TraceJobRequest(name=name)
+        response = self.client.request(
+            "POST",
+            "/v1/traces/jobs",
+            json=request.model_dump(),
+        )
+        result = TraceJobResponse(**response.json())
+        return result.job_id
+
     def create_session(
         self,
         model: Optional[str] = None,
