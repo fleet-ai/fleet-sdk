@@ -8,7 +8,7 @@ Env vars:
     FLEET_TASK_PROMPT: Task prompt
     FLEET_TASK_KEY: Task key
     FLEET_MODEL: Model (default: gemini-2.5-pro)
-    FLEET_MAX_STEPS: Max steps (default: 50)
+    FLEET_MAX_STEPS: Max steps (default: 200)
     FLEET_VERBOSE: Enable verbose logging (default: false)
     USE_OAUTH: Use gcloud OAuth instead of API key (default: false)
     GOOG_PROJECT: Google Cloud project for OAuth (default: gemini-agents-area)
@@ -95,22 +95,33 @@ class MCP:
     
     async def __aenter__(self):
         # Connect using streamable-http transport
-        self._client = streamable_http_client(self.url)
-        read, write, _ = await self._client.__aenter__()
-        self._session = ClientSession(read, write)
-        await self._session.__aenter__()
-        await self._session.initialize()
+        print(f"MCP: Connecting to {self.url}...")
+        try:
+            self._client = streamable_http_client(self.url)
+            read, write, _ = await self._client.__aenter__()
+            self._session = ClientSession(read, write)
+            await self._session.__aenter__()
+            await self._session.initialize()
+            print(f"MCP: Connected successfully")
+        except Exception as e:
+            print(f"MCP: Connection failed: {type(e).__name__}: {e}")
+            raise
         
         # Fetch available tools from server
-        result = await self._session.list_tools()
-        self._tools = [
-            {
-                "name": tool.name,
-                "description": tool.description or "",
-                "inputSchema": tool.inputSchema,
-            }
-            for tool in result.tools
-        ]
+        try:
+            result = await self._session.list_tools()
+            self._tools = [
+                {
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "inputSchema": tool.inputSchema,
+                }
+                for tool in result.tools
+            ]
+            print(f"MCP: Loaded {len(self._tools)} tools")
+        except Exception as e:
+            print(f"MCP: Failed to list tools: {type(e).__name__}: {e}")
+            raise
         return self
     
     async def __aexit__(self, *args):
@@ -212,6 +223,8 @@ class GeminiAgent:
         self.client = get_gemini_client()
         self.transcript: List[Dict] = []
         self.session = session  # Fleet session for live logging
+        self._consecutive_errors = 0
+        self._max_consecutive_errors = 5
     
     async def _execute_tool(self, name: str, args: Dict) -> Dict:
         return await self.mcp.call(name, args)
@@ -287,9 +300,27 @@ STRICT RULES:
                     contents=history,
                     config=config,
                 )
+                self._consecutive_errors = 0  # Reset on success
             except Exception as e:
-                print(f"API error: {e}")
-                return self._result(False, str(e), step, start_time)
+                self._consecutive_errors += 1
+                error_type = type(e).__name__
+                print(f"API error ({error_type}): {e}")
+                print(f"  Consecutive errors: {self._consecutive_errors}/{self._max_consecutive_errors}")
+                
+                if self._consecutive_errors >= self._max_consecutive_errors:
+                    return self._result(False, f"Too many consecutive API errors: {error_type}: {e}", step, start_time)
+                
+                # Check for retryable errors
+                if "429" in str(e) or "quota" in str(e).lower() or "rate" in str(e).lower():
+                    print(f"  Rate limited, waiting 10s...")
+                    await asyncio.sleep(10)
+                    continue
+                elif "503" in str(e) or "500" in str(e) or "overloaded" in str(e).lower():
+                    print(f"  Server error, waiting 5s...")
+                    await asyncio.sleep(5)
+                    continue
+                else:
+                    return self._result(False, f"{error_type}: {e}", step, start_time)
             
             if not response.candidates:
                 print("[WARN] No candidates, retrying...")
@@ -309,6 +340,7 @@ STRICT RULES:
                     if step == 1 and self.session.session_id:
                         print(f"Session: https://fleetai.com/dashboard/sessions/{self.session.session_id}")
                 except Exception as e:
+                    print(f"  [WARN] Session log failed: {type(e).__name__}: {e}")
                     log_verbose(f"  [WARN] Session log failed: {e}")
             
             # Log all parts for debugging
@@ -370,9 +402,28 @@ STRICT RULES:
                     try:
                         result = await self._execute_tool(name, args)
                         log_verbose(f"    Result: isError={result.get('isError', False)}, content_types={[c.get('type') for c in result.get('content', [])]}")
+                        
+                        if result.get("isError"):
+                            self._consecutive_errors += 1
+                            error_text = ""
+                            for c in result.get("content", []):
+                                if c.get("type") == "text":
+                                    error_text = c.get("text", "")[:200]
+                            print(f"    Tool error: {error_text}")
+                        else:
+                            self._consecutive_errors = 0
                     except Exception as e:
-                        print(f"  Error: {e}")
-                        log_verbose(f"    Exception: {type(e).__name__}: {e}")
+                        self._consecutive_errors += 1
+                        error_type = type(e).__name__
+                        print(f"  Tool exception ({error_type}): {e}")
+                        print(f"  Consecutive errors: {self._consecutive_errors}/{self._max_consecutive_errors}")
+                        log_verbose(f"    Exception: {error_type}: {e}")
+                        
+                        # Check if this is a connection/MCP error that we should fail fast on
+                        if "connection" in str(e).lower() or "closed" in str(e).lower():
+                            print(f"  MCP connection lost, failing task")
+                            return self._result(False, f"MCP connection error: {e}", step, start_time)
+                        
                         result = {"content": [{"type": "text", "text": str(e)}], "isError": True}
                     
                     # Build function response with image embedded (per reference format)
@@ -414,7 +465,10 @@ STRICT RULES:
                 history.append(types.Content(role="model", parts=response_parts))
                 log_verbose(f"  Added {len(response_parts)} function response(s) to history")
         
-        return self._result(False, "Max steps reached", max_steps, start_time)
+        # Max steps reached - still mark as completed so verification runs
+        # The agent may have done the task but just didn't say "DONE"
+        print(f"\n⚠ Max steps ({max_steps}) reached - will still run verification")
+        return self._result(True, "Max steps reached", max_steps, start_time, "Max steps reached - task may be complete")
     
     def _result(self, completed: bool, error: Optional[str], steps: int, start_time: float, answer: str = None) -> Dict:
         """Build result dict."""
@@ -437,7 +491,7 @@ async def main():
         "job_id": os.environ.get("FLEET_JOB_ID"),
         "instance_id": os.environ.get("FLEET_INSTANCE_ID"),
         "model": os.environ.get("FLEET_MODEL", "gemini-2.5-pro"),
-        "max_steps": int(os.environ.get("FLEET_MAX_STEPS", "100")),
+        "max_steps": int(os.environ.get("FLEET_MAX_STEPS", "200")),
     }
     
     print(f"Gemini CUA Agent")

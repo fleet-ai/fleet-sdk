@@ -168,6 +168,50 @@ class AgentOrchestrator:
         self._available_ports: List[Tuple[int, int]] = []
         # Register global cleanup handlers
         _register_cleanup()
+        # Stats tracking
+        self._stats = {"started": 0, "completed": 0, "failed": 0, "errors": {}}
+
+    def _track_error(self, category: str, message: str):
+        """Track an error for summary statistics."""
+        if category not in self._stats["errors"]:
+            self._stats["errors"][category] = []
+        # Keep up to 5 examples per category
+        if len(self._stats["errors"][category]) < 5:
+            self._stats["errors"][category].append(message[:200])
+
+    def _print_stats(self):
+        """Print summary statistics."""
+        from rich.console import Console
+        from rich.table import Table
+        
+        console = Console()
+        
+        total = self._stats["started"]
+        completed = self._stats["completed"]
+        failed = self._stats["failed"]
+        
+        console.print()
+        console.print("[bold]Run Summary:[/bold]")
+        console.print(f"  Started:   {total}")
+        console.print(f"  Completed: [green]{completed}[/green] ({100*completed/total:.1f}%)" if total > 0 else "  Completed: 0")
+        console.print(f"  Failed:    [red]{failed}[/red] ({100*failed/total:.1f}%)" if total > 0 else "  Failed: 0")
+        
+        if self._stats["errors"]:
+            console.print()
+            console.print("[bold]Error Breakdown:[/bold]")
+            table = Table(show_header=True, header_style="bold")
+            table.add_column("Category")
+            table.add_column("Count")
+            table.add_column("Example")
+            
+            for category, examples in sorted(self._stats["errors"].items(), key=lambda x: -len(x[1])):
+                table.add_row(
+                    category,
+                    str(len(examples)),
+                    examples[0][:80] + "..." if len(examples[0]) > 80 else examples[0]
+                )
+            
+            console.print(table)
 
     async def _get_next_ports(self) -> Tuple[int, int]:
         """Get next available MCP port and VNC port."""
@@ -282,6 +326,9 @@ class AgentOrchestrator:
             session_logs = list(self._log_dir.glob("*.jsonl"))
             console.print(f"Logs: {self._log_dir}/ ({len(session_logs)} sessions)")
 
+        # Print summary statistics
+        self._print_stats()
+
         return final
 
     async def _build_docker_image(self, agent_path: Path):
@@ -334,15 +381,18 @@ class AgentOrchestrator:
         task_prompt = task.prompt
         short_key = task_key[:20]
 
-        logger.debug(f"[{short_key}] Starting")
+        self._stats["started"] += 1
+        logger.debug(f"[{short_key}] Starting (total started: {self._stats['started']})")
 
         env = None
         container_id = None
         port = None
         vnc_port = None
+        current_phase = "init"
 
         try:
             # 1. Create Fleet environment
+            current_phase = "create_env"
             logger.debug(f"[{short_key}] Creating env...")
             env = await make_async(
                 env_key=task.env_key,
@@ -356,6 +406,7 @@ class AgentOrchestrator:
             await asyncio.sleep(3)  # Wait for env to be ready
 
             # 2. Start Docker container with CUA server
+            current_phase = "start_container"
             port, vnc_port = await self._get_next_ports()
             logger.debug(f"[{short_key}] Starting container on port {port}...")
             container_id = await self._start_container(
@@ -373,11 +424,13 @@ class AgentOrchestrator:
                 print(f"[{short_key}] Browser:  http://localhost:{vnc_port}/vnc.html")
 
             # Wait for server to be ready
+            current_phase = "wait_for_server"
             logger.debug(f"[{short_key}] Waiting for CUA server...")
             await self._wait_for_server(port)
             logger.debug(f"[{short_key}] CUA server ready")
 
             # 3. Run agent
+            current_phase = "run_agent"
             logger.debug(f"[{short_key}] Running agent...")
             agent_result = await self._run_agent(
                 port=port,
@@ -388,14 +441,17 @@ class AgentOrchestrator:
             logger.debug(
                 f"[{short_key}] Agent done: completed={agent_result.completed}"
             )
+            if agent_result.error and agent_result.error != "Max steps reached":
+                print(f"[{short_key}] Agent error: {agent_result.error[:200]}")
 
             # 4. Run verification
+            current_phase = "verification"
             verification_success = None
             verification_score = None
             verifier_execution_id = None
 
             if agent_result.completed and task.verifier:
-                logger.info(f"[{task_key}] Running verification...")
+                logger.info(f"[{short_key}] Running verification...")
                 try:
                     v = await task.verify_detailed_async(
                         env=env,
@@ -407,9 +463,21 @@ class AgentOrchestrator:
                     verification_score = (
                         v.result if isinstance(v.result, (int, float)) else None
                     )
-                    logger.info(f"[{task_key}] Verification: {verification_success}")
+                    logger.info(f"[{short_key}] Verification: {verification_success}")
+                    if verification_success:
+                        self._stats["completed"] += 1
+                    else:
+                        self._stats["failed"] += 1
+                        print(f"[{short_key}] Verification FAILED: score={verification_score}")
                 except Exception as e:
-                    logger.error(f"[{task_key}] Verification error: {e}")
+                    logger.error(f"[{short_key}] Verification error: {e}")
+                    self._stats["failed"] += 1
+                    self._track_error("verification_error", str(e))
+            elif not agent_result.completed:
+                self._stats["failed"] += 1
+                error_msg = agent_result.error or "unknown"
+                self._track_error("agent_not_completed", error_msg)
+                print(f"[{short_key}] Agent did not complete: {error_msg}")
 
             # 5. Complete/fail session (session was created by agent, we just complete it)
             session_id = getattr(agent_result, "session_id", None)
@@ -439,11 +507,24 @@ class AgentOrchestrator:
             )
 
         except Exception as e:
-            logger.exception(f"[{short_key}] Failed: {e}")
+            import traceback
+            error_type = type(e).__name__
+            error_msg = str(e)
+            tb = traceback.format_exc()
+            
+            # Categorize the error
+            error_category = f"{current_phase}:{error_type}"
+            self._track_error(error_category, error_msg)
+            self._stats["failed"] += 1
+            
+            # Always print errors for visibility
+            print(f"[{short_key}] EXCEPTION in {current_phase}: {error_type}: {error_msg[:200]}")
+            logger.error(f"[{short_key}] Traceback:\n{tb}")
+            
             return TaskResult(
                 task_key=task_key,
                 task_prompt=task_prompt,
-                error=str(e),
+                error=f"[{current_phase}] {error_type}: {error_msg}",
                 execution_time_ms=int((time.time() - start) * 1000),
             )
 
@@ -687,7 +768,7 @@ async def run_agent(
     agent: str = "gemini_cua",
     model: str = "gemini-2.5-pro",
     max_concurrent: int = 4,
-    max_steps: int = 100,
+    max_steps: int = 200,
     timeout_seconds: int = 600,
     api_keys: Optional[Dict[str, str]] = None,
     headful: bool = False,

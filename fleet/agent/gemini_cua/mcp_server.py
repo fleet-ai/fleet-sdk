@@ -57,10 +57,20 @@ async def lifespan(app):
     )
     
     try:
+        logger.info("Starting Playwright browser...")
         await computer.start()
+        logger.info(f"Browser started, navigated to: {computer.current_url}")
         yield
+    except Exception as e:
+        logger.error(f"Browser startup FAILED: {type(e).__name__}: {e}")
+        raise
     finally:
-        await computer.stop()
+        logger.info("Stopping Playwright browser...")
+        try:
+            await computer.stop()
+            logger.info("Browser stopped")
+        except Exception as e:
+            logger.error(f"Browser stop error: {type(e).__name__}: {e}")
 
 
 mcp = FastMCP("cua-server", lifespan=lifespan, host="0.0.0.0", port=PORT)
@@ -74,7 +84,13 @@ mcp = FastMCP("cua-server", lifespan=lifespan, host="0.0.0.0", port=PORT)
 async def computer_screenshot() -> list:
     """Takes a screenshot of the computer screen. Use this to see what's on screen."""
     logger.info("computer_screenshot()")
-    return _screenshot_response(await computer.screenshot())
+    try:
+        result = await computer.screenshot()
+        logger.info(f"computer_screenshot() -> {len(result)} bytes")
+        return _screenshot_response(result)
+    except Exception as e:
+        logger.error(f"computer_screenshot() FAILED: {type(e).__name__}: {e}")
+        raise
 
 
 @mcp.tool()
@@ -88,7 +104,11 @@ async def mouse_click(x: int, y: int, button: str, repeats: int = 1) -> None:
         repeats: The number of times to click. Default is 1.
     """
     logger.info(f"mouse_click({x}, {y}, {button}, {repeats})")
-    await computer.mouse_click(_dx(x), _dy(y), button, repeats)
+    try:
+        await computer.mouse_click(_dx(x), _dy(y), button, repeats)
+    except Exception as e:
+        logger.error(f"mouse_click FAILED: {type(e).__name__}: {e}")
+        raise
 
 
 @mcp.tool()
@@ -172,7 +192,11 @@ async def type_text(input_text: str, press_enter: bool) -> None:
         press_enter: Whether to press enter after typing.
     """
     logger.info(f"type_text({input_text[:50]}{'...' if len(input_text) > 50 else ''}, enter={press_enter})")
-    await computer.type_text(input_text, press_enter)
+    try:
+        await computer.type_text(input_text, press_enter)
+    except Exception as e:
+        logger.error(f"type_text FAILED: {type(e).__name__}: {e}")
+        raise
 
 
 @mcp.tool()
