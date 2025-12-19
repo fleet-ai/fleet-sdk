@@ -329,7 +329,7 @@ class AgentOrchestrator:
         # Print summary statistics
         self._print_stats()
 
-        return final
+        return final, self._job_id
 
     async def _build_docker_image(self, agent_path: Path):
         """Build Docker image for CUA server."""
@@ -773,7 +773,7 @@ async def run_agent(
     api_keys: Optional[Dict[str, str]] = None,
     headful: bool = False,
     verbose: bool = False,
-) -> List[TaskResult]:
+) -> Tuple[List[TaskResult], str]:
     """Run agent on Fleet tasks.
 
     Args:
@@ -789,7 +789,7 @@ async def run_agent(
         verbose: Enable verbose agent logging
 
     Returns:
-        List of TaskResult
+        Tuple of (List of TaskResult, job_id)
     """
     config = AgentConfig(
         project_key=project_key,

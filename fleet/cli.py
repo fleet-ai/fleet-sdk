@@ -94,6 +94,53 @@ def get_client() -> Fleet:
     return Fleet(api_key=api_key, base_url=base_url)
 
 
+def _run_oversight(job_id: str, model: str = "anthropic/claude-sonnet-4"):
+    """Run oversight summarization on a completed job."""
+    import httpx
+    
+    api_key = os.getenv("FLEET_API_KEY")
+    if not api_key:
+        console.print("[yellow]Warning:[/yellow] FLEET_API_KEY not set, skipping oversight")
+        return
+    
+    base_url = os.getenv("FLEET_BASE_URL", CLI_DEFAULT_BASE_URL)
+    oversight_url = f"{base_url}/v1/summarize/job"
+    
+    console.print()
+    console.print("[bold]Running Oversight Analysis...[/bold]")
+    
+    try:
+        with httpx.Client(timeout=300) as client:
+            response = client.post(
+                oversight_url,
+                headers={
+                    "accept": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "job_id": job_id,
+                    "model": model,
+                    "max_context_tokens": 180000,
+                    "force_new_summary": False,
+                    "max_concurrent": 20,
+                },
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                console.print(f"[green]✓[/green] Oversight analysis started")
+                if "summary_id" in result:
+                    console.print(f"  Summary ID: [cyan]{result['summary_id']}[/cyan]")
+                # Show link to dashboard
+                console.print(f"  View: [cyan]https://fleetai.com/dashboard/jobs/{job_id}[/cyan]")
+            else:
+                console.print(f"[yellow]Warning:[/yellow] Oversight API returned {response.status_code}")
+                console.print(f"  {response.text[:200]}")
+    except Exception as e:
+        console.print(f"[yellow]Warning:[/yellow] Oversight request failed: {e}")
+
+
 # Jobs commands
 
 
@@ -326,6 +373,15 @@ def list_job_sessions(
         console.print(f"[dim]  Session transcript: flt sessions transcript {first_session_id}[/dim]")
 
 
+@jobs_app.command("oversight")
+def run_job_oversight(
+    job_id: str = typer.Argument(..., help="Job ID to analyze"),
+    model: str = typer.Option("anthropic/claude-sonnet-4", "--model", "-m", help="Model for oversight analysis"),
+):
+    """Run AI oversight analysis on a job."""
+    _run_oversight(job_id, model)
+
+
 # Sessions commands
 
 
@@ -488,6 +544,8 @@ def _run_local_agent(
     output_json: bool,
     verbose: bool = False,
     headful: bool = False,
+    oversight: bool = False,
+    oversight_model: str = "anthropic/claude-sonnet-4",
 ):
     """Run agent locally with Docker-based browser control."""
     import asyncio
@@ -563,8 +621,9 @@ def _run_local_agent(
     console.print("[dim]Starting agent...[/dim]")
     console.print()
     
+    job_id = None
     try:
-        results = asyncio.run(run())
+        results, job_id = asyncio.run(run())
     except KeyboardInterrupt:
         console.print()
         console.print("[yellow]Cancelled.[/yellow]")
@@ -633,6 +692,10 @@ def _run_local_agent(
         console.print(f"[bold]Pass Rate:[/bold] [{color}]{passed}/{total} ({rate:.1f}%)[/{color}]")
         if errors:
             console.print(f"[bold]Errors:[/bold] [red]{errors}[/red]")
+    
+    # Run oversight if requested
+    if oversight and job_id:
+        _run_oversight(job_id, oversight_model)
 
 
 def _listen_for_detach_key(stop_event: threading.Event):
@@ -688,6 +751,9 @@ def eval_run(
     local: Optional[str] = typer.Option(None, "--local", "-l", help="Run locally. Use 'gemini_cua' for built-in or path for custom agent"),
     headful: bool = typer.Option(False, "--headful", help="Show browser via noVNC (local mode)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show debug output"),
+    # Oversight
+    oversight: bool = typer.Option(False, "--oversight", help="Run AI oversight analysis on job completion"),
+    oversight_model: str = typer.Option("anthropic/claude-sonnet-4", "--oversight-model", help="Model for oversight analysis"),
 ):
     """
     Run an evaluation on a project or specific tasks.
@@ -721,13 +787,15 @@ def eval_run(
             task_keys=task_keys,
             model=model[0] if model else "gemini-2.5-pro",
             agent=local if local else "gemini_cua",
-            max_steps=max_steps or 100,
+            max_steps=max_steps or 200,
             max_duration=max_duration,
             max_concurrent=max_concurrent,
             byok=byok,
             output_json=output_json,
             verbose=verbose,
             headful=headful,
+            oversight=oversight,
+            oversight_model=oversight_model,
         )
         return
     
@@ -938,6 +1006,10 @@ def eval_run(
                         console.print(f"  {task_name}: {tg.passed_sessions}/{tg.total_sessions} ({task_rate:.0f}%)")
         except:
             pass
+        
+        # Run oversight if requested and job completed (not detached)
+        if oversight and not detached:
+            _run_oversight(job_id, oversight_model)
 
     finally:
         # Signal the keyboard listener thread to stop
@@ -948,6 +1020,8 @@ def eval_run(
             console.print()
             console.print("[yellow]Detached. Eval continues running in background.[/yellow]")
             console.print(f"[dim]Check status: flt jobs get {job_id}[/dim]")
+            if oversight:
+                console.print(f"[dim]Run oversight manually: flt jobs oversight {job_id}[/dim]")
 
 
 def main():
