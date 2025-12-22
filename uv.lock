@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.9"
 resolution-markers = [
     "python_full_version >= '3.10'",
@@ -661,7 +661,7 @@ wheels = [
 
 [[package]]
 name = "fleet-python"
-version = "0.2.92"
+version = "0.2.95"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
