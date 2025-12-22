@@ -1439,9 +1439,35 @@ class SyncSnapshotDiff:
         This version supports field-level specifications for added/removed rows,
         allowing users to specify expected field values instead of just whole-row specs.
         """
-        # Special case: empty allowed_changes means no changes should have occurred
-        if not allowed_changes:
-            return self._expect_no_changes()
+        resource = self.after.resource
+        if resource.client is not None and resource._mode == "http":
+            api_diff = None
+            try:
+                payload = {}
+                if self.ignore_config:
+                    payload["ignore_config"] = {
+                        "tables": list(self.ignore_config.tables),
+                        "fields": list(self.ignore_config.fields),
+                        "table_fields": {
+                            table: list(fields) for table, fields in self.ignore_config.table_fields.items()
+                        }
+                    }
+                response = resource.client.request(
+                    "POST",
+                    "/diff/structured",
+                    json=payload,
+                )
+                result = response.json()
+                if result.get("success") and "diff" in result:
+                    api_diff = result["diff"]
+            except Exception as e:
+                # Fall back to local diff if API call fails
+                print(f"Warning: Failed to fetch structured diff from API: {e}")
+                print("Falling back to local diff computation...")
+            
+            # Validate outside try block so AssertionError propagates
+            if api_diff is not None:
+                return self._validate_diff_against_allowed_changes(api_diff, allowed_changes)
 
         # Fall back to full diff for v2 (no targeted optimization yet)
         diff = self._collect()
