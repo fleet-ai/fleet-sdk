@@ -236,13 +236,18 @@ class AgentOrchestrator:
         from fleet._async import load_tasks
         from rich.console import Console
         from rich.live import Live
+        from rich.panel import Panel
         from rich.spinner import Spinner
 
         console = Console()
 
         # Create job via Fleet API (name generated server-side)
         self._job_id = await fleet.job_async()
-        console.print(f"Job: https://fleetai.com/dashboard/jobs/{self._job_id}")
+        console.print(Panel(
+            f"[bold]Live agent traces[/bold]\n\n  https://www.fleetai.com/dashboard/jobs/{self._job_id}",
+            border_style="cyan",
+        ))
+        console.print()
 
         # Create log directory: ~/.fleet/logs/{job_id}/
         self._log_dir = Path.home() / ".fleet" / "logs" / self._job_id
@@ -278,6 +283,9 @@ class AgentOrchestrator:
 
         semaphore = asyncio.Semaphore(self.config.max_concurrent)
         results = [None] * len(tasks)
+        completed_count = 0
+        passed_count = 0
+        total_count = len(tasks)
 
         with Progress(
             SpinnerColumn(),
@@ -286,12 +294,23 @@ class AgentOrchestrator:
             TaskProgressColumn(),
             console=console,
         ) as progress:
-            task_progress = progress.add_task("Running tasks", total=len(tasks))
+            task_progress = progress.add_task(
+                f"[cyan]Running ({completed_count}/{total_count}) | {passed_count} passed[/cyan]",
+                total=len(tasks)
+            )
 
             async def run_with_semaphore(idx, task):
+                nonlocal completed_count, passed_count
                 async with semaphore:
                     result = await self._run_task(task)
-                    progress.update(task_progress, advance=1)
+                    completed_count += 1
+                    if result.verification_success:
+                        passed_count += 1
+                    progress.update(
+                        task_progress,
+                        advance=1,
+                        description=f"[cyan]Running ({completed_count}/{total_count}) | {passed_count} passed[/cyan]"
+                    )
                     return idx, result
 
             completed = await asyncio.gather(
@@ -329,7 +348,7 @@ class AgentOrchestrator:
         # Print summary statistics
         self._print_stats()
 
-        return final
+        return final, self._job_id
 
     async def _build_docker_image(self, agent_path: Path):
         """Build Docker image for CUA server."""
@@ -670,6 +689,7 @@ class AgentOrchestrator:
 
         env.update(
             {
+                "PYTHONUNBUFFERED": "1",  # Ensure real-time output
                 "FLEET_MCP_URL": f"http://localhost:{port}",
                 "FLEET_SESSION_LOG": str(
                     session_log_file
@@ -695,9 +715,36 @@ class AgentOrchestrator:
             env=env,
         )
 
+        short_key = task_key[:20]
+        stdout_lines = []
+        stderr_lines = []
+
+        async def read_stdout():
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                line_str = line.decode().rstrip()
+                stdout_lines.append(line_str)
+                # Show step updates in real-time
+                if line_str.startswith("STEP:") or line_str.startswith("Step "):
+                    print(f"[{short_key}] {line_str}")
+                elif self.config.verbose:
+                    logger.info(f"[{short_key}] {line_str}")
+
+        async def read_stderr():
+            while True:
+                line = await proc.stderr.readline()
+                if not line:
+                    break
+                line_str = line.decode().rstrip()
+                stderr_lines.append(line_str)
+                if self.config.verbose:
+                    logger.warning(f"[{short_key}] stderr: {line_str}")
+
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
+            await asyncio.wait_for(
+                asyncio.gather(read_stdout(), read_stderr(), proc.wait()),
                 timeout=self.config.timeout_seconds,
             )
         except asyncio.TimeoutError:
@@ -710,8 +757,8 @@ class AgentOrchestrator:
             )
 
         # Parse result from stdout/stderr
-        stdout_str = stdout.decode()
-        stderr_str = stderr.decode()
+        stdout_str = "\n".join(stdout_lines)
+        stderr_str = "\n".join(stderr_lines)
 
         # Show full output in verbose mode
         if self.config.verbose:
@@ -725,7 +772,6 @@ class AgentOrchestrator:
 
         # Always show stderr if agent crashed (non-zero exit or has stderr)
         if proc.returncode != 0 or stderr_str:
-            short_key = task_key[:20]
             if stderr_str:
                 print(f"[{short_key}] Agent stderr: {stderr_str[:500]}")
 
@@ -773,7 +819,7 @@ async def run_agent(
     api_keys: Optional[Dict[str, str]] = None,
     headful: bool = False,
     verbose: bool = False,
-) -> List[TaskResult]:
+) -> Tuple[List[TaskResult], str]:
     """Run agent on Fleet tasks.
 
     Args:
@@ -789,7 +835,7 @@ async def run_agent(
         verbose: Enable verbose agent logging
 
     Returns:
-        List of TaskResult
+        Tuple of (List of TaskResult, job_id)
     """
     config = AgentConfig(
         project_key=project_key,

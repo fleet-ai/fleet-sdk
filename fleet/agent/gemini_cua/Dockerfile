@@ -18,13 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python deps
+# Install Python deps (includes fleet-python for utils like fleet.utils.playwright)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && playwright install chromium
 
-# Copy server files (all from same directory)
-COPY playwright_utils.py .
-COPY mcp_server.py .
+# Copy MCP server files (standalone scripts that import from installed fleet-python)
+COPY mcp_server/ ./mcp_server/
+
+# Copy start script
 COPY start.sh .
 RUN chmod +x start.sh
 
