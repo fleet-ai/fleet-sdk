@@ -277,7 +277,8 @@ def create_job(
 
     console.print(f"[green]Job created successfully![/green]")
     console.print(f"  Job ID: [cyan]{result.job_id}[/cyan]")
-    console.print(f"  Workflow ID: {result.workflow_job_id}")
+    if result.workflow_job_id:
+        console.print(f"  Workflow ID: {result.workflow_job_id}")
     console.print(f"  Status: {format_status(result.status)}")
     if result.name:
         console.print(f"  Name: {result.name}")
@@ -587,16 +588,14 @@ def _run_local_agent(
     if verbose:
         console.print(f"[dim]API keys configured: {list(api_keys.keys())}[/dim]")
     
-    # Display config
+    # Display config (matching remote format)
+    suite_name = project_key if project_key else (', '.join(task_keys) if task_keys else "all tasks")
     console.print()
-    console.print("[green bold]Running Agent[/green bold]")
+    console.print("[green bold]Eval started[/green bold] [dim](local)[/dim]")
     console.print()
-    if task_keys:
-        console.print(f"  [bold]Tasks[/bold]       {', '.join(task_keys)}")
-    else:
-        console.print(f"  [bold]Project[/bold]     {project_key or 'all tasks'}")
+    console.print(f"  [bold]Suite[/bold]       {suite_name}")
+    console.print(f"  [bold]Models[/bold]      {model}")
     console.print(f"  [bold]Agent[/bold]       {agent}")
-    console.print(f"  [bold]Model[/bold]       {model}")
     console.print(f"  [bold]Max Steps[/bold]   {max_steps}")
     console.print(f"  [bold]Concurrent[/bold]  {max_concurrent}")
     if headful:
@@ -618,7 +617,7 @@ def _run_local_agent(
             verbose=verbose,
         )
     
-    console.print("[dim]Starting agent...[/dim]")
+    console.print("[dim]Starting...[/dim]")
     console.print()
     
     job_id = None
@@ -650,33 +649,56 @@ def _run_local_agent(
         console.print(json.dumps(output, indent=2))
         return
     
+    # Show dashboard link panel (matching remote format)
+    console.print()
+    if job_id:
+        console.print(Panel(
+            f"[bold]Live agent traces[/bold]\n\n  https://www.fleetai.com/dashboard/jobs/{job_id}",
+            border_style="cyan",
+        ))
+        console.print()
+        console.print("[dim]Tips:[/dim]")
+        console.print(f"[dim]  Job details:        flt jobs get {job_id}[/dim]")
+        console.print(f"[dim]  Job sessions:       flt jobs sessions {job_id}[/dim]")
+        console.print(f"[dim]  Session transcript: flt sessions transcript <session-id>[/dim]")
+    
     # Summary
     console.print()
     console.print("[bold]Results[/bold]")
     console.print("-" * 60)
     
-    passed = failed = errors = 0
+    errors = 0
+    scores = []
+    completed = 0
     
     for r in results:
         if r.error:
             status = "[red]ERROR[/red]"
             errors += 1
-        elif r.verification_success:
+        elif r.verification_score is not None:
+            scores.append(r.verification_score)
+            completed += 1
+            # Color based on score
+            if r.verification_score >= 0.7:
+                status = f"[green]{r.verification_score:.2f}[/green]"
+            elif r.verification_score >= 0.4:
+                status = f"[yellow]{r.verification_score:.2f}[/yellow]"
+            else:
+                status = f"[red]{r.verification_score:.2f}[/red]"
+        elif r.verification_success is True:
             status = "[green]PASS[/green]"
-            passed += 1
+            completed += 1
         elif r.verification_success is False:
             status = "[red]FAIL[/red]"
-            failed += 1
+            completed += 1
         elif r.agent_result and r.agent_result.completed:
             status = "[yellow]DONE[/yellow]"
-            passed += 1
+            completed += 1
         else:
             status = "[red]INCOMPLETE[/red]"
-            failed += 1
         
         key = r.task_key[:40] + "..." if len(r.task_key) > 40 else r.task_key
-        score = f" ({r.verification_score:.2f})" if r.verification_score is not None else ""
-        console.print(f"  {status}{score}  {key}")
+        console.print(f"  {status}  {key}")
         
         if r.error:
             # Show first 100 chars of error
@@ -687,9 +709,11 @@ def _run_local_agent(
     
     total = len(results)
     if total > 0:
-        rate = (passed / total) * 100
-        color = "green" if rate >= 70 else "yellow" if rate >= 40 else "red"
-        console.print(f"[bold]Pass Rate:[/bold] [{color}]{passed}/{total} ({rate:.1f}%)[/{color}]")
+        console.print(f"[bold]Completed:[/bold] {completed}/{total}")
+        if scores:
+            avg_score = sum(scores) / len(scores)
+            score_color = "green" if avg_score >= 0.7 else "yellow" if avg_score >= 0.4 else "red"
+            console.print(f"[bold]Avg. Score:[/bold] [{score_color}]{avg_score:.2f}[/{score_color}]")
         if errors:
             console.print(f"[bold]Errors:[/bold] [red]{errors}[/red]")
     
@@ -821,6 +845,7 @@ def eval_run(
             name=name,
             pass_k=pass_k,
             project_key=project_key if project_key else None,
+            task_keys=task_keys if task_keys else None,
             max_steps=max_steps,
             max_duration_minutes=max_duration,
             max_concurrent_per_model=max_concurrent,
@@ -857,9 +882,12 @@ def eval_run(
     
     # Display summary
     suite_name = project_key if project_key else "all tasks"
+    job_name = name or result.name  # Use provided name or server-generated name
     console.print()
     console.print("[green bold]Eval started[/green bold]")
     console.print()
+    if job_name:
+        console.print(f"  [bold]Name[/bold]      {job_name}")
     console.print(f"  [bold]Suite[/bold]     {suite_name}")
     console.print(f"  [bold]Models[/bold]    {', '.join(model)}")
     console.print(f"  [bold]Passes[/bold]    {pass_k}")

@@ -457,7 +457,7 @@ class JobCreateResponse(BaseModel):
     """Response from creating a job."""
 
     job_id: str = Field(..., title="Job Id")
-    workflow_job_id: str = Field(..., title="Workflow Job Id")
+    workflow_job_id: Optional[str] = Field(None, title="Workflow Job Id")
     status: str = Field(..., title="Status")
     name: Optional[str] = Field(None, title="Name")
 

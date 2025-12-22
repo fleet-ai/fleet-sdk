@@ -1,3 +1,4 @@
+fleet-python
 playwright>=1.40.0
 mcp[cli]>=1.2.0
 uvicorn>=0.30.0

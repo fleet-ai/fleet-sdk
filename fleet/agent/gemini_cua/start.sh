@@ -26,6 +26,5 @@ if [ "$HEADLESS" != "true" ]; then
     echo ""
 fi
 
-# Start the MCP server
-exec python mcp_server.py
-
+# Start the MCP server (standalone script, imports from installed fleet-python)
+exec python mcp_server/main.py
