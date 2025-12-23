@@ -172,6 +172,7 @@ from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
 from .resources.browser import AsyncBrowserResource
 from .resources.mcp import AsyncMCPResource
+from .resources.api import AsyncAPIResource
 
 logger = logging.getLogger(__name__)
 
@@ -384,6 +385,24 @@ class AsyncEnv(EnvironmentBase):
 
     def browser(self, name: str = "cdp") -> AsyncBrowserResource:
         return self.instance.browser(name)
+
+    def api(self, name: str = "api") -> AsyncAPIResource:
+        """Get an API resource for making HTTP requests to the app's API.
+
+        Args:
+            name: Name for the API resource (default: "api")
+
+        Returns:
+            AsyncAPIResource for making HTTP requests
+        """
+        # Use urls.api if available, otherwise fall back to urls.root + "/raw"
+        if self.urls and self.urls.api:
+            base_url = self.urls.api
+        elif self.urls and self.urls.root:
+            base_url = f"{self.urls.root.rstrip('/')}/raw"
+        else:
+            raise ValueError("No API URL configured for this environment")
+        return self.instance.api(name, base_url)
 
     @property
     def mcp(self) -> AsyncMCPResource:
