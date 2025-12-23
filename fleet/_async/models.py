@@ -120,6 +120,7 @@ class ResourceMode(Enum):
 class ResourceType(Enum):
     sqlite = "sqlite"
     cdp = "cdp"
+    api = "api"
 
 
 class RestoreRequest(BaseModel):

@@ -91,6 +91,7 @@ class ResourceMode(Enum):
 class ResourceType(Enum):
     db = "sqlite"
     cdp = "cdp"
+    api = "api"
 
 
 class TableSchema(BaseModel):

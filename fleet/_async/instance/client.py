@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from ..resources.sqlite import AsyncSQLiteResource
 from ..resources.browser import AsyncBrowserResource
+from ..resources.api import AsyncAPIResource
 from ..resources.base import Resource
 
 from fleet.verifiers import DatabaseSnapshot
@@ -23,6 +24,7 @@ from ...instance.models import (
     ResetResponse,
     Resource as ResourceModel,
     ResourceType,
+    ResourceMode,
     HealthResponse,
     ExecuteFunctionRequest,
     ExecuteFunctionResponse,
@@ -35,6 +37,7 @@ logger = logging.getLogger(__name__)
 RESOURCE_TYPES = {
     ResourceType.db: AsyncSQLiteResource,
     ResourceType.cdp: AsyncBrowserResource,
+    ResourceType.api: AsyncAPIResource,
 }
 
 ValidatorType = Callable[
@@ -100,6 +103,29 @@ class AsyncInstanceClient:
     def browser(self, name: str) -> AsyncBrowserResource:
         return AsyncBrowserResource(
             self._resources_state[ResourceType.cdp.value][name], self.client
+        )
+
+    def api(self, name: str, base_url: str) -> AsyncAPIResource:
+        """
+        Returns an API resource for making HTTP requests.
+
+        Args:
+            name: The name of the API resource
+            base_url: The base URL for API requests
+
+        Returns:
+            An AsyncAPIResource for making HTTP requests
+        """
+        # Create a minimal resource model for API
+        resource_model = ResourceModel(
+            name=name,
+            type=ResourceType.api,
+            mode=ResourceMode.rw,
+        )
+        return AsyncAPIResource(
+            resource_model,
+            base_url=base_url,
+            client=self.client.httpx_client if self.client else None,
         )
 
     async def resources(self) -> List[Resource]:
