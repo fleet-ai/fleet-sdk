@@ -241,7 +241,7 @@ Remote traceback:
 
             if needs_upload:
                 # Need to upload bundle to S3
-                # logger.info(f"Uploading bundle {bundle_sha[:8]}... for {self.key}")
+                logger.info(f"Uploading bundle {bundle_sha[:8]}... for {self.key}")
                 bundle_data, _ = self._get_or_create_bundle()
 
                 response = await env.execute_verifier_remote(
@@ -260,7 +260,7 @@ Remote traceback:
 
             else:
                 # Bundle already available - execute without upload
-                # logger.info(f"Bundle {bundle_sha[:8]}... already cached for {self.key}")
+                logger.info(f"Bundle {bundle_sha[:8]}... already cached for {self.key}")
                 response = await env.execute_verifier_remote(
                     bundle_data=b"",  # Empty bundle since it's cached
                     bundle_sha=bundle_sha,

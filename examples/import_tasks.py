@@ -1,6 +1,7 @@
 import asyncio
 import argparse
 import json
+import os
 import sys
 from collections import defaultdict
 from typing import Dict, List, Tuple
@@ -183,8 +184,8 @@ async def run_verifier_sanity_check(
             print(f"  - {task_key}: {error_msg}")
         if len(errors) > 10:
             print(f"  ... and {len(errors) - 10} more")
-        print("\nFix the verifiers and try again.")
-        return False, errors
+        print("\nSkipping the tasks with errors.")
+        return True, errors
     else:
         print("✓ All verifiers passed!")
         return True, {}
@@ -291,10 +292,36 @@ async def main():
     print(f"✓ Loaded {len(tasks)} tasks")
 
     # Run sanity check (unless skipped)
+    import_file = args.json_file
     if not args.skip_sanity_check:
         success, errors = await run_verifier_sanity_check(tasks, client)
-        if not success:
-            sys.exit(1)
+
+        # Handle filtering if there are errors
+        if errors:
+            if not success:
+                # Critical failure (e.g. instance creation)
+                print("\n✗ Critical error during sanity check. Exiting.")
+                sys.exit(1)
+            
+            print(f"\nFiltering out {len(errors)} failed tasks...")
+            
+            # Filter tasks_data to keep only valid ones
+            tasks_data = [
+                t for t in tasks_data 
+                if (t.get("key") or t.get("id")) not in errors
+            ]
+            
+            if not tasks_data:
+                print("No valid tasks remaining. Exiting.")
+                sys.exit(1)
+                
+            # Create a new JSON file for the filtered tasks
+            base, ext = os.path.splitext(args.json_file)
+            import_file = f"{base}_filtered{ext}"
+            
+            with open(import_file, "w", encoding="utf-8") as f:
+                json.dump(tasks_data, f, indent=2)
+            print(f"✓ Saved {len(tasks_data)} valid tasks to '{import_file}'")
 
         # If only doing sanity check, exit successfully here
         if args.sanity_check_only:
@@ -307,16 +334,16 @@ async def main():
     # Confirmation prompt (unless --yes flag is provided)
     if not args.yes:
         print("\n" + "=" * 60)
-        response = input("Type 'YES' to proceed with import: ")
+        response = input(f"Type 'YES' to proceed with import from '{import_file}': ")
         if response != "YES":
             print("Import cancelled.")
             sys.exit(0)
 
     # Import tasks
-    print("\nImporting tasks...")
+    print(f"\nImporting tasks from {import_file}...")
     try:
         results = await fleet.import_tasks_async(
-            args.json_file, project_key=args.project_key
+            import_file, project_key=args.project_key
         )
         print(f"\n✓ Successfully imported {len(results)} task(s)")
     except Exception as e:

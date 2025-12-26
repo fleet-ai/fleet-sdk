@@ -383,6 +383,42 @@ class AsyncEnv(EnvironmentBase):
     def db(self, name: str = "current") -> AsyncSQLiteResource:
         return self.instance.db(name)
 
+    async def diff_sql(self) -> Optional[str]:
+        """Fetch a lightweight SQL diff (seed -> current) from the instance manager.
+
+        Returns:
+            The diff string if available, else None.
+        """
+        payload: Dict[str, Any] = {}
+
+        def _extract_diff(data: Any) -> Optional[str]:
+            if isinstance(data, dict):
+                diff_val = data.get("diff")
+                if isinstance(diff_val, str):
+                    # Some implementations also include success=false; treat missing/empty as unavailable.
+                    return diff_val
+            return None
+
+        # Preferred: SQL diff
+        try:
+            resp = await self.instance.client.request("POST", "/diff/sql", json=payload)
+            diff_text = _extract_diff(resp.json())
+            if diff_text:
+                return diff_text
+        except Exception:
+            pass
+
+        # Fallback: generic diff endpoint
+        try:
+            resp = await self.instance.client.request("POST", "/diff", json=payload)
+            diff_text = _extract_diff(resp.json())
+            if diff_text:
+                return diff_text
+        except Exception:
+            pass
+
+        return None
+
     def browser(self, name: str = "cdp") -> AsyncBrowserResource:
         return self.instance.browser(name)
 
@@ -1728,18 +1764,18 @@ async def _execute_verifier_remote(
     if verifier_runtime_version:
         request_data["verifier_runtime_version"] = verifier_runtime_version
 
-    # Debug logging
-    # logger.debug(
-    #     f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}"
-    # )
-    # logger.debug(f"Request has bundle: {needs_upload}")
-    # logger.debug(f"Using client with base_url: {client.base_url}")
-    # logger.debug(f"Request data keys: {list(request_data.keys())}")
-    # logger.debug(
-    #     f"Bundle size: {len(request_data.get('bundle', ''))} chars"
-    #     if "bundle" in request_data
-    #     else "No bundle"
-    # )
+    #Debug logging
+    logger.debug(
+        f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}"
+    )
+    logger.debug(f"Request has bundle: {needs_upload}")
+    logger.debug(f"Using client with base_url: {client.base_url}")
+    logger.debug(f"Request data keys: {list(request_data.keys())}")
+    logger.debug(
+        f"Bundle size: {len(request_data.get('bundle', ''))} chars"
+        if "bundle" in request_data
+        else "No bundle"
+    )
 
     # Note: This should be called on the instance URL, not the orchestrator
     # The instance has manager URLs for verifier execution

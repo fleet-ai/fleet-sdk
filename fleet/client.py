@@ -395,6 +395,41 @@ class SyncEnv(EnvironmentBase):
     def db(self, name: str = "current") -> SQLiteResource:
         return self.instance.db(name)
 
+    def diff_sql(self) -> Optional[str]:
+        """Fetch a lightweight SQL diff (seed -> current) from the instance manager.
+
+        Returns:
+            The diff string if available, else None.
+        """
+        payload: Dict[str, Any] = {}
+
+        def _extract_diff(data: Any) -> Optional[str]:
+            if isinstance(data, dict):
+                diff_val = data.get("diff")
+                if isinstance(diff_val, str):
+                    return diff_val
+            return None
+
+        # Preferred: SQL diff
+        try:
+            resp = self.instance.client.request("POST", "/diff/sql", json=payload)
+            diff_text = _extract_diff(resp.json())
+            if diff_text:
+                return diff_text
+        except Exception:
+            pass
+
+        # Fallback: generic diff endpoint
+        try:
+            resp = self.instance.client.request("POST", "/diff", json=payload)
+            diff_text = _extract_diff(resp.json())
+            if diff_text:
+                return diff_text
+        except Exception:
+            pass
+
+        return None
+
     def browser(self, name: str = "cdp") -> BrowserResource:
         return self.instance.browser(name)
 
