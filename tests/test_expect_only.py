@@ -1919,3 +1919,675 @@ def test_deletion_with_bulk_fields_spec():
     finally:
         os.unlink(before_db)
         os.unlink(after_db)
+
+
+# ============================================================================
+# Tests for targeted query optimization edge cases
+# These tests verify the _expect_only_targeted_v2 optimization works correctly
+# ============================================================================
+
+
+def test_targeted_empty_allowed_changes_no_changes():
+    """Test that empty allowed_changes with no actual changes passes (uses _expect_no_changes)."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, status TEXT)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'active')")
+        conn.execute("INSERT INTO users VALUES (2, 'Bob', 'inactive')")
+        conn.commit()
+        conn.close()
+
+        # Same data in after database
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, status TEXT)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'active')")
+        conn.execute("INSERT INTO users VALUES (2, 'Bob', 'inactive')")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Empty allowed_changes should pass when there are no changes
+        before.diff(after).expect_only_v2([])
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_targeted_empty_allowed_changes_with_changes_fails():
+    """Test that empty allowed_changes with actual changes fails."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, status TEXT)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'active')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, status TEXT)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'active')")
+        conn.execute("INSERT INTO users VALUES (2, 'Bob', 'inactive')")  # New row!
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Empty allowed_changes should fail when there are changes
+        # The error message depends on the optimization path taken
+        with pytest.raises(AssertionError):
+            before.diff(after).expect_only_v2([])
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_targeted_unmentioned_table_row_added_fails():
+    """Test that row added in an unmentioned table is detected by targeted optimization."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice')")
+        conn.execute("INSERT INTO orders VALUES (1, 1)")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice')")
+        conn.execute("INSERT INTO users VALUES (2, 'Bob')")  # Allowed change
+        conn.execute("INSERT INTO orders VALUES (1, 1)")
+        conn.execute("INSERT INTO orders VALUES (2, 2)")  # Sneaky unmentioned change!
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Only mention users table - orders change should be detected
+        with pytest.raises(AssertionError, match="orders"):
+            before.diff(after).expect_only_v2(
+                [
+                    {
+                        "table": "users",
+                        "pk": 2,
+                        "type": "insert",
+                        "fields": [("id", 2), ("name", "Bob")],
+                    },
+                ]
+            )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_targeted_unmentioned_table_row_deleted_fails():
+    """Test that row deleted in an unmentioned table is detected."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE logs (id INTEGER PRIMARY KEY, message TEXT)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice')")
+        conn.execute("INSERT INTO logs VALUES (1, 'Log entry 1')")
+        conn.execute("INSERT INTO logs VALUES (2, 'Log entry 2')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE logs (id INTEGER PRIMARY KEY, message TEXT)"
+        )
+        conn.execute("INSERT INTO users VALUES (1, 'Alice Updated')")  # Allowed change
+        conn.execute("INSERT INTO logs VALUES (1, 'Log entry 1')")
+        # logs id=2 deleted - not mentioned!
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Only mention users table - logs deletion should be detected
+        with pytest.raises(AssertionError, match="logs"):
+            before.diff(after).expect_only_v2(
+                [
+                    {
+                        "table": "users",
+                        "pk": 1,
+                        "type": "modify",
+                        "resulting_fields": [("name", "Alice Updated")],
+                        "no_other_changes": True,
+                    },
+                ]
+            )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_targeted_multiple_changes_same_table():
+    """Test targeted optimization with multiple changes to the same table."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, quantity INTEGER)"
+        )
+        conn.execute("INSERT INTO items VALUES (1, 'Widget', 10)")
+        conn.execute("INSERT INTO items VALUES (2, 'Gadget', 20)")
+        conn.execute("INSERT INTO items VALUES (3, 'Gizmo', 30)")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, quantity INTEGER)"
+        )
+        conn.execute("INSERT INTO items VALUES (1, 'Widget Updated', 15)")  # Modified
+        conn.execute("INSERT INTO items VALUES (2, 'Gadget', 20)")  # Unchanged
+        # Item 3 deleted
+        conn.execute("INSERT INTO items VALUES (4, 'New Item', 40)")  # Added
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # All changes properly specified
+        before.diff(after).expect_only_v2(
+            [
+                {
+                    "table": "items",
+                    "pk": 1,
+                    "type": "modify",
+                    "resulting_fields": [("name", "Widget Updated"), ("quantity", 15)],
+                    "no_other_changes": True,
+                },
+                {
+                    "table": "items",
+                    "pk": 3,
+                    "type": "delete",
+                },
+                {
+                    "table": "items",
+                    "pk": 4,
+                    "type": "insert",
+                    "fields": [("id", 4), ("name", "New Item"), ("quantity", 40)],
+                },
+            ]
+        )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_targeted_legacy_single_field_specs():
+    """Test that legacy single-field specs work with targeted optimization."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE settings (id INTEGER PRIMARY KEY, key TEXT, value TEXT)"
+        )
+        conn.execute("INSERT INTO settings VALUES (1, 'theme', 'light')")
+        conn.execute("INSERT INTO settings VALUES (2, 'language', 'en')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE settings (id INTEGER PRIMARY KEY, key TEXT, value TEXT)"
+        )
+        conn.execute("INSERT INTO settings VALUES (1, 'theme', 'dark')")  # Changed
+        conn.execute("INSERT INTO settings VALUES (2, 'language', 'fr')")  # Changed
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Legacy single-field specs
+        before.diff(after).expect_only_v2(
+            [
+                {"table": "settings", "pk": 1, "field": "value", "after": "dark"},
+                {"table": "settings", "pk": 2, "field": "value", "after": "fr"},
+            ]
+        )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_targeted_mixed_v2_and_legacy_specs():
+    """Test that mixed v2 and legacy specs work together."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE config (id INTEGER PRIMARY KEY, key TEXT, value TEXT, enabled INTEGER)"
+        )
+        conn.execute("INSERT INTO config VALUES (1, 'feature_a', 'off', 0)")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE config (id INTEGER PRIMARY KEY, key TEXT, value TEXT, enabled INTEGER)"
+        )
+        conn.execute("INSERT INTO config VALUES (1, 'feature_a', 'on', 1)")  # Both changed
+        conn.execute("INSERT INTO config VALUES (2, 'feature_b', 'active', 1)")  # Added
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Mix of v2 insert spec and legacy single-field specs
+        before.diff(after).expect_only_v2(
+            [
+                # Legacy specs for modification
+                {"table": "config", "pk": 1, "field": "value", "after": "on"},
+                {"table": "config", "pk": 1, "field": "enabled", "after": 1},
+                # V2 spec for insertion
+                {
+                    "table": "config",
+                    "pk": 2,
+                    "type": "insert",
+                    "fields": [
+                        ("id", 2),
+                        ("key", "feature_b"),
+                        ("value", "active"),
+                        ("enabled", 1),
+                    ],
+                },
+            ]
+        )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_targeted_with_ignore_config():
+    """Test that ignore_config works correctly with targeted optimization."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE audit (id INTEGER PRIMARY KEY, action TEXT, timestamp TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE data (id INTEGER PRIMARY KEY, value TEXT, updated_at TEXT)"
+        )
+        conn.execute("INSERT INTO audit VALUES (1, 'init', '2024-01-01')")
+        conn.execute("INSERT INTO data VALUES (1, 'original', '2024-01-01')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE audit (id INTEGER PRIMARY KEY, action TEXT, timestamp TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE data (id INTEGER PRIMARY KEY, value TEXT, updated_at TEXT)"
+        )
+        conn.execute("INSERT INTO audit VALUES (1, 'init', '2024-01-01')")
+        conn.execute("INSERT INTO audit VALUES (2, 'update', '2024-01-02')")  # Ignored table
+        conn.execute("INSERT INTO data VALUES (1, 'updated', '2024-01-02')")  # Changed
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Ignore the audit table entirely, and updated_at field in data
+        ignore_config = IgnoreConfig(
+            tables={"audit"},
+            table_fields={"data": {"updated_at"}},
+        )
+
+        # Only need to specify the value change, audit table is ignored
+        before.diff(after, ignore_config).expect_only_v2(
+            [
+                {
+                    "table": "data",
+                    "pk": 1,
+                    "type": "modify",
+                    "resulting_fields": [("value", "updated")],
+                    "no_other_changes": True,
+                },
+            ]
+        )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_targeted_string_vs_int_pk_coercion():
+    """Test that PK comparison works with string vs int coercion."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)"
+        )
+        conn.execute("INSERT INTO items VALUES (1, 'Item 1')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)"
+        )
+        conn.execute("INSERT INTO items VALUES (1, 'Item 1')")
+        conn.execute("INSERT INTO items VALUES (2, 'Item 2')")
+        conn.execute("INSERT INTO items VALUES (3, 'Item 3')")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Use string PKs - should still work due to coercion
+        before.diff(after).expect_only_v2(
+            [
+                {
+                    "table": "items",
+                    "pk": "2",  # String PK
+                    "type": "insert",
+                    "fields": [("id", 2), ("name", "Item 2")],
+                },
+                {
+                    "table": "items",
+                    "pk": 3,  # Integer PK
+                    "type": "insert",
+                    "fields": [("id", 3), ("name", "Item 3")],
+                },
+            ]
+        )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_targeted_modify_without_resulting_fields():
+    """Test that type: 'modify' without resulting_fields allows any modification."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE records (id INTEGER PRIMARY KEY, field_a TEXT, field_b TEXT, field_c TEXT)"
+        )
+        conn.execute("INSERT INTO records VALUES (1, 'a1', 'b1', 'c1')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE records (id INTEGER PRIMARY KEY, field_a TEXT, field_b TEXT, field_c TEXT)"
+        )
+        conn.execute("INSERT INTO records VALUES (1, 'a2', 'b2', 'c2')")  # All fields changed
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # type: "modify" without resulting_fields allows any modification
+        before.diff(after).expect_only_v2(
+            [
+                {
+                    "table": "records",
+                    "pk": 1,
+                    "type": "modify",
+                    # No resulting_fields - allows any changes
+                },
+            ]
+        )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_targeted_insert_without_fields():
+    """Test that type: 'insert' without fields allows insertion with any values."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE entities (id INTEGER PRIMARY KEY, data TEXT, secret TEXT)"
+        )
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE entities (id INTEGER PRIMARY KEY, data TEXT, secret TEXT)"
+        )
+        conn.execute("INSERT INTO entities VALUES (1, 'any data', 'any secret')")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # type: "insert" without fields allows insertion with any values
+        before.diff(after).expect_only_v2(
+            [
+                {
+                    "table": "entities",
+                    "pk": 1,
+                    "type": "insert",
+                    # No fields - allows any values
+                },
+            ]
+        )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_targeted_multiple_tables_all_specs():
+    """Test targeted optimization with multiple tables and all spec types."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+        conn.execute("CREATE TABLE posts (id INTEGER PRIMARY KEY, title TEXT)")
+        conn.execute("CREATE TABLE comments (id INTEGER PRIMARY KEY, body TEXT)")
+        conn.execute("INSERT INTO users VALUES (1, 'Alice')")
+        conn.execute("INSERT INTO posts VALUES (1, 'Post 1')")
+        conn.execute("INSERT INTO posts VALUES (2, 'Post 2')")
+        conn.execute("INSERT INTO comments VALUES (1, 'Comment 1')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+        conn.execute("CREATE TABLE posts (id INTEGER PRIMARY KEY, title TEXT)")
+        conn.execute("CREATE TABLE comments (id INTEGER PRIMARY KEY, body TEXT)")
+        conn.execute("INSERT INTO users VALUES (1, 'Alice')")
+        conn.execute("INSERT INTO users VALUES (2, 'Bob')")  # Added
+        conn.execute("INSERT INTO posts VALUES (1, 'Post 1 Updated')")  # Modified
+        # Post 2 deleted
+        conn.execute("INSERT INTO comments VALUES (1, 'Comment 1')")  # Unchanged
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Multiple tables with different change types
+        before.diff(after).expect_only_v2(
+            [
+                {
+                    "table": "users",
+                    "pk": 2,
+                    "type": "insert",
+                    "fields": [("id", 2), ("name", "Bob")],
+                },
+                {
+                    "table": "posts",
+                    "pk": 1,
+                    "type": "modify",
+                    "resulting_fields": [("title", "Post 1 Updated")],
+                    "no_other_changes": True,
+                },
+                {
+                    "table": "posts",
+                    "pk": 2,
+                    "type": "delete",
+                },
+            ]
+        )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_targeted_row_exists_both_sides_no_change():
+    """Test that specifying a row that exists but didn't change works correctly."""
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        before_db = f.name
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        after_db = f.name
+
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)"
+        )
+        conn.execute("INSERT INTO items VALUES (1, 'Item 1')")
+        conn.execute("INSERT INTO items VALUES (2, 'Item 2')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)"
+        )
+        conn.execute("INSERT INTO items VALUES (1, 'Item 1')")  # Unchanged
+        conn.execute("INSERT INTO items VALUES (2, 'Item 2 Updated')")  # Changed
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Specify the change correctly
+        before.diff(after).expect_only_v2(
+            [
+                {
+                    "table": "items",
+                    "pk": 2,
+                    "type": "modify",
+                    "resulting_fields": [("name", "Item 2 Updated")],
+                    "no_other_changes": True,
+                },
+            ]
+        )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
