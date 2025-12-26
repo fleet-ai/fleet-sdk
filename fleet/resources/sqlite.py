@@ -913,6 +913,352 @@ class SyncSnapshotDiff:
 
         return self
 
+    def _expect_only_targeted_v2(self, allowed_changes: List[Dict[str, Any]]):
+        """Optimized version that only queries specific rows mentioned in allowed_changes.
+        
+        Supports v2 spec formats:
+        - {"table": "t", "pk": 1, "type": "insert", "fields": [...]}
+        - {"table": "t", "pk": 1, "type": "modify", "resulting_fields": [...], "no_other_changes": bool}
+        - {"table": "t", "pk": 1, "type": "delete", "fields": [...]}
+        - Legacy single-field specs: {"table": "t", "pk": 1, "field": "x", "after": val}
+        """
+        import concurrent.futures
+        from threading import Lock
+
+        # Helper functions for v2 spec validation
+        def _parse_fields_spec(
+            fields_spec: List[Tuple[str, Any]]
+        ) -> Dict[str, Tuple[bool, Any]]:
+            """Parse a fields spec into a mapping of field_name -> (should_check_value, expected_value)."""
+            spec_map: Dict[str, Tuple[bool, Any]] = {}
+            for spec_tuple in fields_spec:
+                if len(spec_tuple) != 2:
+                    raise ValueError(
+                        f"Invalid field spec tuple: {spec_tuple}. "
+                        f"Expected 2-tuple like ('field', value), ('field', None), or ('field', ...)"
+                    )
+                field_name, expected_value = spec_tuple
+                if expected_value is ...:
+                    spec_map[field_name] = (False, None)
+                else:
+                    spec_map[field_name] = (True, expected_value)
+            return spec_map
+
+        def _get_spec_for_pk(table: str, pk: Any) -> Optional[Dict[str, Any]]:
+            """Get the spec for a given table/pk."""
+            for allowed in allowed_changes:
+                if (
+                    allowed["table"] == table
+                    and str(allowed.get("pk")) == str(pk)
+                ):
+                    return allowed
+            return None
+
+        def _get_all_specs_for_pk(table: str, pk: Any) -> List[Dict[str, Any]]:
+            """Get all specs for a given table/pk (for legacy multi-field specs)."""
+            specs = []
+            for allowed in allowed_changes:
+                if (
+                    allowed["table"] == table
+                    and str(allowed.get("pk")) == str(pk)
+                ):
+                    specs.append(allowed)
+            return specs
+
+        def _validate_insert_row(
+            table: str, pk: Any, row_data: Dict[str, Any], specs: List[Dict[str, Any]]
+        ) -> Optional[str]:
+            """Validate an inserted row against specs. Returns error message or None."""
+            # Check for type: "insert" spec with fields
+            for spec in specs:
+                if spec.get("type") == "insert":
+                    fields_spec = spec.get("fields")
+                    if fields_spec is not None:
+                        # Validate each field
+                        spec_map = _parse_fields_spec(fields_spec)
+                        for field_name, field_value in row_data.items():
+                            if field_name == "rowid":
+                                continue
+                            if self.ignore_config.should_ignore_field(table, field_name):
+                                continue
+                            if field_name not in spec_map:
+                                return f"Field '{field_name}' not in insert spec for table '{table}' pk={pk}"
+                            should_check, expected_value = spec_map[field_name]
+                            if should_check and not _values_equivalent(expected_value, field_value):
+                                return (
+                                    f"Insert mismatch in table '{table}' pk={pk}, "
+                                    f"field '{field_name}': expected {repr(expected_value)}, got {repr(field_value)}"
+                                )
+                    # type: "insert" found (with or without fields) - allowed
+                    return None
+
+            # Check for legacy whole-row spec
+            for spec in specs:
+                if spec.get("fields") is None and spec.get("after") == "__added__":
+                    return None
+
+            return f"Unexpected row added in table '{table}': pk={pk}"
+
+        def _validate_delete_row(
+            table: str, pk: Any, row_data: Dict[str, Any], specs: List[Dict[str, Any]]
+        ) -> Optional[str]:
+            """Validate a deleted row against specs. Returns error message or None."""
+            # Check for type: "delete" spec with optional fields
+            for spec in specs:
+                if spec.get("type") == "delete":
+                    fields_spec = spec.get("fields")
+                    if fields_spec is not None:
+                        # Validate each field against the deleted row
+                        spec_map = _parse_fields_spec(fields_spec)
+                        for field_name, (should_check, expected_value) in spec_map.items():
+                            if field_name not in row_data:
+                                return f"Field '{field_name}' in delete spec not found in row for table '{table}' pk={pk}"
+                            if should_check and not _values_equivalent(expected_value, row_data[field_name]):
+                                return (
+                                    f"Delete mismatch in table '{table}' pk={pk}, "
+                                    f"field '{field_name}': expected {repr(expected_value)}, got {repr(row_data[field_name])}"
+                                )
+                    # type: "delete" found (with or without fields) - allowed
+                    return None
+
+            # Check for legacy whole-row spec
+            for spec in specs:
+                if spec.get("fields") is None and spec.get("after") == "__removed__":
+                    return None
+
+            return f"Unexpected row removed from table '{table}': pk={pk}"
+
+        def _validate_modify_row(
+            table: str,
+            pk: Any,
+            before_row: Dict[str, Any],
+            after_row: Dict[str, Any],
+            specs: List[Dict[str, Any]],
+        ) -> Optional[str]:
+            """Validate a modified row against specs. Returns error message or None."""
+            # Collect actual changes
+            changed_fields: Dict[str, Dict[str, Any]] = {}
+            for field in set(before_row.keys()) | set(after_row.keys()):
+                if self.ignore_config.should_ignore_field(table, field):
+                    continue
+                before_val = before_row.get(field)
+                after_val = after_row.get(field)
+                if not _values_equivalent(before_val, after_val):
+                    changed_fields[field] = {"before": before_val, "after": after_val}
+
+            if not changed_fields:
+                return None  # No changes
+
+            # Check for type: "modify" spec with resulting_fields
+            for spec in specs:
+                if spec.get("type") == "modify":
+                    resulting_fields = spec.get("resulting_fields")
+                    if resulting_fields is not None:
+                        # Validate no_other_changes is provided
+                        if "no_other_changes" not in spec:
+                            raise ValueError(
+                                f"Modify spec for table '{table}' pk={pk} "
+                                f"has 'resulting_fields' but missing required 'no_other_changes' field."
+                            )
+                        no_other_changes = spec["no_other_changes"]
+                        if not isinstance(no_other_changes, bool):
+                            raise ValueError(
+                                f"Modify spec for table '{table}' pk={pk} "
+                                f"'no_other_changes' must be boolean, got {type(no_other_changes).__name__}"
+                            )
+
+                        spec_map = _parse_fields_spec(resulting_fields)
+                        
+                        # Validate changed fields
+                        for field_name, vals in changed_fields.items():
+                            after_val = vals["after"]
+                            if field_name not in spec_map:
+                                if no_other_changes:
+                                    return (
+                                        f"Unexpected field change in table '{table}' pk={pk}: "
+                                        f"field '{field_name}' not in resulting_fields"
+                                    )
+                                # no_other_changes=False: ignore this field
+                            else:
+                                should_check, expected_value = spec_map[field_name]
+                                if should_check and not _values_equivalent(expected_value, after_val):
+                                    return (
+                                        f"Modify mismatch in table '{table}' pk={pk}, "
+                                        f"field '{field_name}': expected {repr(expected_value)}, got {repr(after_val)}"
+                                    )
+                        return None  # Validation passed
+                    else:
+                        # type: "modify" without resulting_fields - allow any modification
+                        return None
+
+            # Check for legacy single-field specs
+            for field_name, vals in changed_fields.items():
+                after_val = vals["after"]
+                field_allowed = False
+                for spec in specs:
+                    if (
+                        spec.get("field") == field_name
+                        and _values_equivalent(spec.get("after"), after_val)
+                    ):
+                        field_allowed = True
+                        break
+                if not field_allowed:
+                    return (
+                        f"Unexpected change in table '{table}' pk={pk}, "
+                        f"field '{field_name}': {repr(vals['before'])} -> {repr(after_val)}"
+                    )
+
+            return None
+
+        # Group allowed changes by table
+        changes_by_table: Dict[str, List[Dict[str, Any]]] = {}
+        for change in allowed_changes:
+            table = change["table"]
+            if table not in changes_by_table:
+                changes_by_table[table] = []
+            changes_by_table[table].append(change)
+
+        errors = []
+        errors_lock = Lock()
+
+        # Function to check a single row
+        def check_row(
+            table: str,
+            pk: Any,
+            pk_columns: List[str],
+        ):
+            try:
+                # Build WHERE clause for this PK
+                where_sql = self._build_pk_where_clause(pk_columns, pk)
+
+                # Query before snapshot
+                before_query = f"SELECT * FROM {table} WHERE {where_sql}"
+                before_response = self.before.resource.query(before_query)
+                before_row = (
+                    dict(zip(before_response.columns, before_response.rows[0]))
+                    if before_response.rows
+                    else None
+                )
+
+                # Query after snapshot
+                after_response = self.after.resource.query(before_query)
+                after_row = (
+                    dict(zip(after_response.columns, after_response.rows[0]))
+                    if after_response.rows
+                    else None
+                )
+
+                # Get all specs for this table/pk
+                specs = _get_all_specs_for_pk(table, pk)
+
+                # Check changes for this row
+                if before_row and after_row:
+                    # Modified row
+                    error = _validate_modify_row(table, pk, before_row, after_row, specs)
+                    if error:
+                        with errors_lock:
+                            errors.append(AssertionError(error))
+                elif not before_row and after_row:
+                    # Added row
+                    error = _validate_insert_row(table, pk, after_row, specs)
+                    if error:
+                        with errors_lock:
+                            errors.append(AssertionError(error))
+                elif before_row and not after_row:
+                    # Removed row
+                    error = _validate_delete_row(table, pk, before_row, specs)
+                    if error:
+                        with errors_lock:
+                            errors.append(AssertionError(error))
+
+            except Exception as e:
+                with errors_lock:
+                    errors.append(e)
+
+        # Prepare all row checks
+        row_checks = []
+        for table, table_changes in changes_by_table.items():
+            if self.ignore_config.should_ignore_table(table):
+                continue
+
+            # Get primary key columns once per table
+            pk_columns = self._get_primary_key_columns(table)
+
+            # Extract unique PKs to check
+            pks_to_check = {change["pk"] for change in table_changes}
+
+            for pk in pks_to_check:
+                row_checks.append((table, pk, pk_columns))
+
+        # Execute row checks in parallel
+        if row_checks:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [
+                    executor.submit(check_row, table, pk, pk_columns)
+                    for table, pk, pk_columns in row_checks
+                ]
+                concurrent.futures.wait(futures)
+
+        # Check for errors from row checks
+        if errors:
+            raise errors[0]
+
+        # Now check tables not mentioned in allowed_changes to ensure no changes
+        all_tables = set(self.before.tables()) | set(self.after.tables())
+        tables_to_verify = []
+
+        for table in all_tables:
+            if (
+                table not in changes_by_table
+                and not self.ignore_config.should_ignore_table(table)
+            ):
+                tables_to_verify.append(table)
+
+        # Function to verify no changes in a table
+        def verify_no_changes(table: str):
+            try:
+                # For tables with no allowed changes, just check row counts
+                before_count_response = self.before.resource.query(
+                    f"SELECT COUNT(*) FROM {table}"
+                )
+                before_count = (
+                    before_count_response.rows[0][0]
+                    if before_count_response.rows
+                    else 0
+                )
+
+                after_count_response = self.after.resource.query(
+                    f"SELECT COUNT(*) FROM {table}"
+                )
+                after_count = (
+                    after_count_response.rows[0][0] if after_count_response.rows else 0
+                )
+
+                if before_count != after_count:
+                    error_msg = (
+                        f"Unexpected change in table '{table}': "
+                        f"row count changed from {before_count} to {after_count}"
+                    )
+                    with errors_lock:
+                        errors.append(AssertionError(error_msg))
+            except Exception as e:
+                with errors_lock:
+                    errors.append(e)
+
+        # Execute table verification in parallel
+        if tables_to_verify:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [
+                    executor.submit(verify_no_changes, table) for table in tables_to_verify
+                ]
+                concurrent.futures.wait(futures)
+
+        # Final error check
+        if errors:
+            raise errors[0]
+
+        return self
+
     def _validate_diff_against_allowed_changes_v2(
         self, diff: Dict[str, Any], allowed_changes: List[Dict[str, Any]]
     ):
@@ -1439,6 +1785,10 @@ class SyncSnapshotDiff:
         This version supports field-level specifications for added/removed rows,
         allowing users to specify expected field values instead of just whole-row specs.
         """
+        # Special case: empty allowed_changes means no changes should have occurred
+        if not allowed_changes:
+            return self._expect_no_changes()
+
         resource = self.after.resource
         if resource.client is not None and resource._mode == "http":
             api_diff = None
@@ -1467,9 +1817,13 @@ class SyncSnapshotDiff:
             
             # Validate outside try block so AssertionError propagates
             if api_diff is not None:
-                return self._validate_diff_against_allowed_changes(api_diff, allowed_changes)
+                return self._validate_diff_against_allowed_changes_v2(api_diff, allowed_changes)
 
-        # Fall back to full diff for v2 (no targeted optimization yet)
+        # For expect_only_v2, we can optimize by only checking the specific rows mentioned
+        if self._can_use_targeted_queries(allowed_changes):
+            return self._expect_only_targeted_v2(allowed_changes)
+
+        # Fall back to full diff for complex cases
         diff = self._collect()
         return self._validate_diff_against_allowed_changes_v2(diff, allowed_changes)
 
