@@ -19,8 +19,8 @@ from fleet.verifiers.db import (
     _get_row_identifier,
     _format_row_for_error,
     _values_equivalent,
+    validate_diff_expect_exactly,
 )
-from fleet.verifiers.diff_validation import validate_diff_expect_exactly
 
 
 class SyncDatabaseSnapshot:
