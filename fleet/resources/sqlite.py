@@ -1839,16 +1839,29 @@ class SyncSnapshotDiff:
         not more, not less.
 
         Args:
-            expected_changes: List of expected change specs. Same format as expect_only_v2:
-                - Insert: {"table": "t", "pk": 1, "type": "insert", "fields": [...]}
-                - Modify: {"table": "t", "pk": 1, "type": "modify", "resulting_fields": [...], "no_other_changes": True/False}
-                - Delete: {"table": "t", "pk": 1, "type": "delete"}
+            expected_changes: List of expected change specs. Each spec requires:
+                - "type": "insert", "modify", or "delete" (required)
+                - "table": table name (required)
+                - "pk": primary key value (required)
+
+                Spec formats by type:
+                - Insert: {"type": "insert", "table": "t", "pk": 1, "fields": [...]}
+                - Modify: {"type": "modify", "table": "t", "pk": 1, "resulting_fields": [...], "no_other_changes": True/False}
+                - Delete: {"type": "delete", "table": "t", "pk": 1}
+
+                Field specs are 2-tuples: (field_name, expected_value)
+                - ("name", "Alice"): check field equals "Alice"
+                - ("name", ...): accept any value (ellipsis)
+                - ("name", None): check field is SQL NULL
+
+                Note: Legacy specs without explicit "type" are not supported.
 
         Returns:
             self for method chaining
 
         Raises:
             AssertionError: If there are unexpected changes OR if expected changes are missing
+            ValueError: If specs are missing required fields or have invalid format
         """
         # Get the diff (using HTTP if available, otherwise local)
         resource = self.after.resource
