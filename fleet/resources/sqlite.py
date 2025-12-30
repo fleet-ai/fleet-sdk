@@ -20,6 +20,7 @@ from fleet.verifiers.db import (
     _format_row_for_error,
     _values_equivalent,
 )
+from fleet.verifiers.diff_validation import validate_diff_expect_exactly
 
 
 class SyncDatabaseSnapshot:
@@ -1826,6 +1827,68 @@ class SyncSnapshotDiff:
         # Fall back to full diff for complex cases
         diff = self._collect()
         return self._validate_diff_against_allowed_changes_v2(diff, allowed_changes)
+
+    def expect_exactly(self, expected_changes: List[Dict[str, Any]]):
+        """Verify that EXACTLY the specified changes occurred.
+
+        This is stricter than expect_only_v2:
+        1. All changes in diff must match a spec (no unexpected changes)
+        2. All specs must have a matching change in diff (no missing expected changes)
+
+        This method is ideal for verifying that an agent performed exactly what was expected -
+        not more, not less.
+
+        Args:
+            expected_changes: List of expected change specs. Same format as expect_only_v2:
+                - Insert: {"table": "t", "pk": 1, "type": "insert", "fields": [...]}
+                - Modify: {"table": "t", "pk": 1, "type": "modify", "resulting_fields": [...], "no_other_changes": True/False}
+                - Delete: {"table": "t", "pk": 1, "type": "delete"}
+
+        Returns:
+            self for method chaining
+
+        Raises:
+            AssertionError: If there are unexpected changes OR if expected changes are missing
+        """
+        # Get the diff (using HTTP if available, otherwise local)
+        resource = self.after.resource
+        diff = None
+
+        if resource.client is not None and resource._mode == "http":
+            try:
+                payload = {}
+                if self.ignore_config:
+                    payload["ignore_config"] = {
+                        "tables": list(self.ignore_config.tables),
+                        "fields": list(self.ignore_config.fields),
+                        "table_fields": {
+                            table: list(fields) for table, fields in self.ignore_config.table_fields.items()
+                        }
+                    }
+                response = resource.client.request(
+                    "POST",
+                    "/diff/structured",
+                    json=payload,
+                )
+                result = response.json()
+                if result.get("success") and "diff" in result:
+                    diff = result["diff"]
+            except Exception as e:
+                print(f"Warning: Failed to fetch structured diff from API: {e}")
+                print("Falling back to local diff computation...")
+
+        if diff is None:
+            diff = self._collect()
+
+        # Use shared validation logic
+        success, error_msg, _ = validate_diff_expect_exactly(
+            diff, expected_changes, self.ignore_config
+        )
+
+        if not success:
+            raise AssertionError(error_msg)
+
+        return self
 
     def _ensure_all_fetched(self):
         """Fetch ALL data from ALL tables upfront (non-lazy loading).

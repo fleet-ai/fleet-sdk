@@ -18,6 +18,8 @@ from datetime import datetime
 from typing import Any
 import json
 
+from fleet.verifiers.diff_validation import validate_diff_expect_exactly
+
 ################################################################################
 #  Low‑level helpers
 ################################################################################
@@ -1095,6 +1097,40 @@ class SnapshotDiff:
                 error_lines.append("  (No changes were allowed)")
 
             raise AssertionError("\n".join(error_lines))
+
+        return self
+
+    def expect_exactly(self, expected_changes: List[Dict[str, Any]]):
+        """Verify that EXACTLY the specified changes occurred.
+
+        This is stricter than expect_only_v2:
+        1. All changes in diff must match a spec (no unexpected changes)
+        2. All specs must have a matching change in diff (no missing expected changes)
+
+        This method is ideal for verifying that an agent performed exactly what was expected -
+        not more, not less.
+
+        Args:
+            expected_changes: List of expected change specs. Same format as expect_only_v2:
+                - Insert: {"table": "t", "pk": 1, "type": "insert", "fields": [...]}
+                - Modify: {"table": "t", "pk": 1, "type": "modify", "resulting_fields": [...], "no_other_changes": True/False}
+                - Delete: {"table": "t", "pk": 1, "type": "delete"}
+
+        Returns:
+            self for method chaining
+
+        Raises:
+            AssertionError: If there are unexpected changes OR if expected changes are missing
+        """
+        diff = self._collect()
+
+        # Use shared validation logic
+        success, error_msg, _ = validate_diff_expect_exactly(
+            diff, expected_changes, self.ignore_config
+        )
+
+        if not success:
+            raise AssertionError(error_msg)
 
         return self
 
