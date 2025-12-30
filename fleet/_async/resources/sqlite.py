@@ -7,6 +7,7 @@ import tempfile
 import sqlite3
 import os
 import asyncio
+import re
 
 from typing import TYPE_CHECKING
 
@@ -21,6 +22,17 @@ from fleet.verifiers.db import (
     _format_row_for_error,
     _values_equivalent,
 )
+
+
+def _quote_identifier(identifier: str) -> str:
+    """Quote an identifier (table or column name) for SQLite.
+
+    SQLite uses double quotes for identifiers and escapes internal quotes by doubling them.
+    This handles reserved keywords like 'order', 'table', etc.
+    """
+    # Escape any double quotes in the identifier by doubling them
+    escaped = identifier.replace('"', '""')
+    return f'"{escaped}"'
 
 
 class AsyncDatabaseSnapshot:
@@ -57,12 +69,12 @@ class AsyncDatabaseSnapshot:
             return
 
         # Get table schema
-        schema_response = await self.resource.query(f"PRAGMA table_info({table})")
+        schema_response = await self.resource.query(f"PRAGMA table_info({_quote_identifier(table)})")
         if schema_response.rows:
             self._schemas[table] = [row[1] for row in schema_response.rows]  # Column names
 
         # Get all data for this table
-        data_response = await self.resource.query(f"SELECT * FROM {table}")
+        data_response = await self.resource.query(f"SELECT * FROM {_quote_identifier(table)}")
         if data_response.rows and data_response.columns:
             self._data[table] = [
                 dict(zip(data_response.columns, row)) for row in data_response.rows
@@ -123,23 +135,23 @@ class AsyncSnapshotQueryBuilder:
         where_parts = []
         for col, op, val in self._conditions:
             if op == "=" and val is None:
-                where_parts.append(f"{col} IS NULL")
+                where_parts.append(f"{_quote_identifier(col)} IS NULL")
             elif op == "IS":
-                where_parts.append(f"{col} IS NULL")
+                where_parts.append(f"{_quote_identifier(col)} IS NULL")
             elif op == "IS NOT":
-                where_parts.append(f"{col} IS NOT NULL")
+                where_parts.append(f"{_quote_identifier(col)} IS NOT NULL")
             elif op == "=":
                 if isinstance(val, str):
                     escaped_val = val.replace("'", "''")
-                    where_parts.append(f"{col} = '{escaped_val}'")
+                    where_parts.append(f"{_quote_identifier(col)} = '{escaped_val}'")
                 else:
-                    where_parts.append(f"{col} = '{val}'")
+                    where_parts.append(f"{_quote_identifier(col)} = '{val}'")
 
         where_clause = " AND ".join(where_parts)
 
         # Build full query
         cols = ", ".join(self._select_cols)
-        query = f"SELECT {cols} FROM {self._table} WHERE {where_clause}"
+        query = f"SELECT {cols} FROM {_quote_identifier(self._table)} WHERE {where_clause}"
 
         if self._order_by:
             query += f" ORDER BY {self._order_by}"
@@ -271,7 +283,7 @@ class AsyncSnapshotDiff:
     async def _get_primary_key_columns(self, table: str) -> List[str]:
         """Get primary key columns for a table."""
         # Try to get from schema
-        schema_response = await self.after.resource.query(f"PRAGMA table_info({table})")
+        schema_response = await self.after.resource.query(f"PRAGMA table_info({_quote_identifier(table)})")
         if not schema_response.rows:
             return ["id"]  # Default fallback
 
@@ -414,18 +426,18 @@ class AsyncSnapshotDiff:
                 return f"'{val}'"
 
         if len(pk_columns) == 1:
-            return f"{pk_columns[0]} = {escape_value(pk_value)}"
+            return f"{_quote_identifier(pk_columns[0])} = {escape_value(pk_value)}"
         else:
             # Composite key
             if isinstance(pk_value, tuple):
                 conditions = [
-                    f"{col} = {escape_value(val)}"
+                    f"{_quote_identifier(col)} = {escape_value(val)}"
                     for col, val in zip(pk_columns, pk_value)
                 ]
                 return " AND ".join(conditions)
             else:
                 # Shouldn't happen if data is consistent
-                return f"{pk_columns[0]} = {escape_value(pk_value)}"
+                return f"{_quote_identifier(pk_columns[0])} = {escape_value(pk_value)}"
 
     async def _expect_no_changes(self):
         """Efficiently verify that no changes occurred between snapshots using row counts."""
@@ -472,7 +484,7 @@ class AsyncSnapshotDiff:
 
                     if table in before_tables:
                         before_count_response = await self.before.resource.query(
-                            f"SELECT COUNT(*) FROM {table}"
+                            f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
                         )
                         before_count = (
                             before_count_response.rows[0][0]
@@ -482,7 +494,7 @@ class AsyncSnapshotDiff:
 
                     if table in after_tables:
                         after_count_response = await self.after.resource.query(
-                            f"SELECT COUNT(*) FROM {table}"
+                            f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
                         )
                         after_count = (
                             after_count_response.rows[0][0]
@@ -549,10 +561,10 @@ class AsyncSnapshotDiff:
         order_by = ", ".join(pk_columns) if pk_columns else "rowid"
 
         before_response = await self.before.resource.query(
-            f"SELECT * FROM {table} ORDER BY {order_by}"
+            f"SELECT * FROM {_quote_identifier(table)} ORDER BY {order_by}"
         )
         after_response = await self.after.resource.query(
-            f"SELECT * FROM {table} ORDER BY {order_by}"
+            f"SELECT * FROM {_quote_identifier(table)} ORDER BY {order_by}"
         )
 
         # Quick check: if column counts differ, there's a schema change
@@ -634,7 +646,7 @@ class AsyncSnapshotDiff:
                 where_sql = self._build_pk_where_clause(pk_columns, pk)
 
                 # Query before snapshot
-                before_query = f"SELECT * FROM {table} WHERE {where_sql}"
+                before_query = f"SELECT * FROM {_quote_identifier(table)} WHERE {where_sql}"
                 before_response = await self.before.resource.query(before_query)
                 before_row = (
                     dict(zip(before_response.columns, before_response.rows[0]))
@@ -727,7 +739,7 @@ class AsyncSnapshotDiff:
             try:
                 # For tables with no allowed changes, just check row counts
                 before_count_response = await self.before.resource.query(
-                    f"SELECT COUNT(*) FROM {table}"
+                    f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
                 )
                 before_count = (
                     before_count_response.rows[0][0]
@@ -736,7 +748,7 @@ class AsyncSnapshotDiff:
                 )
 
                 after_count_response = await self.after.resource.query(
-                    f"SELECT COUNT(*) FROM {table}"
+                    f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
                 )
                 after_count = (
                     after_count_response.rows[0][0] if after_count_response.rows else 0
@@ -1098,7 +1110,7 @@ class AsyncSnapshotDiff:
                 where_sql = self._build_pk_where_clause(pk_columns, pk)
 
                 # Query before snapshot
-                before_query = f"SELECT * FROM {table} WHERE {where_sql}"
+                before_query = f"SELECT * FROM {_quote_identifier(table)} WHERE {where_sql}"
                 before_response = await self.before.resource.query(before_query)
                 before_row = (
                     dict(zip(before_response.columns, before_response.rows[0]))
@@ -1176,7 +1188,7 @@ class AsyncSnapshotDiff:
             try:
                 # For tables with no allowed changes, just check row counts
                 before_count_response = await self.before.resource.query(
-                    f"SELECT COUNT(*) FROM {table}"
+                    f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
                 )
                 before_count = (
                     before_count_response.rows[0][0]
@@ -1185,7 +1197,7 @@ class AsyncSnapshotDiff:
                 )
 
                 after_count_response = await self.after.resource.query(
-                    f"SELECT COUNT(*) FROM {table}"
+                    f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
                 )
                 after_count = (
                     after_count_response.rows[0][0] if after_count_response.rows else 0
@@ -1950,13 +1962,13 @@ class AsyncQueryBuilder:
     # Compile to SQL
     def _compile(self) -> Tuple[str, List[Any]]:
         cols = ", ".join(self._select_cols)
-        sql = [f"SELECT {cols} FROM {self._table}"]
+        sql = [f"SELECT {cols} FROM {_quote_identifier(self._table)}"]
         params: List[Any] = []
 
         # Joins
         for tbl, onmap in self._joins:
-            join_clauses = [f"{self._table}.{l} = {tbl}.{r}" for l, r in onmap.items()]
-            sql.append(f"JOIN {tbl} ON {' AND '.join(join_clauses)}")
+            join_clauses = [f"{_quote_identifier(self._table)}.{_quote_identifier(l)} = {_quote_identifier(tbl)}.{_quote_identifier(r)}" for l, r in onmap.items()]
+            sql.append(f"JOIN {_quote_identifier(tbl)} ON {' AND '.join(join_clauses)}")
 
         # WHERE
         if self._conditions:
@@ -1964,12 +1976,12 @@ class AsyncQueryBuilder:
             for col, op, val in self._conditions:
                 if op in ("IN", "NOT IN") and isinstance(val, tuple):
                     ph = ", ".join(["?" for _ in val])
-                    placeholders.append(f"{col} {op} ({ph})")
+                    placeholders.append(f"{_quote_identifier(col)} {op} ({ph})")
                     params.extend(val)
                 elif op in ("IS", "IS NOT"):
-                    placeholders.append(f"{col} {op} NULL")
+                    placeholders.append(f"{_quote_identifier(col)} {op} NULL")
                 else:
-                    placeholders.append(f"{col} {op} ?")
+                    placeholders.append(f"{_quote_identifier(col)} {op} ?")
                     params.append(val)
             sql.append("WHERE " + " AND ".join(placeholders))
 
@@ -2122,7 +2134,7 @@ class AsyncSQLiteResource(Resource):
                 tables = []
                 for table_name in table_names:
                     # Get table info
-                    cursor.execute(f"PRAGMA table_info({table_name})")
+                    cursor.execute(f"PRAGMA table_info({_quote_identifier(table_name)})")
                     columns = cursor.fetchall()
 
                     # Get CREATE TABLE SQL
@@ -2182,7 +2194,113 @@ class AsyncSQLiteResource(Resource):
         if self._mode == "direct":
             return await self._query_direct(query, args, read_only)
         else:
+            # Check if this is a PRAGMA query - HTTP endpoints don't support PRAGMA
+            query_stripped = query.strip().upper()
+            if query_stripped.startswith("PRAGMA"):
+                return await self._handle_pragma_query_http(query, args)
             return await self._query_http(query, args, read_only)
+
+    async def _handle_pragma_query_http(
+        self, query: str, args: Optional[List[Any]] = None
+    ) -> QueryResponse:
+        """Handle PRAGMA queries in HTTP mode by using the describe endpoint."""
+        query_upper = query.strip().upper()
+
+        # Extract table name from PRAGMA table_info(table_name)
+        if "TABLE_INFO" in query_upper:
+            # Match: PRAGMA table_info("table") or PRAGMA table_info(table)
+            match = re.search(r'TABLE_INFO\s*\(\s*"([^"]+)"\s*\)', query, re.IGNORECASE)
+            if not match:
+                match = re.search(r"TABLE_INFO\s*\(\s*'([^']+)'\s*\)", query, re.IGNORECASE)
+            if not match:
+                match = re.search(r'TABLE_INFO\s*\(\s*([^\s\)]+)\s*\)', query, re.IGNORECASE)
+
+            if match:
+                table_name = match.group(1)
+
+                # Use the describe endpoint to get schema
+                describe_response = await self.describe()
+                if not describe_response.success or not describe_response.tables:
+                    return QueryResponse(
+                        success=False,
+                        columns=None,
+                        rows=None,
+                        error="Failed to get schema information",
+                        message="PRAGMA query failed: could not retrieve schema"
+                    )
+
+                # Find the table in the schema
+                table_schema = None
+                for table in describe_response.tables:
+                    # Handle both dict and TableSchema objects
+                    table_name_in_schema = table.name if hasattr(table, 'name') else table.get("name")
+                    if table_name_in_schema == table_name:
+                        table_schema = table
+                        break
+
+                if not table_schema:
+                    return QueryResponse(
+                        success=False,
+                        columns=None,
+                        rows=None,
+                        error=f"Table '{table_name}' not found",
+                        message=f"PRAGMA query failed: table '{table_name}' not found"
+                    )
+
+                # Get columns from table schema
+                columns = table_schema.columns if hasattr(table_schema, 'columns') else table_schema.get("columns")
+                if not columns:
+                    return QueryResponse(
+                        success=False,
+                        columns=None,
+                        rows=None,
+                        error=f"Table '{table_name}' has no columns",
+                        message=f"PRAGMA query failed: table '{table_name}' has no columns"
+                    )
+
+                # Convert schema to PRAGMA table_info format
+                # Format: (cid, name, type, notnull, dflt_value, pk)
+                rows = []
+                for idx, col in enumerate(columns):
+                    # Handle both dict and object column definitions
+                    if isinstance(col, dict):
+                        col_name = col["name"]
+                        col_type = col.get("type", "")
+                        col_notnull = col.get("notnull", False)
+                        col_default = col.get("default_value")
+                        col_pk = col.get("pk", 0)
+                    else:
+                        col_name = col.name if hasattr(col, 'name') else str(col)
+                        col_type = getattr(col, 'type', "")
+                        col_notnull = getattr(col, 'notnull', False)
+                        col_default = getattr(col, 'default_value', None)
+                        col_pk = getattr(col, 'pk', 0)
+
+                    row = (
+                        idx,  # cid
+                        col_name,  # name
+                        col_type,  # type
+                        1 if col_notnull else 0,  # notnull
+                        col_default,  # dflt_value
+                        col_pk  # pk
+                    )
+                    rows.append(row)
+
+                return QueryResponse(
+                    success=True,
+                    columns=["cid", "name", "type", "notnull", "dflt_value", "pk"],
+                    rows=rows,
+                    message="PRAGMA query executed successfully via describe endpoint"
+                )
+
+        # For other PRAGMA queries, return an error indicating they're not supported
+        return QueryResponse(
+            success=False,
+            columns=None,
+            rows=None,
+            error="PRAGMA query not supported in HTTP mode",
+            message=f"PRAGMA query '{query}' is not supported via HTTP API"
+        )
 
     async def _query_http(
         self, query: str, args: Optional[List[Any]] = None, read_only: bool = True

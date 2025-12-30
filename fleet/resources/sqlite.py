@@ -6,6 +6,7 @@ from datetime import datetime
 import tempfile
 import sqlite3
 import os
+import re
 
 from typing import TYPE_CHECKING
 
@@ -2234,7 +2235,113 @@ class SQLiteResource(Resource):
         if self._mode == "direct":
             return self._query_direct(query, args, read_only)
         else:
+            # Check if this is a PRAGMA query - HTTP endpoints don't support PRAGMA
+            query_stripped = query.strip().upper()
+            if query_stripped.startswith("PRAGMA"):
+                return self._handle_pragma_query_http(query, args)
             return self._query_http(query, args, read_only)
+
+    def _handle_pragma_query_http(
+        self, query: str, args: Optional[List[Any]] = None
+    ) -> QueryResponse:
+        """Handle PRAGMA queries in HTTP mode by using the describe endpoint."""
+        query_upper = query.strip().upper()
+
+        # Extract table name from PRAGMA table_info(table_name)
+        if "TABLE_INFO" in query_upper:
+            # Match: PRAGMA table_info("table") or PRAGMA table_info(table)
+            match = re.search(r'TABLE_INFO\s*\(\s*"([^"]+)"\s*\)', query, re.IGNORECASE)
+            if not match:
+                match = re.search(r"TABLE_INFO\s*\(\s*'([^']+)'\s*\)", query, re.IGNORECASE)
+            if not match:
+                match = re.search(r'TABLE_INFO\s*\(\s*([^\s\)]+)\s*\)', query, re.IGNORECASE)
+
+            if match:
+                table_name = match.group(1)
+
+                # Use the describe endpoint to get schema
+                describe_response = self.describe()
+                if not describe_response.success or not describe_response.tables:
+                    return QueryResponse(
+                        success=False,
+                        columns=None,
+                        rows=None,
+                        error="Failed to get schema information",
+                        message="PRAGMA query failed: could not retrieve schema"
+                    )
+
+                # Find the table in the schema
+                table_schema = None
+                for table in describe_response.tables:
+                    # Handle both dict and TableSchema objects
+                    table_name_in_schema = table.name if hasattr(table, 'name') else table.get("name")
+                    if table_name_in_schema == table_name:
+                        table_schema = table
+                        break
+
+                if not table_schema:
+                    return QueryResponse(
+                        success=False,
+                        columns=None,
+                        rows=None,
+                        error=f"Table '{table_name}' not found",
+                        message=f"PRAGMA query failed: table '{table_name}' not found"
+                    )
+
+                # Get columns from table schema
+                columns = table_schema.columns if hasattr(table_schema, 'columns') else table_schema.get("columns")
+                if not columns:
+                    return QueryResponse(
+                        success=False,
+                        columns=None,
+                        rows=None,
+                        error=f"Table '{table_name}' has no columns",
+                        message=f"PRAGMA query failed: table '{table_name}' has no columns"
+                    )
+
+                # Convert schema to PRAGMA table_info format
+                # Format: (cid, name, type, notnull, dflt_value, pk)
+                rows = []
+                for idx, col in enumerate(columns):
+                    # Handle both dict and object column definitions
+                    if isinstance(col, dict):
+                        col_name = col["name"]
+                        col_type = col.get("type", "")
+                        col_notnull = col.get("notnull", False)
+                        col_default = col.get("default_value")
+                        col_pk = col.get("pk", 0)
+                    else:
+                        col_name = col.name if hasattr(col, 'name') else str(col)
+                        col_type = getattr(col, 'type', "")
+                        col_notnull = getattr(col, 'notnull', False)
+                        col_default = getattr(col, 'default_value', None)
+                        col_pk = getattr(col, 'pk', 0)
+
+                    row = (
+                        idx,  # cid
+                        col_name,  # name
+                        col_type,  # type
+                        1 if col_notnull else 0,  # notnull
+                        col_default,  # dflt_value
+                        col_pk  # pk
+                    )
+                    rows.append(row)
+
+                return QueryResponse(
+                    success=True,
+                    columns=["cid", "name", "type", "notnull", "dflt_value", "pk"],
+                    rows=rows,
+                    message="PRAGMA query executed successfully via describe endpoint"
+                )
+
+        # For other PRAGMA queries, return an error indicating they're not supported
+        return QueryResponse(
+            success=False,
+            columns=None,
+            rows=None,
+            error="PRAGMA query not supported in HTTP mode",
+            message=f"PRAGMA query '{query}' is not supported via HTTP API"
+        )
 
     def _query_http(
         self, query: str, args: Optional[List[Any]] = None, read_only: bool = True
