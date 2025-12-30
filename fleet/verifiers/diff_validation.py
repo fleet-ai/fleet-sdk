@@ -27,7 +27,14 @@ def _values_equivalent(expected: Any, actual: Any) -> bool:
 def _parse_fields_spec(fields_spec: List[Tuple[str, Any]]) -> Dict[str, Tuple[bool, Any]]:
     """Parse a fields spec into a mapping of field_name -> (should_check_value, expected_value)."""
     spec_map = {}
-    for field_name, expected_value in fields_spec:
+    for item in fields_spec:
+        if not isinstance(item, (tuple, list)) or len(item) != 2:
+            raise ValueError(
+                f"Invalid field spec: {item!r}. "
+                f"Each field must be a 2-tuple: (field_name, expected_value). "
+                f"Use (field_name, ...) to accept any value."
+            )
+        field_name, expected_value = item
         if expected_value is ...:
             spec_map[field_name] = (False, None)  # Don't check value
         else:
@@ -58,6 +65,28 @@ def validate_diff_expect_exactly(
         - error_message: Error message if validation failed, None otherwise
         - matched_specs: List of (table, pk, type) tuples that matched
     """
+    # Validate all specs have required fields
+    for i, spec in enumerate(expected_changes):
+        if "type" not in spec:
+            raise ValueError(
+                f"Spec at index {i} is missing required 'type' field. "
+                f"expect_exactly requires explicit type: 'insert', 'modify', or 'delete'. "
+                f"Got: {spec}"
+            )
+        if spec["type"] not in ("insert", "modify", "delete"):
+            raise ValueError(
+                f"Spec at index {i} has invalid type '{spec['type']}'. "
+                f"Must be 'insert', 'modify', or 'delete'."
+            )
+        if "table" not in spec:
+            raise ValueError(
+                f"Spec at index {i} is missing required 'table' field. Got: {spec}"
+            )
+        if "pk" not in spec:
+            raise ValueError(
+                f"Spec at index {i} is missing required 'pk' field. Got: {spec}"
+            )
+
     # Collect all errors into categories
     field_mismatches = []      # Changes that happened but with wrong field values
     unexpected_changes = []     # Changes that happened but no spec allows them
@@ -327,25 +356,31 @@ def _format_expect_exactly_error(
             lines.append(f"[{error_num}] {op_type} '{fm['table']}' pk={fm['pk']}")
             lines.append("")
             # Side-by-side comparison table
-            lines.append("    FIELD                EXPECTED             ACTUAL")
-            lines.append("    " + "-" * 60)
+            lines.append("    FIELD                EXPECTED                                      ACTUAL")
+            lines.append("    " + "-" * 85)
             for field_name, expected, actual, reason in fm["mismatches"]:
                 # Truncate field name if too long
                 field_display = field_name if len(field_name) <= 20 else field_name[:17] + "..."
-                # Differentiate between "not in spec" and "expected None (NULL)"
-                if reason == "not in spec" or reason == "not in resulting_fields":
-                    exp_str = "(not specified)"
+
+                # Generate clear error message based on reason
+                if reason == "not in spec":
+                    # Insert: field in row but not in fields spec
+                    exp_str = f"(field '{field_name}' not specified in expected fields)"
+                elif reason == "not in resulting_fields":
+                    # Modify: field changed but not in resulting_fields
+                    exp_str = f"(field '{field_name}' not specified in resulting_fields)"
                 elif expected is None:
                     exp_str = "None"  # Explicitly expected NULL
                 else:
                     exp_str = repr(expected)
                 act_str = repr(actual)
-                # Truncate long values
-                if len(exp_str) > 20:
-                    exp_str = exp_str[:17] + "..."
+                # Truncate long values (but not the descriptive error messages)
+                if not exp_str.startswith("(field"):
+                    if len(exp_str) > 20:
+                        exp_str = exp_str[:17] + "..."
                 if len(act_str) > 20:
                     act_str = act_str[:17] + "..."
-                lines.append(f"    {field_display:<20} {exp_str:<20} {act_str:<20}")
+                lines.append(f"    {field_display:<20} {exp_str:<45} {act_str:<20}")
             lines.append("")
             error_num += 1
 
