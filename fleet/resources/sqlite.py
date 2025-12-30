@@ -22,6 +22,17 @@ from fleet.verifiers.db import (
 )
 
 
+def _quote_identifier(identifier: str) -> str:
+    """Quote an identifier (table or column name) for SQLite.
+
+    SQLite uses double quotes for identifiers and escapes internal quotes by doubling them.
+    This handles reserved keywords like 'order', 'table', etc.
+    """
+    # Escape any double quotes in the identifier by doubling them
+    escaped = identifier.replace('"', '""')
+    return f'"{escaped}"'
+
+
 class SyncDatabaseSnapshot:
     """Lazy database snapshot that fetches data on-demand through API."""
 
@@ -56,12 +67,12 @@ class SyncDatabaseSnapshot:
             return
 
         # Get table schema
-        schema_response = self.resource.query(f"PRAGMA table_info({table})")
+        schema_response = self.resource.query(f"PRAGMA table_info({_quote_identifier(table)})")
         if schema_response.rows:
             self._schemas[table] = [row[1] for row in schema_response.rows]  # Column names
 
         # Get all data for this table
-        data_response = self.resource.query(f"SELECT * FROM {table}")
+        data_response = self.resource.query(f"SELECT * FROM {_quote_identifier(table)}")
         if data_response.rows and data_response.columns:
             self._data[table] = [
                 dict(zip(data_response.columns, row)) for row in data_response.rows
@@ -122,23 +133,23 @@ class SyncSnapshotQueryBuilder:
         where_parts = []
         for col, op, val in self._conditions:
             if op == "=" and val is None:
-                where_parts.append(f"{col} IS NULL")
+                where_parts.append(f"{_quote_identifier(col)} IS NULL")
             elif op == "IS":
-                where_parts.append(f"{col} IS NULL")
+                where_parts.append(f"{_quote_identifier(col)} IS NULL")
             elif op == "IS NOT":
-                where_parts.append(f"{col} IS NOT NULL")
+                where_parts.append(f"{_quote_identifier(col)} IS NOT NULL")
             elif op == "=":
                 if isinstance(val, str):
                     escaped_val = val.replace("'", "''")
-                    where_parts.append(f"{col} = '{escaped_val}'")
+                    where_parts.append(f"{_quote_identifier(col)} = '{escaped_val}'")
                 else:
-                    where_parts.append(f"{col} = '{val}'")
+                    where_parts.append(f"{_quote_identifier(col)} = '{val}'")
 
         where_clause = " AND ".join(where_parts)
 
         # Build full query
         cols = ", ".join(self._select_cols)
-        query = f"SELECT {cols} FROM {self._table} WHERE {where_clause}"
+        query = f"SELECT {cols} FROM {_quote_identifier(self._table)} WHERE {where_clause}"
 
         if self._order_by:
             query += f" ORDER BY {self._order_by}"
@@ -270,7 +281,7 @@ class SyncSnapshotDiff:
     def _get_primary_key_columns(self, table: str) -> List[str]:
         """Get primary key columns for a table."""
         # Try to get from schema
-        schema_response = self.after.resource.query(f"PRAGMA table_info({table})")
+        schema_response = self.after.resource.query(f"PRAGMA table_info({_quote_identifier(table)})")
         if not schema_response.rows:
             return ["id"]  # Default fallback
 
@@ -409,18 +420,18 @@ class SyncSnapshotDiff:
                 return f"'{val}'"
 
         if len(pk_columns) == 1:
-            return f"{pk_columns[0]} = {escape_value(pk_value)}"
+            return f"{_quote_identifier(pk_columns[0])} = {escape_value(pk_value)}"
         else:
             # Composite key
             if isinstance(pk_value, tuple):
                 conditions = [
-                    f"{col} = {escape_value(val)}"
+                    f"{_quote_identifier(col)} = {escape_value(val)}"
                     for col, val in zip(pk_columns, pk_value)
                 ]
                 return " AND ".join(conditions)
             else:
                 # Shouldn't happen if data is consistent
-                return f"{pk_columns[0]} = {escape_value(pk_value)}"
+                return f"{_quote_identifier(pk_columns[0])} = {escape_value(pk_value)}"
 
     def _expect_no_changes(self):
         """Efficiently verify that no changes occurred between snapshots using row counts."""
@@ -470,7 +481,7 @@ class SyncSnapshotDiff:
 
                     if table in before_tables:
                         before_count_response = self.before.resource.query(
-                            f"SELECT COUNT(*) FROM {table}"
+                            f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
                         )
                         before_count = (
                             before_count_response.rows[0][0]
@@ -480,7 +491,7 @@ class SyncSnapshotDiff:
 
                     if table in after_tables:
                         after_count_response = self.after.resource.query(
-                            f"SELECT COUNT(*) FROM {table}"
+                            f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
                         )
                         after_count = (
                             after_count_response.rows[0][0]
@@ -559,10 +570,10 @@ class SyncSnapshotDiff:
         order_by = ", ".join(pk_columns) if pk_columns else "rowid"
 
         before_response = self.before.resource.query(
-            f"SELECT * FROM {table} ORDER BY {order_by}"
+            f"SELECT * FROM {_quote_identifier(table)} ORDER BY {order_by}"
         )
         after_response = self.after.resource.query(
-            f"SELECT * FROM {table} ORDER BY {order_by}"
+            f"SELECT * FROM {_quote_identifier(table)} ORDER BY {order_by}"
         )
 
         # Quick check: if column counts differ, there's a schema change
@@ -646,7 +657,7 @@ class SyncSnapshotDiff:
                 where_sql = self._build_pk_where_clause(pk_columns, pk)
 
                 # Query before snapshot
-                before_query = f"SELECT * FROM {table} WHERE {where_sql}"
+                before_query = f"SELECT * FROM {_quote_identifier(table)} WHERE {where_sql}"
                 before_response = self.before.resource.query(before_query)
                 before_row = (
                     dict(zip(before_response.columns, before_response.rows[0]))
@@ -743,7 +754,7 @@ class SyncSnapshotDiff:
             try:
                 # For tables with no allowed changes, just check row counts
                 before_count_response = self.before.resource.query(
-                    f"SELECT COUNT(*) FROM {table}"
+                    f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
                 )
                 before_count = (
                     before_count_response.rows[0][0]
@@ -752,7 +763,7 @@ class SyncSnapshotDiff:
                 )
 
                 after_count_response = self.after.resource.query(
-                    f"SELECT COUNT(*) FROM {table}"
+                    f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
                 )
                 after_count = (
                     after_count_response.rows[0][0] if after_count_response.rows else 0
@@ -1132,7 +1143,7 @@ class SyncSnapshotDiff:
                 where_sql = self._build_pk_where_clause(pk_columns, pk)
 
                 # Query before snapshot
-                before_query = f"SELECT * FROM {table} WHERE {where_sql}"
+                before_query = f"SELECT * FROM {_quote_identifier(table)} WHERE {where_sql}"
                 before_response = self.before.resource.query(before_query)
                 before_row = (
                     dict(zip(before_response.columns, before_response.rows[0]))
@@ -1219,7 +1230,7 @@ class SyncSnapshotDiff:
             try:
                 # For tables with no allowed changes, just check row counts
                 before_count_response = self.before.resource.query(
-                    f"SELECT COUNT(*) FROM {table}"
+                    f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
                 )
                 before_count = (
                     before_count_response.rows[0][0]
@@ -1228,7 +1239,7 @@ class SyncSnapshotDiff:
                 )
 
                 after_count_response = self.after.resource.query(
-                    f"SELECT COUNT(*) FROM {table}"
+                    f"SELECT COUNT(*) FROM {_quote_identifier(table)}"
                 )
                 after_count = (
                     after_count_response.rows[0][0] if after_count_response.rows else 0
@@ -1996,13 +2007,13 @@ class SyncQueryBuilder:
     # Compile to SQL
     def _compile(self) -> Tuple[str, List[Any]]:
         cols = ", ".join(self._select_cols)
-        sql = [f"SELECT {cols} FROM {self._table}"]
+        sql = [f"SELECT {cols} FROM {_quote_identifier(self._table)}"]
         params: List[Any] = []
 
         # Joins
         for tbl, onmap in self._joins:
-            join_clauses = [f"{self._table}.{l} = {tbl}.{r}" for l, r in onmap.items()]
-            sql.append(f"JOIN {tbl} ON {' AND '.join(join_clauses)}")
+            join_clauses = [f"{_quote_identifier(self._table)}.{_quote_identifier(l)} = {_quote_identifier(tbl)}.{_quote_identifier(r)}" for l, r in onmap.items()]
+            sql.append(f"JOIN {_quote_identifier(tbl)} ON {' AND '.join(join_clauses)}")
 
         # WHERE
         if self._conditions:
@@ -2010,12 +2021,12 @@ class SyncQueryBuilder:
             for col, op, val in self._conditions:
                 if op in ("IN", "NOT IN") and isinstance(val, tuple):
                     ph = ", ".join(["?" for _ in val])
-                    placeholders.append(f"{col} {op} ({ph})")
+                    placeholders.append(f"{_quote_identifier(col)} {op} ({ph})")
                     params.extend(val)
                 elif op in ("IS", "IS NOT"):
-                    placeholders.append(f"{col} {op} NULL")
+                    placeholders.append(f"{_quote_identifier(col)} {op} NULL")
                 else:
-                    placeholders.append(f"{col} {op} ?")
+                    placeholders.append(f"{_quote_identifier(col)} {op} ?")
                     params.append(val)
             sql.append("WHERE " + " AND ".join(placeholders))
 
@@ -2167,7 +2178,7 @@ class SQLiteResource(Resource):
             tables = []
             for table_name in table_names:
                 # Get table info
-                cursor.execute(f"PRAGMA table_info({table_name})")
+                cursor.execute(f"PRAGMA table_info({_quote_identifier(table_name)})")
                 columns = cursor.fetchall()
 
                 # Get CREATE TABLE SQL
