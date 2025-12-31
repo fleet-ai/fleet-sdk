@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fleet-python"
 
-version = "0.2.99"
+version = "0.2.100"
 description = "Python SDK for Fleet environments"
 authors = [
     {name = "Fleet AI", email = "nic@fleet.so"},
