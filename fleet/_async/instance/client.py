@@ -166,8 +166,12 @@ class AsyncInstanceClient:
         if self._resources is None:
             response = await self.client.request("GET", "/resources")
             if response.status_code != 200:
-                self._resources = []
-                return
+                response_body = response.text[:500] if response.text else "empty"
+                self._resources = []  # Mark as loaded (empty) to prevent retries
+                raise FleetEnvironmentError(
+                    f"Failed to load instance resources: status_code={response.status_code} "
+                    f"(url={self.base_url}, response={response_body})"
+                )
 
             # Handle both old and new response formats
             response_data = response.json()
