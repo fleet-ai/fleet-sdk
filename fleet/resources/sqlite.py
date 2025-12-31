@@ -7,6 +7,7 @@ import tempfile
 import sqlite3
 import os
 import re
+import json
 
 from typing import TYPE_CHECKING
 
@@ -2160,7 +2161,14 @@ class SQLiteResource(Resource):
         response = self.client.request(
             "GET", f"/resources/sqlite/{self.resource.name}/describe"
         )
-        return DescribeResponse(**response.json())
+        try:
+            return DescribeResponse(**response.json())
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Failed to parse JSON response from SQLite describe endpoint. "
+                f"Status: {response.status_code}, "
+                f"Response text: {response.text[:500]}"
+            ) from e
 
     def _describe_direct(self) -> DescribeResponse:
         """Describe database schema from local file or in-memory database."""
