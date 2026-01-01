@@ -1756,7 +1756,8 @@ class AsyncSnapshotDiff:
             return await self._expect_no_changes()
 
         resource = self.after.resource
-        if resource.client is not None and resource._mode == "http":
+        # Disabled: structured diff endpoint not yet available
+        if False and resource.client is not None and resource._mode == "http":
             api_diff = None
             try:
                 payload = {}
@@ -1780,7 +1781,7 @@ class AsyncSnapshotDiff:
                 # Fall back to local diff if API call fails
                 print(f"Warning: Failed to fetch structured diff from API: {e}")
                 print("Falling back to local diff computation...")
-            
+
             # Validate outside try block so AssertionError propagates
             if api_diff is not None:
                 return await self._validate_diff_against_allowed_changes_v2(api_diff, allowed_changes)
