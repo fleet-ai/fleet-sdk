@@ -1733,6 +1733,11 @@ class AsyncSnapshotDiff:
 
     async def expect_only(self, allowed_changes: List[Dict[str, Any]]):
         """Ensure only specified changes occurred."""
+        # Normalize pk values: convert lists to tuples for hashability and consistency
+        for change in allowed_changes:
+            if "pk" in change and isinstance(change["pk"], list):
+                change["pk"] = tuple(change["pk"])
+
         # Special case: empty allowed_changes means no changes should have occurred
         if not allowed_changes:
             return await self._expect_no_changes()
@@ -1751,6 +1756,11 @@ class AsyncSnapshotDiff:
         This version supports field-level specifications for added/removed rows,
         allowing users to specify expected field values instead of just whole-row specs.
         """
+        # Normalize pk values: convert lists to tuples for hashability and consistency
+        for change in allowed_changes:
+            if "pk" in change and isinstance(change["pk"], list):
+                change["pk"] = tuple(change["pk"])
+
         # Special case: empty allowed_changes means no changes should have occurred
         if not allowed_changes:
             return await self._expect_no_changes()
