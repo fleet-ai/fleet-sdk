@@ -1,7 +1,9 @@
 import asyncio
 import argparse
 import json
+import os
 import sys
+import tempfile
 from collections import defaultdict
 from typing import Dict, List, Tuple
 import fleet
@@ -183,7 +185,6 @@ async def run_verifier_sanity_check(
             print(f"  - {task_key}: {error_msg}")
         if len(errors) > 10:
             print(f"  ... and {len(errors) - 10} more")
-        print("\nFix the verifiers and try again.")
         return False, errors
     else:
         print("✓ All verifiers passed!")
@@ -237,6 +238,7 @@ async def main():
     task_count = len(tasks_data)
     task_keys = []
     missing_verifier = []
+    tasks_with_output_schema = []
     for task_data in tasks_data:
         task_key = task_data.get("key") or task_data.get("id")
         if task_key:
@@ -248,6 +250,10 @@ async def main():
         verifier_code = task_data.get("verifier_func") or task_data.get("verifier_code")
         if not verifier_code:
             missing_verifier.append(task_key or "(no key)")
+
+        # Check for output_json_schema
+        if task_data.get("output_json_schema"):
+            tasks_with_output_schema.append(task_key or "(no key)")
 
     # Validate all tasks have verifier_func
     if missing_verifier:
@@ -291,21 +297,64 @@ async def main():
     print(f"✓ Loaded {len(tasks)} tasks")
 
     # Run sanity check (unless skipped)
+    already_confirmed = False  # Track if user already confirmed import
     if not args.skip_sanity_check:
         success, errors = await run_verifier_sanity_check(tasks, client)
-        if not success:
-            sys.exit(1)
 
-        # If only doing sanity check, exit successfully here
+        # If only doing sanity check, exit here
         if args.sanity_check_only:
-            print("\n✓ Sanity check complete! (--sanity-check-only)")
-            print("Tasks are ready to import.")
-            sys.exit(0)
+            if success:
+                print("\n✓ Sanity check complete! (--sanity-check-only)")
+                print("Tasks are ready to import.")
+                sys.exit(0)
+            else:
+                print("\n✗ Sanity check failed (--sanity-check-only)")
+                print("Fix the verifiers and try again.")
+                sys.exit(1)
+
+        # Handle partial failures
+        if not success:
+            # Filter out failed tasks
+            failed_keys = set(errors.keys())
+            passed_tasks = [t for t in tasks if t.key not in failed_keys]
+
+            print("\n" + "=" * 60)
+            print("SANITY CHECK RESULTS")
+            print("=" * 60)
+            print(f"Passed: {len(passed_tasks)}/{len(tasks)} tasks")
+            print(f"Failed: {len(failed_keys)}/{len(tasks)} tasks")
+
+            if len(passed_tasks) == 0:
+                print("\n✗ No tasks passed the sanity check.")
+                print("Fix the verifiers and try again.")
+                sys.exit(1)
+
+            # Prompt user to import only passed tasks
+            if not args.yes:
+                print("\nWould you like to import only the tasks that passed?")
+                response = input("Type 'YES' to import passed tasks only: ")
+                if response != "YES":
+                    print("Import cancelled.")
+                    sys.exit(0)
+                already_confirmed = True  # User already confirmed import
+            else:
+                print("\n⚠️  Auto-importing only tasks that passed (--yes flag)")
+
+            # Update tasks list and tasks_data to only include passed tasks
+            tasks = passed_tasks
+            passed_keys = {t.key for t in passed_tasks}
+            tasks_data = [td for td in tasks_data if td.get("key") in passed_keys]
+            # Also filter tasks_with_output_schema
+            tasks_with_output_schema = [
+                k for k in tasks_with_output_schema if k in passed_keys
+            ]
+
+            print(f"\nProceeding with {len(tasks)} tasks that passed sanity check")
     else:
         print("\n⚠️  Skipping sanity check (--skip-sanity-check)")
 
-    # Confirmation prompt (unless --yes flag is provided)
-    if not args.yes:
+    # Confirmation prompt (unless --yes flag is provided or already confirmed)
+    if not args.yes and not already_confirmed:
         print("\n" + "=" * 60)
         response = input("Type 'YES' to proceed with import: ")
         if response != "YES":
@@ -315,10 +364,78 @@ async def main():
     # Import tasks
     print("\nImporting tasks...")
     try:
-        results = await fleet.import_tasks_async(
-            args.json_file, project_key=args.project_key
-        )
-        print(f"\n✓ Successfully imported {len(results)} task(s)")
+        # If tasks were filtered, write to a temporary file for import
+        if len(tasks_data) < task_count:
+            # Create temporary file with filtered tasks
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False, encoding="utf-8"
+            ) as temp_file:
+                json.dump(tasks_data, temp_file, indent=2, ensure_ascii=False)
+                temp_filename = temp_file.name
+
+            try:
+                results = await fleet.import_tasks_async(
+                    temp_filename, project_key=args.project_key
+                )
+            finally:
+                # Clean up temporary file
+                os.unlink(temp_filename)
+        else:
+            # Import from original file if no filtering occurred
+            results = await fleet.import_tasks_async(
+                args.json_file, project_key=args.project_key
+            )
+
+        # Print success summary
+        print("\n" + "=" * 60)
+        print("IMPORT COMPLETE")
+        print("=" * 60)
+        print(f"✓ Successfully imported {len(results)} task(s)")
+
+        if args.project_key:
+            print(f"✓ Associated with project: {args.project_key}")
+
+        print(f"✓ Team: {account.team_name}")
+
+        # Print HUGE warning if any tasks have output_json_schema
+        if tasks_with_output_schema:
+            print("\n")
+            print("!" * 80)
+            print("!" * 80)
+            print("!" * 80)
+            print(
+                "!!!                                                                          !!!"
+            )
+            print(
+                "!!!                          ⚠️  WARNING WARNING WARNING  ⚠️                          !!!"
+            )
+            print(
+                "!!!                                                                          !!!"
+            )
+            print(
+                f"!!!  {len(tasks_with_output_schema)} TASK(S) HAVE OUTPUT_JSON_SCHEMA THAT NEED MANUAL COPYING!  !!!"
+            )
+            print(
+                "!!!                                                                          !!!"
+            )
+            print(
+                "!!!  The output_json_schema field is NOT automatically imported!            !!!"
+            )
+            print(
+                "!!!  You MUST manually copy the output schemas to each task!                !!!"
+            )
+            print(
+                "!!!                                                                          !!!"
+            )
+            print("!" * 80)
+            print("!" * 80)
+            print("!" * 80)
+            print("\nTasks with output_json_schema:")
+            for i, key in enumerate(tasks_with_output_schema[:20], 1):
+                print(f"  {i}. {key}")
+            if len(tasks_with_output_schema) > 20:
+                print(f"  ... and {len(tasks_with_output_schema) - 20} more")
+            print("\n⚠️  REMEMBER TO MANUALLY COPY OUTPUT SCHEMAS! ⚠️\n")
     except Exception as e:
         print(f"\n✗ Error importing tasks: {e}")
         sys.exit(1)

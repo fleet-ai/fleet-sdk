@@ -17,8 +17,7 @@ def main():
     parser.add_argument(
         "--task-keys",
         "-t",
-        nargs="+",
-        help="Optional list of task keys to export (space-separated)",
+        help="Optional list of task keys to export (comma-separated)",
         default=None,
     )
     parser.add_argument(
@@ -66,10 +65,12 @@ def main():
         print(f"Loading tasks from project: {args.project_key}")
         tasks = fleet.load_tasks(project_key=args.project_key)
     elif args.task_keys:
+        # Split comma-separated task keys and strip whitespace
+        task_keys_list = [key.strip() for key in args.task_keys.split(",")]
         print(
-            f"Loading {len(args.task_keys)} specific task(s): {', '.join(args.task_keys)}"
+            f"Loading {len(task_keys_list)} specific task(s): {', '.join(task_keys_list)}"
         )
-        tasks = fleet.load_tasks(keys=args.task_keys)
+        tasks = fleet.load_tasks(keys=task_keys_list)
     elif args.task_project_key:
         print(f"Loading tasks from task project: {args.task_project_key}")
         tasks = fleet.load_tasks(task_project_key=args.task_project_key)
