@@ -400,6 +400,11 @@ class AsyncEnv(EnvironmentBase):
             base_url = self.urls.api
         elif self.urls and self.urls.root:
             base_url = f"{self.urls.root.rstrip('/')}/raw"
+        elif self._manager_url_override and self._manager_url_override != "local://":
+            # URL mode: strip /api/v1/env suffix to get root URL
+            base_url = self._manager_url_override.rstrip('/')
+            if base_url.endswith('/api/v1/env'):
+                base_url = base_url[:-len('/api/v1/env')]
         else:
             raise ValueError("No API URL configured for this environment")
         return self.instance.api(name, base_url)
