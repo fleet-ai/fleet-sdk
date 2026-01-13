@@ -233,12 +233,7 @@ class GeminiAgent:
         """Run the agent on a task."""
         start_time = time.time()
         
-        system_prompt = f"""You control a browser via tools.
-
-STRICT RULES:
-- Text output with no tool calls means task complete. Only output text when fully done.
-- When finished: output only "DONE: [what you did]"
-"""
+        system_prompt = f"""You are a helpful agent. Complete the task. The session ends when you stop calling tools."""
         
         # Get tools from MCP server and convert to Gemini format
         mcp_tools = self.mcp.get_tools()
