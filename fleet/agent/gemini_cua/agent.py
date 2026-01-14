@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Gemini CUA Agent
+Gemini CUA Agent (Standalone)
+
+Mirrors the Temporal SessionWorkflow approach for running computer-use agents.
 
 Env vars:
     GEMINI_API_KEY: API key
     FLEET_MCP_URL: CUA server URL (http://localhost:PORT)
     FLEET_TASK_PROMPT: Task prompt
     FLEET_TASK_KEY: Task key
-    FLEET_MODEL: Model (default: gemini-2.5-pro)
+    FLEET_MODEL: Model (default: gemini-3-pro-preview)
     FLEET_MAX_STEPS: Max steps (default: 200)
     FLEET_VERBOSE: Enable verbose logging (default: false)
     USE_OAUTH: Use gcloud OAuth instead of API key (default: false)
@@ -21,10 +23,13 @@ import subprocess
 import sys
 import time
 from typing import Any, Dict, List, Optional
-from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
+
+from google.genai.types import Content, Part
 from google import genai
 from google.genai import types
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
+
 import fleet
 from fleet.utils.logging import log_verbose, VERBOSE
 
@@ -37,6 +42,123 @@ if os.environ.get("FLEET_PROXY_ENABLED"):
 # OAuth configuration
 GOOG_PROJECT = os.environ.get("GOOG_PROJECT", "gemini-agents-area")
 USE_OAUTH = os.environ.get("USE_OAUTH", "false").lower() in ("true", "1", "yes")
+
+# Screen dimensions for coordinate denormalization (matches MCP browser)
+SCREEN_WIDTH = 1366
+SCREEN_HEIGHT = 768
+
+# Gemini 3 tool definitions (0-1000 normalized coordinates)
+GEMINI_3_TOOL_DEFINITIONS = [
+    {
+        "name": "click_at",
+        "description": "Click at the specified screen coordinates. Coordinates are normalized 0-1000.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "x": {
+                    "type": "integer",
+                    "description": "X coordinate (0-1000, where 0 is left edge, 1000 is right edge)",
+                },
+                "y": {
+                    "type": "integer",
+                    "description": "Y coordinate (0-1000, where 0 is top edge, 1000 is bottom edge)",
+                },
+            },
+            "required": ["x", "y"],
+        },
+    },
+    {
+        "name": "type_text",
+        "description": "Type text at the current cursor position. Use click_at first to focus the input field.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "The text to type",
+                },
+                "press_enter": {
+                    "type": "boolean",
+                    "description": "Whether to press Enter after typing (default: false)",
+                },
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "key_press",
+        "description": "Press a key or key combination (e.g., 'Enter', 'Tab', 'Meta+A', 'Ctrl+C', 'Backspace').",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "keys": {
+                    "type": "string",
+                    "description": "Key or key combination to press",
+                },
+            },
+            "required": ["keys"],
+        },
+    },
+    {
+        "name": "scroll",
+        "description": "Scroll the page up or down.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "direction": {
+                    "type": "string",
+                    "description": "Direction to scroll: 'up' or 'down'",
+                    "enum": ["up", "down"],
+                },
+            },
+            "required": ["direction"],
+        },
+    },
+    {
+        "name": "wait",
+        "description": "Wait for a few seconds to allow page to load.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "seconds": {
+                    "type": "integer",
+                    "description": "Number of seconds to wait (1-10)",
+                },
+            },
+            "required": ["seconds"],
+        },
+    },
+]
+
+# Key name normalization for xdotool/X11 keysym compatibility
+_KEY_NAME_MAP_LOWER = {
+    "backspace": "BackSpace",
+    "arrowleft": "Left", "arrowright": "Right", "arrowup": "Up", "arrowdown": "Down",
+    "left": "Left", "right": "Right", "up": "Up", "down": "Down",
+    "esc": "Escape", "escape": "Escape",
+    "del": "Delete", "delete": "Delete",
+    "pgup": "Page_Up", "pageup": "Page_Up",
+    "pgdown": "Page_Down", "pgdn": "Page_Down", "pagedown": "Page_Down",
+    "enter": "Return", "return": "Return",
+    "tab": "Tab", "space": "space",
+    "meta": "super", "command": "super", "cmd": "super", "super": "super",
+    "ctrl": "ctrl", "control": "ctrl",
+    "alt": "alt", "shift": "shift",
+    "f1": "F1", "f2": "F2", "f3": "F3", "f4": "F4", "f5": "F5", "f6": "F6",
+    "f7": "F7", "f8": "F8", "f9": "F9", "f10": "F10", "f11": "F11", "f12": "F12",
+    "home": "Home", "end": "End", "insert": "Insert",
+}
+
+
+def normalize_key_name(key: str) -> str:
+    """Normalize key names to xdotool/X11 keysym format."""
+    if not key:
+        return key
+    if "+" in key:
+        parts = key.split("+")
+        normalized_parts = [_KEY_NAME_MAP_LOWER.get(p.lower(), p) for p in parts]
+        return "+".join(normalized_parts)
+    return _KEY_NAME_MAP_LOWER.get(key.lower(), key)
 
 
 def get_oauth_token() -> str:
@@ -53,11 +175,9 @@ def get_gemini_client() -> genai.Client:
     """Create Gemini client with appropriate auth."""
     api_key = os.environ.get("GEMINI_API_KEY")
     custom_endpoint = os.environ.get("FLEET_MODEL_ENDPOINT")
-    
-    # Register endpoint for proxy whitelist
+
     _register_endpoint(custom_endpoint or "generativelanguage.googleapis.com")
-    
-    # Build http_options
+
     http_opts = None
     if USE_OAUTH or custom_endpoint:
         opts = {}
@@ -72,29 +192,75 @@ def get_gemini_client() -> genai.Client:
             opts["api_version"] = "v1alpha"
             log_verbose(f"Using OAuth (project: {GOOG_PROJECT})")
         http_opts = types.HttpOptions(**opts)
-    
+
     return genai.Client(api_key=api_key, http_options=http_opts)
 
+
+def convert_gemini_3_to_mcp(function_name: str, args: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Convert Gemini 3 custom function calls to MCP computer tool format.
+
+    Coordinates are normalized 0-1000, denormalized to screen dimensions.
+    Returns a list of MCP actions since some functions expand to multiple steps.
+    """
+    def denormalize_x(x: int) -> int:
+        return int(x / 1000 * SCREEN_WIDTH)
+
+    def denormalize_y(y: int) -> int:
+        return int(y / 1000 * SCREEN_HEIGHT)
+
+    mcp_actions = []
+
+    if function_name == "click_at":
+        x = denormalize_x(args.get("x", 500))
+        y = denormalize_y(args.get("y", 500))
+        mcp_actions.append({"action": "left_click", "coordinate": [x, y]})
+
+    elif function_name == "type_text":
+        text = args.get("text", "")
+        press_enter = args.get("press_enter", False)
+        mcp_actions.append({"action": "type", "text": text})
+        if press_enter:
+            mcp_actions.append({"action": "key", "text": "Return"})
+
+    elif function_name == "key_press":
+        keys = args.get("keys", "Return")
+        mcp_actions.append({"action": "key", "text": normalize_key_name(keys)})
+
+    elif function_name == "scroll":
+        direction = args.get("direction", "down")
+        mcp_actions.append({
+            "action": "scroll",
+            "coordinate": [SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2],
+            "scroll_direction": direction,
+            "scroll_amount": 5,
+        })
+
+    elif function_name == "wait":
+        seconds = min(args.get("seconds", 3), 10)
+        mcp_actions.append({"action": "wait", "duration": seconds})
+
+    else:
+        # Unknown function, fallback to screenshot
+        mcp_actions.append({"action": "screenshot"})
+
+    return mcp_actions
 
 
 class MCP:
     """MCP client using streamable-http transport."""
-    
+
     def __init__(self, url: str, log_file: Optional[str] = None):
-        # Ensure URL ends with /mcp/ for streamable-http
         self.url = url.rstrip("/") + "/mcp/"
         self._session: Optional[ClientSession] = None
         self._client = None
-        self._tools: List[Dict] = []
         self._log_file = log_file or os.environ.get("FLEET_SESSION_LOG")
         self._log_handle = None
         if self._log_file:
             from pathlib import Path
             Path(self._log_file).parent.mkdir(parents=True, exist_ok=True)
             self._log_handle = open(self._log_file, "a")
-    
+
     async def __aenter__(self):
-        # Connect using streamable-http transport
         print(f"MCP: Connecting to {self.url}...")
         try:
             self._client = streamable_http_client(self.url)
@@ -123,7 +289,7 @@ class MCP:
             print(f"MCP: Failed to list tools: {type(e).__name__}: {e}")
             raise
         return self
-    
+
     async def __aexit__(self, *args):
         if self._session:
             await self._session.__aexit__(*args)
@@ -131,17 +297,16 @@ class MCP:
             await self._client.__aexit__(*args)
         if self._log_handle:
             self._log_handle.close()
-    
+
     def _log(self, entry: dict):
         """Log an entry to the traffic file."""
         if self._log_handle:
-            import json
             from datetime import datetime
             entry["timestamp"] = datetime.now().isoformat()
             entry["url"] = self.url
             self._log_handle.write(json.dumps(entry) + "\n")
             self._log_handle.flush()
-    
+
     async def call(self, name: str, args: Dict = None) -> Dict:
         """Call a tool and return the result."""
         start_time = time.time()
@@ -163,8 +328,7 @@ class MCP:
             if isinstance(item, dict):
                 return item.get(key, default)
             return getattr(item, key, default)
-        
-        # Convert MCP result to dict format expected by agent
+
         content = []
         for item in result.content:
             item_type = _get(item, "type")
@@ -176,8 +340,7 @@ class MCP:
                 })
             elif item_type == "text":
                 content.append({"type": "text", "text": _get(item, "text", "")})
-        
-        # Log the call (just types, not data)
+
         self._log({
             "type": "mcp_call",
             "tool": name,
@@ -187,22 +350,18 @@ class MCP:
             "is_error": result.isError if hasattr(result, "isError") else False,
         })
         return {"content": content, "isError": result.isError if hasattr(result, "isError") else False}
-    
-    def get_tools(self) -> List[Dict]:
-        """Return the list of tools from the server."""
-        return self._tools
 
 
-def mcp_tools_to_gemini(mcp_tools: List[Dict]) -> List[types.FunctionDeclaration]:
-    """Convert MCP tool definitions to Gemini FunctionDeclarations."""
-    declarations = []
-    for tool in mcp_tools:
-        declarations.append(types.FunctionDeclaration(
+def get_gemini_3_tools() -> List[types.FunctionDeclaration]:
+    """Return Gemini 3 custom tools as FunctionDeclarations."""
+    return [
+        types.FunctionDeclaration(
             name=tool["name"],
-            description=tool.get("description", ""),
-            parameters=tool.get("inputSchema", {"type": "object", "properties": {}}),
-        ))
-    return declarations
+            description=tool["description"],
+            parameters=tool["parameters"],
+        )
+        for tool in GEMINI_3_TOOL_DEFINITIONS
+    ]
 
 
 def get_image_data(result: Dict) -> Optional[str]:
@@ -213,75 +372,126 @@ def get_image_data(result: Dict) -> Optional[str]:
     return None
 
 
+def extract_reasoning_from_candidate(candidate) -> Optional[str]:
+    """Extract reasoning trace from Gemini candidate response."""
+    reasoning_parts = []
+
+    if not candidate or not candidate.content or not candidate.content.parts:
+        return None
+
+    has_function_calls = any(
+        hasattr(p, "function_call") and p.function_call for p in candidate.content.parts
+    )
+
+    for part in candidate.content.parts:
+        if hasattr(part, "thought") and part.thought:
+            if isinstance(part.thought, str):
+                reasoning_parts.append(part.thought)
+            elif part.thought is True and hasattr(part, "text") and part.text:
+                reasoning_parts.append(part.text)
+        elif hasattr(part, "text") and part.text and has_function_calls:
+            reasoning_parts.append(part.text)
+
+    if not reasoning_parts:
+        return None
+    return "\n\n".join(reasoning_parts)
+
+
 class GeminiAgent:
     """Gemini Computer Use Agent."""
-    
+
     def __init__(self, mcp: MCP, model: str, session=None):
         self.mcp = mcp
-        # Strip provider prefix if present
         self.model = model.split("/")[-1] if "/" in model else model
         self.client = get_gemini_client()
         self.transcript: List[Dict] = []
-        self.session = session  # Fleet session for live logging
+        self.session = session
         self._consecutive_errors = 0
         self._max_consecutive_errors = 5
-    
-    async def _execute_tool(self, name: str, args: Dict) -> Dict:
-        return await self.mcp.call(name, args)
-    
+
+    async def _take_screenshot(self) -> Optional[str]:
+        """Take a screenshot and return base64 data."""
+        try:
+            result = await self.mcp.call("computer", {"action": "screenshot"})
+            return get_image_data(result)
+        except Exception as e:
+            print(f"Screenshot failed: {e}")
+            return None
+
+    async def _execute_gemini_function(self, name: str, args: Dict) -> Dict:
+        """Execute a Gemini function by converting to MCP actions."""
+        mcp_actions = convert_gemini_3_to_mcp(name, args)
+        log_verbose(f"  Converting {name} -> {len(mcp_actions)} MCP action(s)")
+
+        last_result = None
+        for i, action in enumerate(mcp_actions):
+            log_verbose(f"    Action {i+1}: {action}")
+            last_result = await self.mcp.call("computer", action)
+            if last_result.get("isError"):
+                return last_result
+
+        # After executing actions, take a screenshot
+        screenshot_result = await self.mcp.call("computer", {"action": "screenshot"})
+        return screenshot_result
+
     async def run(self, prompt: str, max_steps: int) -> Dict[str, Any]:
         """Run the agent on a task."""
         start_time = time.time()
-        
-        system_prompt = f"""You are a helpful agent. Complete the task. The session ends when you stop calling tools."""
-        
-        # Get tools from MCP server and convert to Gemini format
-        mcp_tools = self.mcp.get_tools()
-        gemini_tools = mcp_tools_to_gemini(mcp_tools)
-        
-        # Log system prompt and tools
+
+        system_prompt = """You are a helpful agent. Complete the task by interacting with the browser.
+
+Use the available tools to click, type, scroll, and interact with the page.
+Coordinates are normalized 0-1000 (0,0 is top-left, 1000,1000 is bottom-right).
+
+When done, stop calling tools and provide your final response."""
+
+        # Get Gemini 3 tools
+        gemini_tools = get_gemini_3_tools()
+
         log_verbose("\n" + "="*60)
         log_verbose("SYSTEM PROMPT:")
         log_verbose("="*60)
         log_verbose(system_prompt)
-        
-        log_verbose("\n" + "="*60)
-        log_verbose(f"TOOLS ({len(mcp_tools)} total):")
-        log_verbose("="*60)
-        for tool in mcp_tools:
-            log_verbose(f"\n  {tool['name']}:")
-            log_verbose(f"    Description: {tool.get('description', '')[:200]}")
-            schema = tool.get('inputSchema', {})
-            props = schema.get('properties', {})
-            if props:
-                log_verbose(f"    Parameters:")
-                for pname, pinfo in props.items():
-                    ptype = pinfo.get('type', 'any')
-                    pdesc = pinfo.get('description', '')[:80]
-                    log_verbose(f"      - {pname} ({ptype}): {pdesc}")
-        
+
+        log_verbose(f"\nTOOLS ({len(gemini_tools)} total):")
+        for tool in GEMINI_3_TOOL_DEFINITIONS:
+            log_verbose(f"  {tool['name']}: {tool['description'][:80]}...")
+
+        # Configure Gemini with thinking enabled
         config = types.GenerateContentConfig(
-            max_output_tokens=4096,
+            max_output_tokens=65536,
             system_instruction=system_prompt,
             tools=[types.Tool(function_declarations=gemini_tools)],
             thinking_config=types.ThinkingConfig(include_thoughts=True),
         )
-        
+
         # Set config on session for logging (if session exists)
         if self.session:
             self.session.config = config
         
-        history: List[types.Content] = []
-        
-        user_prompt = f"""###User instruction: {prompt}"""
-        history.append(types.Content(role="user", parts=[types.Part(text=user_prompt)]))
+        # Take initial screenshot
+        print("Taking initial screenshot...")
+        initial_screenshot = await self._take_screenshot()
+
+        # Build initial user message with task + screenshot
+        user_parts = [Part(text=f"Task: {prompt}")]
+        if initial_screenshot:
+            user_parts.append(Part(inline_data={
+                "mime_type": "image/png",
+                "data": initial_screenshot,
+            }))
+            print("✓ Initial screenshot captured")
+        else:
+            print("⚠ Could not capture initial screenshot")
+
+        history: List[Content] = [Content(role="user", parts=user_parts)]
         self.transcript.append({"role": "user", "content": prompt})
-        
+
         log_verbose("\n" + "="*60)
         log_verbose("USER PROMPT:")
         log_verbose("="*60)
-        log_verbose(user_prompt)
-        
+        log_verbose(prompt)
+
         for step in range(1, max_steps + 1):
             print(f"\n{'='*50}")
             print(f"Step {step}/{max_steps}")
@@ -295,40 +505,45 @@ class GeminiAgent:
                     contents=history,
                     config=config,
                 )
-                self._consecutive_errors = 0  # Reset on success
+                self._consecutive_errors = 0
             except Exception as e:
                 self._consecutive_errors += 1
                 error_type = type(e).__name__
                 print(f"API error ({error_type}): {e}")
                 print(f"  Consecutive errors: {self._consecutive_errors}/{self._max_consecutive_errors}")
-                
+
                 if self._consecutive_errors >= self._max_consecutive_errors:
                     return self._result(False, f"Too many consecutive API errors: {error_type}: {e}", step, start_time)
                 
                 # Check for retryable errors
                 if "429" in str(e) or "quota" in str(e).lower() or "rate" in str(e).lower():
-                    print(f"  Rate limited, waiting 10s...")
+                    print("  Rate limited, waiting 10s...")
                     await asyncio.sleep(10)
                     continue
                 elif "503" in str(e) or "500" in str(e) or "overloaded" in str(e).lower():
-                    print(f"  Server error, waiting 5s...")
+                    print("  Server error, waiting 5s...")
                     await asyncio.sleep(5)
                     continue
                 else:
                     return self._result(False, f"{error_type}: {e}", step, start_time)
-            
+
             if not response.candidates:
                 print("[WARN] No candidates, retrying...")
                 log_verbose(f"  Response: {response}")
                 continue
-            
+
             candidate = response.candidates[0]
             if not candidate.content or not candidate.content.parts:
                 print("[WARN] Empty response, retrying...")
-                log_verbose(f"  Candidate: {candidate}")
                 continue
-            
-            # Log to Fleet session (live)
+
+            # Extract reasoning trace
+            reasoning = extract_reasoning_from_candidate(candidate)
+            if reasoning:
+                preview = reasoning[:100] + "..." if len(reasoning) > 100 else reasoning
+                print(f"🧠 Thinking: {preview}")
+
+            # Log to Fleet session if available
             if self.session:
                 try:
                     await self.session.log(history, response)
@@ -354,19 +569,19 @@ class GeminiAgent:
             
             # Extract function calls and text
             function_calls = [p.function_call for p in candidate.content.parts if p.function_call]
-            text_parts = [p.text for p in candidate.content.parts if p.text]
-            
+            text_parts = [p.text for p in candidate.content.parts if p.text and not getattr(p, "thought", False)]
+
             # Print model output
             if text_parts:
                 for text in text_parts:
                     display = text[:200] + "..." if len(text) > 200 else text
                     print(f"Model: {display}")
-            
-            # Check for completion
+
+            # Check for completion (no function calls)
             if text_parts and not function_calls:
                 final_text = " ".join(text_parts)
                 self.transcript.append({"role": "assistant", "content": final_text})
-                
+
                 if final_text.strip().upper().startswith("DONE:"):
                     answer = final_text.strip()[5:].strip()
                     print(f"\n✓ Agent completed: {answer[:100]}")
@@ -376,28 +591,33 @@ class GeminiAgent:
                     print(f"\n✗ Agent failed: {error[:100]}")
                     return self._result(False, error, step, start_time)
                 else:
-                    # Text without DONE/FAILED - treat as completion
                     print(f"\n✓ Agent finished with response")
                     return self._result(True, None, step, start_time, final_text)
-            
+
+            # Check for thinking-only response (no function calls, no text)
+            if not function_calls and not text_parts:
+                print("🧠 Thinking-only response, continuing...")
+                # Add thinking to history so model has context
+                history.append(candidate.content)
+                continue
+
             if function_calls:
                 # Add model's response to history
                 history.append(candidate.content)
-                
+
                 log_verbose(f"\n  Executing {len(function_calls)} function call(s):")
-                
-                # Execute each function call in series with delays
+
+                # Execute each function call
                 response_parts = []
                 for i, fc in enumerate(function_calls):
                     name = fc.name
                     args = dict(fc.args) if fc.args else {}
                     print(f"  Tool {i+1}/{len(function_calls)}: {name}({json.dumps(args)})")
                     self.transcript.append({"role": "tool_call", "name": name, "args": args})
-                    
+
                     try:
-                        result = await self._execute_tool(name, args)
-                        log_verbose(f"    Result: isError={result.get('isError', False)}, content_types={[c.get('type') for c in result.get('content', [])]}")
-                        
+                        result = await self._execute_gemini_function(name, args)
+
                         if result.get("isError"):
                             self._consecutive_errors += 1
                             error_text = ""
@@ -405,66 +625,72 @@ class GeminiAgent:
                                 if c.get("type") == "text":
                                     error_text = c.get("text", "")[:200]
                             print(f"    Tool error: {error_text}")
+
+                            # Return error to model
+                            response_parts.append(Part(
+                                function_response={
+                                    "name": name,
+                                    "response": {"status": "error", "error": error_text},
+                                }
+                            ))
                         else:
                             self._consecutive_errors = 0
+                            img_data = get_image_data(result)
+
+                            if img_data:
+                                # Function response with screenshot
+                                response_parts.append(Part(
+                                    function_response={
+                                        "name": name,
+                                        "response": {"status": "success"},
+                                    }
+                                ))
+                                # Add screenshot as inline_data
+                                response_parts.append(Part(
+                                    inline_data={
+                                        "mime_type": "image/png",
+                                        "data": img_data,
+                                    }
+                                ))
+                                log_verbose("    Response: screenshot captured")
+                            else:
+                                response_parts.append(Part(
+                                    function_response={
+                                        "name": name,
+                                        "response": {"status": "success"},
+                                    }
+                                ))
+                                log_verbose("    Response: no screenshot")
+
                     except Exception as e:
                         self._consecutive_errors += 1
                         error_type = type(e).__name__
                         print(f"  Tool exception ({error_type}): {e}")
-                        print(f"  Consecutive errors: {self._consecutive_errors}/{self._max_consecutive_errors}")
-                        log_verbose(f"    Exception: {error_type}: {e}")
-                        
-                        # Check if this is a connection/MCP error that we should fail fast on
+
                         if "connection" in str(e).lower() or "closed" in str(e).lower():
-                            print(f"  MCP connection lost, failing task")
+                            print("  MCP connection lost, failing task")
                             return self._result(False, f"MCP connection error: {e}", step, start_time)
-                        
-                        result = {"content": [{"type": "text", "text": str(e)}], "isError": True}
-                    
-                    # Build function response with image embedded (per reference format)
-                    img_data = get_image_data(result)  # Base64 string
-                    
-                    if img_data:
-                        log_verbose(f"    Response: image (base64 len={len(img_data)})")
-                        # Function response with image in parts
-                        fr_part = types.Part(
-                            function_response=types.FunctionResponse(
-                                name=name,
-                                response={"status": "success" if not result.get("isError") else "error"},
-                                parts=[
-                                    types.FunctionResponsePart(
-                                        inline_data=types.FunctionResponseBlob(
-                                            mime_type="image/png",
-                                            data=img_data,  # Base64 string
-                                        )
-                                    )
-                                ],
-                            )
-                        )
-                    else:
-                        log_verbose(f"    Response: no image (status only)")
-                        # Function response without image
-                        fr_part = types.Part(
-                            function_response=types.FunctionResponse(
-                                name=name,
-                                response={"status": "error" if result.get("isError") else "success"},
-                            )
-                        )
-                    response_parts.append(fr_part)
-                    
-                    # Small delay between tool calls to let page settle
+
+                        response_parts.append(Part(
+                            function_response={
+                                "name": name,
+                                "response": {"status": "error", "error": str(e)},
+                            }
+                        ))
+
+                    # Small delay between tool calls
                     if i < len(function_calls) - 1:
                         await asyncio.sleep(0.1)
-                
-                # Add function responses with role="model" (per reference)
-                history.append(types.Content(role="model", parts=response_parts))
-                log_verbose(f"  Added {len(response_parts)} function response(s) to history")
-        
-        # Max steps reached - still mark as completed so verification runs
-        # The agent may have done the task but just didn't say "DONE"
-        print(f"\n⚠ Max steps ({max_steps}) reached - will still run verification")
+
+                # Add function responses to history as user role
+                # (Gemini expects function_response in user messages)
+                history.append(Content(role="user", parts=response_parts))
+                log_verbose(f"  Added {len(response_parts)} response part(s) to history")
+
+        # Max steps reached
+        print(f"\n⚠ Max steps ({max_steps}) reached")
         return self._result(True, "Max steps reached", max_steps, start_time, "Max steps reached - task may be complete")
-    
+
     def _result(self, completed: bool, error: Optional[str], steps: int, start_time: float, answer: str = None) -> Dict:
         """Build result dict."""
         return {
@@ -485,21 +711,21 @@ async def main():
         "task_key": os.environ.get("FLEET_TASK_KEY", ""),
         "job_id": os.environ.get("FLEET_JOB_ID"),
         "instance_id": os.environ.get("FLEET_INSTANCE_ID"),
-        "model": os.environ.get("FLEET_MODEL", "gemini-2.5-pro"),
+        "model": os.environ.get("FLEET_MODEL", "gemini-3-pro-preview"),
         "max_steps": int(os.environ.get("FLEET_MAX_STEPS", "200")),
     }
-    
-    print(f"Gemini CUA Agent")
+
+    print("Gemini CUA Agent")
     print(f"  Model: {config['model']}")
     print(f"  MCP: {config['url']}")
     print(f"  Verbose: {VERBOSE}")
     print(f"  Task: {config['prompt'][:80]}...")
-    
+
     if not os.environ.get("GEMINI_API_KEY"):
         result = {"task_key": config["task_key"], "completed": False, "error": "No GEMINI_API_KEY"}
         print(json.dumps(result))
         return result
-    
+
     try:
         # Create Fleet session for live logging
         session = None
@@ -510,15 +736,14 @@ async def main():
                 task_key=config["task_key"],
                 instance_id=config["instance_id"],
             )
-        
+
         async with MCP(config["url"]) as mcp:
             agent = GeminiAgent(mcp, config["model"], session=session)
             result = await agent.run(config["prompt"], config["max_steps"])
             result["task_key"] = config["task_key"]
-            # Include session_id in result so orchestrator can complete it after verification
             if session and session.session_id:
                 result["session_id"] = session.session_id
-            
+
             print(json.dumps(result))
             return result
     except Exception as e:
