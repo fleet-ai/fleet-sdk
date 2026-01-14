@@ -2,8 +2,6 @@
 """
 Gemini CUA Agent (Standalone)
 
-Mirrors the Temporal SessionWorkflow approach for running computer-use agents.
-
 Env vars:
     GEMINI_API_KEY: API key
     FLEET_MCP_URL: CUA server URL (http://localhost:PORT)
