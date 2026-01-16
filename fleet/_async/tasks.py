@@ -346,8 +346,9 @@ def verifier_from_string(
                 return False
             return target in numbers
 
-        # Create a local namespace for executing the code
-        local_namespace = {
+        # Create a globals namespace with all required imports
+        exec_globals = globals().copy()
+        exec_globals.update({
             "TASK_SUCCESSFUL_SCORE": TASK_SUCCESSFUL_SCORE,
             "TASK_FAILED_SCORE": TASK_FAILED_SCORE,
             "IgnoreConfig": IgnoreConfig,
@@ -358,10 +359,17 @@ def verifier_from_string(
             "json": json,
             "re": re,
             "string": string,
-        }
+        })
+
+        # Create a local namespace for executing the code
+        local_namespace = {}
 
         # Execute the cleaned verifier code in the namespace
-        exec(cleaned_code, globals(), local_namespace)
+        exec(cleaned_code, exec_globals, local_namespace)
+
+        # Merge local_namespace into exec_globals so helper functions are accessible
+        # from the main verifier function when it's called
+        exec_globals.update(local_namespace)
 
         # Find the function that was defined (not imported)
         # Functions defined via exec have co_filename == '<string>'

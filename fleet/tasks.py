@@ -364,6 +364,10 @@ def verifier_from_string(
         # Execute the cleaned verifier code in the namespace
         exec(cleaned_code, exec_globals, local_namespace)
 
+        # Merge local_namespace into exec_globals so helper functions are accessible
+        # from the main verifier function when it's called
+        exec_globals.update(local_namespace)
+
         # Find the function that was defined (not imported)
         # Functions defined via exec have co_filename == '<string>'
         # Imported functions have their actual module file path
