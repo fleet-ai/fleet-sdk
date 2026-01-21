@@ -941,6 +941,8 @@ class AsyncFleet:
             verifier_sha=verifier_sha,  # Set verifier_sha
             verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
             metadata=task_json.get("metadata", {}),  # Default empty metadata
+            writer_metadata=task_json.get("writer_metadata"),  # Writer metadata
+            qa_metadata=task_json.get("qa_metadata"),  # QA metadata
             output_json_schema=task_json.get("output_json_schema"),  # JSON schema for output
         )
         return task
@@ -1270,6 +1272,8 @@ class AsyncFleet:
         prompt: Optional[str] = None,
         verifier_code: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        writer_metadata: Optional[Dict[str, Any]] = None,
+        qa_metadata: Optional[Dict[str, Any]] = None,
     ) -> TaskResponse:
         """Update an existing task.
 
@@ -1278,11 +1282,19 @@ class AsyncFleet:
             prompt: New prompt text for the task (optional)
             verifier_code: Python code for task verification (optional)
             metadata: Additional metadata for the task (optional)
+            writer_metadata: Metadata filled by task writer (optional)
+            qa_metadata: Metadata filled by QA reviewer (optional)
 
         Returns:
             TaskResponse containing the updated task details
         """
-        payload = TaskUpdateRequest(prompt=prompt, verifier_code=verifier_code, metadata=metadata)
+        payload = TaskUpdateRequest(
+            prompt=prompt,
+            verifier_code=verifier_code,
+            metadata=metadata,
+            writer_metadata=writer_metadata,
+            qa_metadata=qa_metadata,
+        )
         response = await self.client.request(
             "PUT", f"/v1/tasks/{task_key}", json=payload.model_dump(exclude_none=True)
         )

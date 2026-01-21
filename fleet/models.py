@@ -161,6 +161,9 @@ class TaskRequest(BaseModel):
     version: Optional[str] = Field(None, title="Version")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
+    writer_metadata: Optional[Dict[str, Any]] = Field(
+        None, title="Writer Metadata", description="Metadata filled by task writer"
+    )
     output_json_schema: Optional[Dict[str, Any]] = Field(
         None, title="Output Json Schema"
     )
@@ -170,6 +173,12 @@ class TaskUpdateRequest(BaseModel):
     prompt: Optional[str] = Field(None, title="Prompt")
     verifier_code: Optional[str] = Field(None, title="Verifier Code")
     metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
+    writer_metadata: Optional[Dict[str, Any]] = Field(
+        None, title="Writer Metadata", description="Metadata filled by task writer"
+    )
+    qa_metadata: Optional[Dict[str, Any]] = Field(
+        None, title="QA Metadata", description="Metadata filled by QA reviewer"
+    )
 
 
 class VerifierData(BaseModel):
@@ -196,6 +205,8 @@ class TaskResponse(BaseModel):
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     verifier: Optional[VerifierData] = Field(None, title="Verifier")
     metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
+    writer_metadata: Optional[Dict[str, Any]] = Field(None, title="Writer Metadata")
+    qa_metadata: Optional[Dict[str, Any]] = Field(None, title="QA Metadata")
     output_json_schema: Optional[Dict[str, Any]] = Field(
         None, title="Output Json Schema"
     )
@@ -500,6 +511,8 @@ class TaskInfo(BaseModel):
     verifier_func: Optional[str] = Field(None, title="Verifier Func")
     verifier_id: Optional[str] = Field(None, title="Verifier Id")
     metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
+    writer_metadata: Optional[Dict[str, Any]] = Field(None, title="Writer Metadata")
+    qa_metadata: Optional[Dict[str, Any]] = Field(None, title="QA Metadata")
 
 
 class TaskSessionGroup(BaseModel):
