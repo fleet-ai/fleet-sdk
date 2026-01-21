@@ -164,6 +164,10 @@ class TaskRequest(BaseModel):
     output_json_schema: Optional[Dict[str, Any]] = Field(
         None, title="Output Json Schema"
     )
+    task_scenario_id: Optional[str] = Field(None, title="Task Scenario Id")
+    verifier_runtime_version: Optional[str] = Field(
+        None, title="Verifier Runtime Version"
+    )
 
 
 class TaskUpdateRequest(BaseModel):
@@ -198,6 +202,10 @@ class TaskResponse(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
     output_json_schema: Optional[Dict[str, Any]] = Field(
         None, title="Output Json Schema"
+    )
+    task_scenario_id: Optional[str] = Field(None, title="Task Scenario Id")
+    verifier_runtime_version: Optional[str] = Field(
+        None, title="Verifier Runtime Version"
     )
 
 
