@@ -7,7 +7,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, conint
+from pydantic import BaseModel, Field, conint
 
 
 class CDPDescribeResponse(BaseModel):
@@ -55,13 +55,11 @@ class Instance(BaseModel):
 
 
 class InstanceRequest(BaseModel):
-    """Model for creating a new instance."""
-
     env_key: str = Field(..., title="Env Key")
     env_version: Optional[str] = Field(None, title="Env Version")
     data_key: Optional[str] = Field(None, title="Data Key")
     data_version: Optional[str] = Field(None, title="Data Version")
-    region: Optional[str] = Field(None, title="Region", description="Region name or cluster name. If not provided, uses default from ConfigMap.")
+    region: Optional[str] = Field("us-west-1", title="Region")
     seed: Optional[int] = Field(None, title="Seed")
     timestamp: Optional[int] = Field(None, title="Timestamp")
     p_error: Optional[float] = Field(None, title="P Error")
@@ -71,15 +69,9 @@ class InstanceRequest(BaseModel):
     force_pull: Optional[bool] = Field(None, title="Force Pull")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     image_type: Optional[str] = Field(None, title="Image Type")
-    profile_id: Optional[str] = Field(None, title="Profile Id")
-    created_from: Optional[str] = Field("api", title="Created From")
+    created_from: Optional[str] = Field(None, title="Created From")
     ttl_seconds: Optional[int] = Field(None, title="TTL Seconds")
     heartbeat_interval: Optional[int] = Field(None, title="Heartbeat Interval")
-    async_provision: bool = Field(False, title="Async Provision", description="Enable async provisioning (queues job, returns immediately with status=QUEUED)")
-    instance_mode: Optional[str] = Field(None, title="Instance Mode", description="Instance mode: 'default', 'dev' (SSH enabled, higher resources)")
-    ssh_public_keys: Optional[List[str]] = Field(None, title="SSH Public Keys", description="SSH public keys to inject for dev mode")
-    snapshot_interval_minutes: Optional[int] = Field(None, title="Snapshot Interval Minutes", description="Periodic snapshot interval (0 or None = disabled)")
-    version: Optional[str] = Field(None, title="Version", description="Deprecated")
 
 
 class InstanceStatus(Enum):
@@ -162,22 +154,16 @@ class TableSchema(BaseModel):
 
 
 class TaskRequest(BaseModel):
-    """Request model for creating a new task."""
-
-    model_config = ConfigDict(extra="ignore", populate_by_name=True)
-
     key: str = Field(..., title="Key")
     prompt: str = Field(..., title="Prompt")
-    environment_id: str = Field(..., title="Environment Id", alias="env_id")
+    environment_id: str = Field(..., title="Environment Id")
     verifier_id: Optional[str] = Field(None, title="Verifier Id")
-    verifier_func: Optional[str] = Field(None, title="Verifier Func")
     version: Optional[str] = Field(None, title="Version")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
-    project_key: Optional[str] = Field(None, title="Project Key")
-    data_id: Optional[str] = Field(None, title="Data Id")
-    data_version: Optional[str] = Field(None, title="Data Version")
-    output_json_schema: Optional[Dict[str, Any]] = Field(None, title="Output Json Schema")
-    writer_metadata: Optional[Dict[str, Any]] = Field(None, title="Writer Metadata", description="Metadata filled by task writer")
+    metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
+    output_json_schema: Optional[Dict[str, Any]] = Field(
+        None, title="Output Json Schema"
+    )
 
 
 class TaskUpdateRequest(BaseModel):
