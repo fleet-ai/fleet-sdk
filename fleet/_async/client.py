@@ -941,8 +941,6 @@ class AsyncFleet:
             verifier_sha=verifier_sha,  # Set verifier_sha
             verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
             metadata=task_json.get("metadata", {}),  # Default empty metadata
-            writer_metadata=task_json.get("writer_metadata"),  # Writer metadata
-            qa_metadata=task_json.get("qa_metadata"),  # QA metadata
             output_json_schema=task_json.get("output_json_schema"),  # JSON schema for output
         )
         return task
@@ -1117,8 +1115,6 @@ class AsyncFleet:
                 verifier_sha=verifier_sha,  # Set verifier_sha
                 verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
                 metadata=metadata,
-                writer_metadata=getattr(task_response, "writer_metadata", None),  # Writer metadata
-                qa_metadata=getattr(task_response, "qa_metadata", None),  # QA metadata
                 output_json_schema=getattr(task_response, "output_json_schema", None),  # Get output_json_schema if available
             )
             tasks.append(task)

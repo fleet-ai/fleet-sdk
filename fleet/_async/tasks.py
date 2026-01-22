@@ -38,12 +38,6 @@ class Task(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(
         default_factory=dict, description="Additional task metadata"
     )
-    writer_metadata: Optional[Dict[str, Any]] = Field(
-        None, description="Metadata filled by task writer"
-    )
-    qa_metadata: Optional[Dict[str, Any]] = Field(
-        None, description="Metadata filled by QA reviewer"
-    )
     output_json_schema: Optional[Dict[str, Any]] = Field(
         None, description="JSON schema for expected output format"
     )
