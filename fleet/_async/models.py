@@ -199,8 +199,6 @@ class TaskResponse(BaseModel):
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     verifier: Optional[VerifierData] = Field(None, title="Verifier")
     metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
-    writer_metadata: Optional[Dict[str, Any]] = Field(None, title="Writer Metadata")
-    qa_metadata: Optional[Dict[str, Any]] = Field(None, title="QA Metadata")
     output_json_schema: Optional[Dict[str, Any]] = Field(None, title="Output Json Schema")
 
 
