@@ -40,6 +40,12 @@ class Task(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(
         default_factory=dict, description="Additional task metadata"
     )
+    writer_metadata: Optional[Dict[str, Any]] = Field(
+        None, description="Metadata filled by task writer"
+    )
+    qa_metadata: Optional[Dict[str, Any]] = Field(
+        None, description="Metadata filled by QA reviewer"
+    )
     output_json_schema: Optional[Dict[str, Any]] = Field(
         None, description="JSON schema for expected output format"
     )
@@ -457,7 +463,12 @@ def load_tasks(
 
 
 def update_task(
-    task_key: str, prompt: Optional[str] = None, verifier_code: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None
+    task_key: str,
+    prompt: Optional[str] = None,
+    verifier_code: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    writer_metadata: Optional[Dict[str, Any]] = None,
+    qa_metadata: Optional[Dict[str, Any]] = None,
 ):
     """Convenience function to update an existing task.
 
@@ -466,6 +477,8 @@ def update_task(
         prompt: New prompt text for the task (optional)
         verifier_code: Python code for task verification (optional)
         metadata: Additional metadata for the task (optional)
+        writer_metadata: Metadata filled by task writer (optional)
+        qa_metadata: Metadata filled by QA reviewer (optional)
 
     Returns:
         TaskResponse containing the updated task details
@@ -474,12 +487,18 @@ def update_task(
         response = fleet.update_task("my-task", prompt="New prompt text")
         response = fleet.update_task("my-task", verifier_code="def verify(env): return True")
         response = fleet.update_task("my-task", metadata={"seed": 42, "story": "Updated story"})
+        response = fleet.update_task("my-task", writer_metadata={"author": "john"})
     """
     from .global_client import get_client
 
     client = get_client()
     return client.update_task(
-        task_key=task_key, prompt=prompt, verifier_code=verifier_code, metadata=metadata
+        task_key=task_key,
+        prompt=prompt,
+        verifier_code=verifier_code,
+        metadata=metadata,
+        writer_metadata=writer_metadata,
+        qa_metadata=qa_metadata,
     )
 
 
