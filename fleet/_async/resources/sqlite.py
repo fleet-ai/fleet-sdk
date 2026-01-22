@@ -2407,7 +2407,14 @@ class AsyncSQLiteResource(Resource):
             f"/resources/sqlite/{self.resource.name}/query",
             json=request.model_dump(),
         )
-        return QueryResponse(**response.json())
+        try:
+            return QueryResponse(**response.json())
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Failed to parse JSON response from SQLite query endpoint. "
+                f"Status: {response.status_code}, "
+                f"Response text: {response.text[:500] if response.text else '(empty)'}"
+            ) from e
 
     async def _query_direct(
         self, query: str, args: Optional[List[Any]] = None, read_only: bool = True
