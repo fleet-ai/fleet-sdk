@@ -41,6 +41,9 @@ async def main():
         run_id="run-123",
     )
 
+    # Access the environment URL
+    print(env.urls.app[0])
+
     # ... interact with the environment ...
 
     # Clean up
