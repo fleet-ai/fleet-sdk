@@ -78,9 +78,9 @@ env = await fleet.env.make_async(
 )
 ```
 
-### With Heartbeats
+### With Heartbeats (Optional)
 
-Enable heartbeats to keep environments alive during long-running operations:
+Optionally enable heartbeats to keep environments alive during long-running operations:
 
 ```python
 env = await fleet.env.make_async(
@@ -102,7 +102,7 @@ await env.heartbeat()
 await fleet.env.heartbeat_async(instance_id)
 ```
 
-If a heartbeat is missed 3 consecutive times, the instance will be terminated. Heartbeats take precedence over the TTL.
+Heartbeats are optional. If `heartbeat_interval` is not set, the instance lifetime is controlled solely by `ttl_seconds`. If heartbeats are enabled and missed 3 consecutive times, the instance will be terminated. Heartbeats take precedence over the TTL.
 
 ## Instance Management
 
