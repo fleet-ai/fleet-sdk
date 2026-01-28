@@ -68,16 +68,6 @@ tasks = await fleet.load_tasks_async(project_key="my-project")
 
 ## Creating Environments
 
-### From Task Object (Recommended)
-
-The simplest way to create an environment from a task:
-
-```python
-env = await task.make(ttl_seconds=7200, run_id="run-123")
-```
-
-### From Environment Parameters
-
 ```python
 env = await fleet.env.make_async(
     env_key=task.env_key,
@@ -204,7 +194,10 @@ async def main():
     
     for task in tasks:
         # Create environment with heartbeat support
-        env = await task.make(
+        env = await fleet.env.make_async(
+            env_key=task.env_key,
+            data_key=task.data_key,
+            env_variables=task.env_variables,
             ttl_seconds=7200,
             run_id="my-evaluation-run",
             heartbeat_interval=30,
