@@ -8,88 +8,217 @@ The Fleet Python SDK provides programmatic access to Fleet's environment infrast
 
 ## Installation
 
-Install the Fleet SDK using pip:
-
 ```bash
 pip install fleet-python
 ```
 
-### Alpha/Pre-release Versions
-
-To install the latest alpha or pre-release version:
-
-```bash
-pip install --pre fleet-python
-```
-
-To install a specific alpha version:
-
-```bash
-pip install fleet-python==0.2.64-alpha1
-```
-
 ## API Key Setup
 
-Fleet requires an API key for authentication. You can obtain one from the [Fleet Platform](https://fleetai.com/dashboard/api-keys).
-
-Set your API key as an environment variable:
+Get your API key from the [Fleet Dashboard](https://fleetai.com/dashboard/api-keys), then set it as an environment variable:
 
 ```bash
 export FLEET_API_KEY="sk_your_key_here"
 ```
 
-## Basic Usage
+## Quick Start
 
 ```python
 import fleet
-import datetime
 
-# Create environment by key
-env = fleet.env.make("fira")
+async def main():
+    # Load a task
+    tasks = await fleet.load_tasks_async(
+        keys=["task_abcdef"]
+    )
+    task = tasks[0]
 
-# Reset environment with seed and options
-env.reset(
-    seed=42,
-    timestamp=int(datetime.datetime.now().timestamp())
+    # Create an environment from the task
+    env = await fleet.env.make_async(
+        env_key=task.env_key,
+        data_key=task.data_key,
+        env_variables=task.env_variables,
+        ttl_seconds=7200,
+        run_id="run-123",
+    )
+
+    # ... interact with the environment ...
+
+    # Clean up
+    await env.close()
+```
+
+## Loading Tasks
+
+### By Task Keys
+
+```python
+tasks = await fleet.load_tasks_async(
+    keys=["task_abcdef"]
 )
-
-# Access environment state ('current' is the resource id for a sqlite database)
-sql = env.state("sqlite://current")
-sql.exec("UPDATE customers SET status = 'active' WHERE id = 123")
-
-# Clean up
-env.close()
 ```
 
-## Environment Management
-
-### Creating Instances
+### By Project Key
 
 ```python
-# Create environment instance with explicit version
-env = fleet.env.make("fira:v1.2.5")
-
-# Create environment instance with default (latest) version
-env = fleet.env.make("fira")
-
+tasks = await fleet.load_tasks_async(project_key="my-project")
 ```
 
-### Connecting to Existing Instances
+## Creating Environments
+
+### From Task Object (Recommended)
+
+The simplest way to create an environment from a task:
 
 ```python
-# Connect to a running instance
-env = fleet.env.get("env_instance_id")
+env = await task.make(ttl_seconds=7200, run_id="run-123")
+```
 
-# List all running instances
-instances = fleet.env.list_instances()
-for instance in instances:
-    print(f"Instance: {instance.instance_id}")
-    print(f"Type: {instance.environment_type}")
-    print(f"Status: {instance.status}")
+### From Environment Parameters
 
-# Filter instances by status (running, pending, stopped, error)
-running_instances = fleet.env.list_instances(status_filter="running")
+```python
+env = await fleet.env.make_async(
+    env_key=task.env_key,
+    data_key=task.data_key,
+    env_variables=task.env_variables,
+    ttl_seconds=7200,
+    run_id="run-123",
+)
+```
 
-# List available environment types
-available_envs = fleet.env.list_envs()
+### With Heartbeats
+
+Enable heartbeats to keep environments alive during long-running operations:
+
+```python
+env = await fleet.env.make_async(
+    env_key=task.env_key,
+    data_key=task.data_key,
+    env_variables=task.env_variables,
+    ttl_seconds=10800,
+    heartbeat_interval=30,  # seconds
+)
+```
+
+Send heartbeats to keep the environment alive:
+
+```python
+# Via the environment object
+await env.heartbeat()
+
+# Or via instance ID
+await fleet.env.heartbeat_async(instance_id)
+```
+
+If a heartbeat is missed 3 consecutive times, the instance will be terminated. Heartbeats take precedence over the TTL.
+
+## Instance Management
+
+### List Instances
+
+```python
+# List all instances for a run
+instances = await fleet.env.list_instances_async(run_id="run-123")
+
+# List all instances for your profile
+instances = await fleet.env.list_instances_async(profile_id="self")
+```
+
+### Close Instances
+
+```python
+# Close all instances for a run
+await fleet.env.close_all_async(run_id="run-123")
+
+# Close all instances for your profile
+await fleet.env.close_all_async(profile_id="self")
+
+# Close a specific instance by ID
+await fleet.env.close_async("bc8954c2")
+```
+
+`"self"` is an alias for the profile associated with your `FLEET_API_KEY`.
+
+## Account Information
+
+View your current account details including team info, instance limits, and profile ID:
+
+```python
+account = await fleet.env.account_async()
+```
+
+Returns:
+
+```json
+{
+  "team_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  "team_name": "My Team",
+  "instance_limit": 32000,
+  "instance_count": 924,
+  "profile_id": "11111111-2222-3333-4444-555555555555",
+  "profile_name": "Jane Doe"
+}
+```
+
+## Run Tracking
+
+Track active and past runs:
+
+```python
+# List active runs
+runs = await fleet.env.list_runs_async()
+
+# List all runs (active and inactive)
+runs = await fleet.env.list_runs_async(status="all")
+
+# Filter by profile
+runs = await fleet.env.list_runs_async(profile_id="self")
+```
+
+Returns:
+
+```json
+[
+  {
+    "run_id": "run-123",
+    "running_count": 0,
+    "total_count": 4,
+    "first_created_at": "2025-10-24T09:48:47.152387",
+    "last_created_at": "2025-10-24T09:55:19.284294",
+    "profile_id": "11111111-2222-3333-4444-555555555555"
+  }
+]
+```
+
+## Complete Example
+
+```python
+import fleet
+import asyncio
+
+async def main():
+    # Load tasks from a project
+    tasks = await fleet.load_tasks_async(project_key="my-project")
+    
+    for task in tasks:
+        # Create environment with heartbeat support
+        env = await task.make(
+            ttl_seconds=7200,
+            run_id="my-evaluation-run",
+            heartbeat_interval=30,
+        )
+        
+        try:
+            # Send periodic heartbeats during long operations
+            await env.heartbeat()
+            
+            # ... run your evaluation ...
+            
+        finally:
+            await env.close()
+    
+    # Clean up all instances from this run
+    await fleet.env.close_all_async(run_id="my-evaluation-run")
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
