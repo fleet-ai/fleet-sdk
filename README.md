@@ -46,6 +46,10 @@ async def main():
 
     # ... interact with the environment ...
 
+    # Verify task completion
+    result = await task.verify_detailed_async(env.instance_id)
+    print(result)
+
     # Clean up
     await env.close()
 ```
@@ -182,6 +186,43 @@ Returns:
 ]
 ```
 
+## Task Verification
+
+Verify task completion and get detailed results:
+
+```python
+result = await task.verify_detailed_async(env.instance_id)
+print(result)
+```
+
+Returns:
+
+```json
+{
+  "key": "task_abcdef",
+  "version": 4,
+  "success": true,
+  "result": 1.0,
+  "error": null,
+  "execution_time_ms": 2291,
+  "stdout": ""
+}
+```
+
+On failure, `stdout` contains detailed verification errors:
+
+```json
+{
+  "key": "task_abcdef",
+  "version": 4,
+  "success": true,
+  "result": 0,
+  "error": null,
+  "execution_time_ms": 2291,
+  "stdout": "Verification errors: [\"Expected field to be 'value', got None\", \"Form not marked as complete\"]"
+}
+```
+
 ## Complete Example
 
 ```python
@@ -193,21 +234,24 @@ async def main():
     tasks = await fleet.load_tasks_async(project_key="my-project")
     
     for task in tasks:
-        # Create environment with heartbeat support
+        # Create environment
         env = await fleet.env.make_async(
             env_key=task.env_key,
             data_key=task.data_key,
             env_variables=task.env_variables,
             ttl_seconds=7200,
             run_id="my-evaluation-run",
-            heartbeat_interval=30,
         )
         
         try:
-            # Send periodic heartbeats during long operations
-            await env.heartbeat()
+            # Access the environment URL
+            print(env.urls.app[0])
             
-            # ... run your evaluation ...
+            # ... run your agent ...
+            
+            # Verify task completion
+            result = await task.verify_detailed_async(env.instance_id)
+            print(f"Task {task.key}: score={result['result']}")
             
         finally:
             await env.close()
