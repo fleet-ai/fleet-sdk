@@ -20,6 +20,27 @@ Get your API key from the [Fleet Dashboard](https://fleetai.com/dashboard/api-ke
 export FLEET_API_KEY="sk_your_key_here"
 ```
 
+## Tasks
+
+A **Task** represents a unit of work for an agent to complete within an environment. Each task combines:
+
+- **Prompt**: Instructions describing what needs to be done
+- **Environment**: The environment configuration (`env_key`, `data_key`, `env_variables`)
+- **Verifier**: Code that validates task completion and returns a score (0.0 to 1.0)
+
+Tasks provide all the configuration needed to spin up an environment and verify an agent's work.
+
+### Task Properties
+
+| Property        | Description                                           |
+| --------------- | ----------------------------------------------------- |
+| `key`           | Unique task identifier                                |
+| `prompt`        | Instructions for the agent                            |
+| `env_key`       | Environment identifier (e.g., `"hubspot:v1.2"`)       |
+| `data_key`      | Data configuration identifier                         |
+| `env_variables` | Environment variables for the task                    |
+| `metadata`      | Additional info (e.g., `avg_steps` for task difficulty) |
+
 ## Quick Start
 
 ```python
