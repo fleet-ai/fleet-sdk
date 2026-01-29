@@ -43,6 +43,9 @@ class Task(BaseModel):
     output_json_schema: Optional[Dict[str, Any]] = Field(
         None, description="JSON schema for expected output format"
     )
+    task_scenario_id: Optional[str] = Field(
+        None, description="Task scenario identifier for linking to scenario with output schema"
+    )
 
     @validator("key")
     def validate_key_format(cls, v):
