@@ -1192,12 +1192,18 @@ class Fleet:
             # logger.info("No tasks found to export")
             return None
 
-    def import_single_task(self, task: Task, project_key: Optional[str] = None):
+    def import_single_task(
+        self,
+        task: Task,
+        project_key: Optional[str] = None,
+        team_id: Optional[str] = None,
+    ):
         """Import a single task.
 
         Args:
             task: Task object to import
             project_key: Optional project key to associate with the task
+            team_id: Optional team_id to create task in (admin only, for cross-team imports)
 
         Returns:
             Response from the API, or None if the import failed
@@ -1213,6 +1219,8 @@ class Fleet:
             params = {}
             if project_key:
                 params["project_key"] = project_key
+            if team_id:
+                params["team_id"] = team_id
             response = self.client.request(
                 "POST", "/v1/tasks", json=task.model_dump(), params=params
             )
@@ -1221,12 +1229,18 @@ class Fleet:
             # logger.error(f"Failed to import task {task.key}: {e}")
             return None
 
-    def import_tasks(self, filename: str, project_key: Optional[str] = None):
+    def import_tasks(
+        self,
+        filename: str,
+        project_key: Optional[str] = None,
+        team_id: Optional[str] = None,
+    ):
         """Import tasks from a JSON file.
 
         Args:
             filename: Path to the JSON file of Task objects to import
             project_key: Optional project key to associate with the tasks
+            team_id: Optional team_id to create tasks in (admin only, for cross-team imports)
 
         Returns:
             List[Task] containing imported Task objects
@@ -1260,7 +1274,9 @@ class Fleet:
         # Use ThreadPoolExecutor to parallelize the imports with max 20 workers
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             responses = list(
-                executor.map(lambda t: self.import_single_task(t, project_key), tasks)
+                executor.map(
+                    lambda t: self.import_single_task(t, project_key, team_id), tasks
+                )
             )
 
         # Filter out None values (failed imports)
