@@ -43,6 +43,9 @@ class Task(BaseModel):
     output_json_schema: Optional[Dict[str, Any]] = Field(
         None, description="JSON schema for expected output format"
     )
+    factual_answer: Optional[Any] = Field(
+        None, description="Expected answer for research/factual tasks"
+    )
 
     @validator("key")
     def validate_key_format(cls, v):

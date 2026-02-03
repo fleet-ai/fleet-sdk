@@ -167,6 +167,9 @@ class TaskRequest(BaseModel):
     output_json_schema: Optional[Dict[str, Any]] = Field(
         None, title="Output Json Schema"
     )
+    factual_answer: Optional[Any] = Field(
+        None, title="Factual Answer", description="Expected answer for research/factual tasks"
+    )
 
 
 class TaskUpdateRequest(BaseModel):
@@ -207,6 +210,9 @@ class TaskResponse(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
     output_json_schema: Optional[Dict[str, Any]] = Field(
         None, title="Output Json Schema"
+    )
+    factual_answer: Optional[Any] = Field(
+        None, title="Factual Answer", description="Expected answer for research/factual tasks"
     )
 
 
