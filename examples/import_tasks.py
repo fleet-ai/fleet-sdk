@@ -35,7 +35,7 @@ async def run_verifier_sanity_check(
     instance_groups = defaultdict(list)
     for task in tasks:
         # Build the instance key
-        env_key = task.env_id or ""
+        env_key = task.env_key or ""
         env_version = task.version or ""
         data_key = task.data_id or ""
         data_version = task.data_version or ""
