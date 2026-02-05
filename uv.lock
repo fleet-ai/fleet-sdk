@@ -661,7 +661,7 @@ wheels = [
 
 [[package]]
 name = "fleet-python"
-version = "0.2.107"
+version = "0.2.115"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -705,6 +705,11 @@ playwright = [
     { name = "playwright" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.8.0" },
@@ -732,6 +737,9 @@ requires-dist = [
     { name = "unasync", marker = "extra == 'dev'", specifier = ">=0.6.0" },
 ]
 provides-extras = ["cli", "dev", "playwright", "eval"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ruff", specifier = ">=0.14.9" }]
 
 [[package]]
 name = "frozenlist"

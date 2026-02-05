@@ -7,7 +7,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, conint
+from pydantic import BaseModel, ConfigDict, Field, conint
 
 
 class CDPDescribeResponse(BaseModel):
@@ -154,9 +154,11 @@ class TableSchema(BaseModel):
 
 
 class TaskRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     key: str = Field(..., title="Key")
     prompt: str = Field(..., title="Prompt")
-    environment_id: str = Field(..., title="Environment Id")
+    env_key: str = Field(..., title="Env Key", alias="environment_id")
     verifier_id: Optional[str] = Field(None, title="Verifier Id")
     version: Optional[str] = Field(None, title="Version")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
@@ -195,10 +197,12 @@ class VerifierData(BaseModel):
 
 
 class TaskResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     key: str = Field(..., title="Key")
     prompt: str = Field(..., title="Prompt")
     team_id: str = Field(..., title="Team Id")
-    environment_id: str = Field(..., title="Environment Id")
+    env_key: str = Field(..., title="Env Key", alias="environment_id")
     created_at: str = Field(..., title="Created At")
     verifier_id: Optional[str] = Field(None, title="Verifier Id")
     verifier_func: Optional[str] = Field(None, title="Verifier Func")
@@ -219,6 +223,9 @@ class TaskResponse(BaseModel):
     )
     task_scenario_id: Optional[int] = Field(
         None, title="Task Scenario ID", description="ID of the task scenario this task belongs to"
+    )
+    task_lifecycle_status: Optional[str] = Field(
+        None, title="Task Lifecycle Status", description="Task lifecycle status (production, development, staging, etc.)"
     )
 
 
@@ -547,9 +554,11 @@ class SessionInfo(BaseModel):
 class TaskInfo(BaseModel):
     """Task information for session transcript."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     key: str = Field(..., title="Key")
     prompt: str = Field(..., title="Prompt")
-    env_id: str = Field(..., title="Env Id")
+    env_key: str = Field(..., title="Env Key", alias="env_id")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     created_at: Optional[str] = Field(None, title="Created At")
     version: Optional[str] = Field(None, title="Version")

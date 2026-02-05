@@ -601,7 +601,7 @@ class Fleet:
         return instance
 
     def make_for_task(self, task: Task) -> SyncEnv:
-        return self.make(env_key=f"{task.env_id}:{task.version}")
+        return self.make(env_key=task.env_spec)
 
     def instances(
         self, status: Optional[str] = None, region: Optional[str] = None, run_id: Optional[str] = None, profile_id: Optional[str] = None
@@ -942,7 +942,7 @@ class Fleet:
         task = Task(
             key=task_json.get("key", task_json.get("id")),
             prompt=task_json["prompt"],
-            env_id=task_json.get("env_id") or task_json.get("env_key") or task_json.get("environment_id"),  # Use env_id, env_key, or environment_id
+            env_key=task_json.get("env_key") or task_json.get("environment_id") or task_json.get("env_id"),  # Prefer env_key, fallback to environment_id (API) or env_id (legacy)
             created_at=task_json.get("created_at"),
             version=task_json.get("version"),
             data_id=task_json.get("data_id"),
@@ -958,6 +958,7 @@ class Fleet:
             factual_answer=task_json.get("factual_answer"),  # Expected answer for research/factual tasks
             task_modality=task_json.get("task_modality"),  # Task modality (computer_use, tool_use, browser)
             task_scenario_id=task_json.get("task_scenario_id"),  # Task scenario ID
+            task_lifecycle_status=task_json.get("task_lifecycle_status"),  # Task lifecycle status
         )
         return task
 
@@ -1126,7 +1127,7 @@ class Fleet:
             task = Task(
                 key=task_response.key,
                 prompt=task_response.prompt,
-                env_id=task_response.environment_id,  # Map environment_id -> env_id
+                env_key=task_response.env_key,
                 created_at=task_response.created_at,
                 version=task_response.version,
                 data_id=getattr(task_response, "data_id", None),  # Get data_id if available
@@ -1142,6 +1143,7 @@ class Fleet:
                 factual_answer=getattr(task_response, "factual_answer", None),  # Get factual_answer if available
                 task_modality=getattr(task_response, "task_modality", None),  # Get task_modality if available
                 task_scenario_id=getattr(task_response, "task_scenario_id", None),  # Get task_scenario_id if available
+                task_lifecycle_status=getattr(task_response, "task_lifecycle_status", None),  # Get task_lifecycle_status if available
             )
             tasks.append(task)
 
@@ -1223,8 +1225,14 @@ class Fleet:
         params = {}
         if project_key:
             params["project_key"] = project_key
+        
+        # Convert task to dict and map env_key -> env_id for API compatibility
+        task_data = task.model_dump()
+        if "env_key" in task_data:
+            task_data["env_id"] = task_data.pop("env_key")
+        
         response = self.client.request(
-            "POST", "/v1/tasks", json=task.model_dump(), params=params
+            "POST", "/v1/tasks", json=task_data, params=params
         )
         return response
 

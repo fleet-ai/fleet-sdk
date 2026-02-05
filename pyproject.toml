@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fleet-python"
 
-version = "0.2.114"
+version = "0.2.115"
 description = "Python SDK for Fleet environments"
 authors = [
     {name = "Fleet AI", email = "nic@fleet.so"},
@@ -132,3 +132,8 @@ testpaths = ["tests"]
 "httpx.AsyncHTTPTransport" = "httpx.HTTPTransport"
 "httpx.SyncHTTPTransport" = "httpx.HTTPTransport"
 "aiohttp" = "httpx" 
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.9",
+]

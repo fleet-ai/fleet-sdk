@@ -19,7 +19,7 @@ class Task(BaseModel):
 
     key: str = Field(..., description="Unique task key identifier")
     prompt: str = Field(..., description="Task prompt or instruction")
-    env_id: str = Field(..., description="Environment identifier")
+    env_key: str = Field(..., description="Environment key")
     env_variables: Optional[Dict[str, Any]] = Field(
         default_factory=dict, description="Environment variables"
     )
@@ -50,6 +50,9 @@ class Task(BaseModel):
     task_scenario_id: Optional[int] = Field(
         None, description="ID of the task scenario this task belongs to"
     )
+    task_lifecycle_status: Optional[str] = Field(
+        None, description="Task lifecycle status (production, development, staging, etc.)"
+    )
 
     @validator("key")
     def validate_key_format(cls, v):
@@ -66,20 +69,40 @@ class Task(BaseModel):
         return dt.isoformat() if dt else None
 
     @property
-    def env_key(self) -> str:
-        """Get the environment key combining env_id and version."""
-        if self.version and self.version != "None" and ":" not in self.env_id:
-            return f"{self.env_id}:{self.version}"
-        return self.env_id
+    def env_spec(self) -> str:
+        """Get the env spec string (env_key:version) for instance creation."""
+        if self.version and self.version != "None" and ":" not in self.env_key:
+            return f"{self.env_key}:{self.version}"
+        return self.env_key
 
     @property
-    def data_key(self) -> Optional[str]:
-        """Get the data key combining data_id and data_version."""
+    def data_spec(self) -> Optional[str]:
+        """Get the data spec string (data_id:data_version) for instance creation."""
         if self.data_id and self.data_version:
             return f"{self.data_id}:{self.data_version}"
         elif self.data_id:
             return self.data_id
         return None
+
+    @property
+    def data_key(self) -> Optional[str]:
+        """Alias for data_spec for backward compatibility."""
+        return self.data_spec
+
+    @property
+    def has_verifier(self) -> bool:
+        """Whether this task has a verifier function."""
+        return self.verifier is not None or self.verifier_func is not None
+
+    @property
+    def is_research_based(self) -> bool:
+        """Whether this task is research/factual (has a factual_answer)."""
+        return self.factual_answer is not None
+
+    @property
+    def is_action_based(self) -> bool:
+        """Whether this task is action-based (no factual_answer)."""
+        return self.factual_answer is None
 
     class Config:
         """Pydantic model configuration."""
@@ -228,7 +251,7 @@ class Task(BaseModel):
     ):
         """Create an environment instance for this task's environment.
 
-        Alias for make() method. Uses the task's env_id (and version if present) to create the env.
+        Alias for make() method. Uses the task's env_key (and version if present) to create the env.
         """
         return await self.make(
             region=region,
@@ -249,7 +272,7 @@ class Task(BaseModel):
         """Create an environment instance with task's configuration.
 
         Auto-populates environment creation with:
-        - env_key (env_id + version)
+        - env_key (env_key + version)
         - data_key (data_id + data_version, if present)
         - env_variables (if present)
         - run_id (if present)
@@ -266,18 +289,18 @@ class Task(BaseModel):
             Environment instance configured for this task
 
         Example:
-            task = fleet.Task(key="my-task", prompt="...", env_id="my-env",
+            task = fleet.Task(key="my-task", prompt="...", env_key="my-env",
                             data_id="my-data", data_version="v1.0")
             env = await task.make(region="us-west-2", run_id="my-batch-123", heartbeat_interval=60)
         """
-        if not self.env_id:
-            raise ValueError("Task has no env_id defined")
+        if not self.env_key:
+            raise ValueError("Task has no env_key defined")
 
         # Deferred import to avoid circular dependencies
         from fleet.env import make_async
 
         return await make_async(
-            env_key=self.env_key,
+            env_key=self.env_spec,
             data_key=self.data_key,
             region=region,
             env_variables=self.env_variables if self.env_variables else None,
@@ -541,7 +564,7 @@ async def import_task(task: Task, project_key: Optional[str] = None):
         Response from the API, or None if the import failed
 
     Examples:
-        task = fleet.Task(key="my-task", prompt="Do something", env_id="my-env")
+        task = fleet.Task(key="my-task", prompt="Do something", env_key="my-env")
         response = await fleet.import_task(task)
         response = await fleet.import_task(task, project_key="my-project")
     """

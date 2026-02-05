@@ -112,7 +112,7 @@ async def main():
     print(f"Task definition:")
     print(f"  Key: {task.key}")
     print(f"  Prompt: {task.prompt}")
-    print(f"  Environment: {task.env_id}")
+    print(f"  Environment: {task.env_key}")
     print(
         f"  Verifier: {task.verifier.key if hasattr(task.verifier, 'key') else 'create_bug_issue'}"
     )
