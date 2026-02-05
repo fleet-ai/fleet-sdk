@@ -70,8 +70,7 @@ class Task(BaseModel):
         """Serialize datetime to ISO format string."""
         return dt.isoformat() if dt else None
 
-    @property
-    def env_key(self) -> str:
+    def get_env_key(self) -> str:
         """Get the environment key combining env_key and version."""
         if self.version and self.version != "None" and ":" not in self.env_key:
             return f"{self.env_key}:{self.version}"
