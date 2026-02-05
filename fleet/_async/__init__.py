@@ -215,7 +215,7 @@ async def import_task(task, project_key: Optional[str] = None):
         project_key: Optional project key to associate with the task
 
     Example:
-        task = fleet.Task(key="my-task", prompt="Do something", env_id="my-env")
+        task = fleet.Task(key="my-task", prompt="Do something", env_key="my-env")
         await fleet.import_task(task)
         await fleet.import_task(task, project_key="my-project")
     """

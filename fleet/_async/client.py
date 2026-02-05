@@ -591,7 +591,7 @@ class AsyncFleet:
         return instance
 
     async def make_for_task(self, task: Task) -> AsyncEnv:
-        return await self.make(env_key=f"{task.env_id}:{task.version}")
+        return await self.make(env_key=f"{task.env_key}:{task.version}")
 
     async def instances(
         self, status: Optional[str] = None, region: Optional[str] = None, run_id: Optional[str] = None, profile_id: Optional[str] = None
@@ -932,7 +932,7 @@ class AsyncFleet:
         task = Task(
             key=task_json.get("key", task_json.get("id")),
             prompt=task_json["prompt"],
-            env_id=task_json.get("environment_id"),  # API returns environment_id
+            env_key=task_json.get("environment_id"),  # API returns environment_id, maps to env_key
             created_at=task_json.get("created_at"),
             version=task_json.get("version"),
             data_id=task_json.get("data_id"),
@@ -1110,7 +1110,7 @@ class AsyncFleet:
             task = Task(
                 key=task_response.key,
                 prompt=task_response.prompt,
-                env_id=task_response.environment_id,  # Map environment_id -> env_id
+                env_key=task_response.environment_id,  # Map environment_id -> env_key
                 created_at=task_response.created_at,
                 version=task_response.version,
                 data_id=getattr(task_response, "data_id", None),  # Get data_id if available

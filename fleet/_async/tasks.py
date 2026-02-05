@@ -19,7 +19,7 @@ class Task(BaseModel):
 
     key: str = Field(..., description="Unique task key identifier")
     prompt: str = Field(..., description="Task prompt or instruction")
-    env_id: str = Field(..., description="Environment identifier")
+    env_key: str = Field(..., description="Environment key", alias="environment_id")
     env_variables: Optional[Dict[str, Any]] = Field(
         default_factory=dict, description="Environment variables"
     )
@@ -70,10 +70,10 @@ class Task(BaseModel):
 
     @property
     def env_key(self) -> str:
-        """Get the environment key combining env_id and version."""
-        if self.version and self.version != "None" and ":" not in self.env_id:
-            return f"{self.env_id}:{self.version}"
-        return self.env_id
+        """Get the environment key combining env_key and version."""
+        if self.version and self.version != "None" and ":" not in self.env_key:
+            return f"{self.env_key}:{self.version}"
+        return self.env_key
 
     @property
     def data_key(self) -> Optional[str]:
@@ -231,7 +231,7 @@ class Task(BaseModel):
     ):
         """Create an environment instance for this task's environment.
 
-        Alias for make() method. Uses the task's env_id (and version if present) to create the env.
+        Alias for make() method. Uses the task's env_key (and version if present) to create the env.
         """
         return await self.make(
             region=region,
@@ -252,7 +252,7 @@ class Task(BaseModel):
         """Create an environment instance with task's configuration.
 
         Auto-populates environment creation with:
-        - env_key (env_id + version)
+        - env_key (env_key + version)
         - data_key (data_id + data_version, if present)
         - env_variables (if present)
         - run_id (if present)
@@ -269,12 +269,12 @@ class Task(BaseModel):
             Environment instance configured for this task
 
         Example:
-            task = fleet.Task(key="my-task", prompt="...", env_id="my-env",
+            task = fleet.Task(key="my-task", prompt="...", env_key="my-env",
                             data_id="my-data", data_version="v1.0")
             env = await task.make(region="us-west-2", run_id="my-batch-123", heartbeat_interval=60)
         """
-        if not self.env_id:
-            raise ValueError("Task has no env_id defined")
+        if not self.env_key:
+            raise ValueError("Task has no env_key defined")
 
         # Deferred import to avoid circular dependencies
         from fleet.env import make_async
@@ -544,7 +544,7 @@ async def import_task(task: Task, project_key: Optional[str] = None):
         Response from the API, or None if the import failed
 
     Examples:
-        task = fleet.Task(key="my-task", prompt="Do something", env_id="my-env")
+        task = fleet.Task(key="my-task", prompt="Do something", env_key="my-env")
         response = await fleet.import_task(task)
         response = await fleet.import_task(task, project_key="my-project")
     """

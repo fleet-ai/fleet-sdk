@@ -132,3 +132,8 @@ testpaths = ["tests"]
 "httpx.AsyncHTTPTransport" = "httpx.HTTPTransport"
 "httpx.SyncHTTPTransport" = "httpx.HTTPTransport"
 "aiohttp" = "httpx" 
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.9",
+]

@@ -408,7 +408,7 @@ def get_session_transcript(
     # Task info
     if result.task:
         console.print(f"[bold]Task:[/bold] {result.task.key}")
-        console.print(f"  Environment: {result.task.env_id}")
+        console.print(f"  Environment: {result.task.env_key}")
         if result.task.version:
             console.print(f"  Version: {result.task.version}")
         console.print()
