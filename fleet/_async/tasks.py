@@ -47,7 +47,7 @@ class Task(BaseModel):
     factual_answer: Optional[Any] = Field(
         None, description="Expected answer for research/factual tasks"
     )
-    task_scenario_id: Optional[str] = Field(
+    task_scenario_id: Optional[int] = Field(
         None, description="ID of the task scenario this task belongs to"
     )
 

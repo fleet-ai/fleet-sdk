@@ -49,7 +49,7 @@ class Task(BaseModel):
     task_modality: Optional[str] = Field(
         None, description="Task modality (computer_use, tool_use, browser)"
     )
-    task_scenario_id: Optional[str] = Field(
+    task_scenario_id: Optional[int] = Field(
         None, description="ID of the task scenario this task belongs to"
     )
 

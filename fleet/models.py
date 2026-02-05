@@ -217,7 +217,7 @@ class TaskResponse(BaseModel):
     task_modality: Optional[str] = Field(
         None, title="Task Modality", description="Task modality (computer_use, tool_use, browser)"
     )
-    task_scenario_id: Optional[str] = Field(
+    task_scenario_id: Optional[int] = Field(
         None, title="Task Scenario ID", description="ID of the task scenario this task belongs to"
     )
 
@@ -225,7 +225,7 @@ class TaskResponse(BaseModel):
 class ScenarioResponse(BaseModel):
     """Response model for a task scenario."""
     
-    id: str = Field(..., title="ID", description="Scenario ID")
+    id: int = Field(..., title="ID", description="Scenario ID")
     scenario_title: Optional[str] = Field(None, title="Scenario Title")
     output_json_schema: Optional[Dict[str, Any]] = Field(None, title="Output JSON Schema")
     task_complexity_tier: Optional[str] = Field(None, title="Task Complexity Tier")
