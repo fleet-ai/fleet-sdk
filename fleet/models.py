@@ -552,7 +552,7 @@ class TaskInfo(BaseModel):
 
     key: str = Field(..., title="Key")
     prompt: str = Field(..., title="Prompt")
-    env_key: str = Field(..., title="Env Key")
+    env_key: str = Field(..., title="Env Key", alias="env_id")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     created_at: Optional[str] = Field(None, title="Created At")
     version: Optional[str] = Field(None, title="Version")
