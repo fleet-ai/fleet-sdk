@@ -48,6 +48,9 @@ from .models import (
     JobResponse,
     JobListResponse,
     JobCreateResponse,
+    ScenarioResponse,
+    ScenarioListResponse,
+    ScenarioCreateRequest,
     JobSessionsResponse,
     SessionTranscriptResponse,
     SessionIngestRequest,
@@ -955,6 +958,8 @@ class Fleet:
             metadata=task_json.get("metadata", {}),  # Default empty metadata
             output_json_schema=task_json.get("output_json_schema"),  # JSON schema for output
             task_modality=task_json.get("task_modality"),  # Task modality (computer_use, tool_use, browser)
+            factual_answer=task_json.get("factual_answer"),  # Expected answer for research tasks
+            task_scenario_id=task_json.get("task_scenario_id"),  # Task scenario ID
         )
         return task
 
@@ -1137,6 +1142,8 @@ class Fleet:
                 metadata=metadata,
                 output_json_schema=getattr(task_response, "output_json_schema", None),  # Get output_json_schema if available
                 task_modality=getattr(task_response, "task_modality", None),  # Get task_modality if available
+                factual_answer=getattr(task_response, "factual_answer", None),  # Get factual_answer if available
+                task_scenario_id=getattr(task_response, "task_scenario_id", None),  # Get task_scenario_id if available
             )
             tasks.append(task)
 
@@ -1267,6 +1274,76 @@ class Fleet:
 
         # Filter out None values (failed imports)
         return [r for r in responses if r is not None]
+
+    # Scenario methods
+    def get_scenario(self, scenario_id: str) -> ScenarioResponse:
+        """Get a scenario by ID.
+
+        Args:
+            scenario_id: The scenario ID to retrieve
+
+        Returns:
+            ScenarioResponse containing the scenario details
+        """
+        response = self.client.request("GET", f"/v1/scenarios/{scenario_id}")
+        return ScenarioResponse(**response.json())
+
+    def list_scenarios(self, project_id: Optional[str] = None) -> ScenarioListResponse:
+        """List scenarios, optionally filtered by project.
+
+        Args:
+            project_id: Optional project ID to filter scenarios by
+
+        Returns:
+            ScenarioListResponse containing the list of scenarios
+        """
+        params = {}
+        if project_id:
+            params["project_id"] = project_id
+        response = self.client.request("GET", "/v1/scenarios", params=params)
+        return ScenarioListResponse(**response.json())
+
+    def create_scenario(
+        self,
+        scenario_title: str,
+        project_id: str,
+        output_json_schema: Optional[Dict[str, Any]] = None,
+        task_complexity_tier: Optional[str] = None,
+        user_story: Optional[str] = None,
+        entrypoint: Optional[str] = None,
+        is_research_based: Optional[bool] = None,
+        is_action_based: Optional[bool] = None,
+        scenario_verifier_prompt: Optional[str] = None,
+    ) -> ScenarioResponse:
+        """Create a new scenario.
+
+        Args:
+            scenario_title: Title for the scenario
+            project_id: Project ID to associate the scenario with
+            output_json_schema: Optional JSON schema for expected output
+            task_complexity_tier: Optional complexity tier
+            user_story: Optional user story description
+            entrypoint: Optional entrypoint URL
+            is_research_based: Whether the scenario is research-based
+            is_action_based: Whether the scenario is action-based
+            scenario_verifier_prompt: Optional verifier prompt
+
+        Returns:
+            ScenarioResponse containing the created scenario
+        """
+        request = ScenarioCreateRequest(
+            scenario_title=scenario_title,
+            project_id=project_id,
+            output_json_schema=output_json_schema,
+            task_complexity_tier=task_complexity_tier,
+            user_story=user_story,
+            entrypoint=entrypoint,
+            is_research_based=is_research_based,
+            is_action_based=is_action_based,
+            scenario_verifier_prompt=scenario_verifier_prompt,
+        )
+        response = self.client.request("POST", "/v1/scenarios", json=request.model_dump(exclude_none=True))
+        return ScenarioResponse(**response.json())
 
     def account(self) -> AccountResponse:
         """Get account information including instance limits and usage.
