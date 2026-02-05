@@ -52,6 +52,9 @@ class Task(BaseModel):
     task_scenario_id: Optional[int] = Field(
         None, description="ID of the task scenario this task belongs to"
     )
+    task_lifecycle_status: Optional[str] = Field(
+        None, description="Task lifecycle status (production, development, staging, etc.)"
+    )
 
     @validator("key")
     def validate_key_format(cls, v):

@@ -948,6 +948,7 @@ class AsyncFleet:
             factual_answer=task_json.get("factual_answer"),  # Expected answer for research/factual tasks
             task_modality=task_json.get("task_modality"),  # Task modality (computer_use, tool_use, browser)
             task_scenario_id=task_json.get("task_scenario_id"),  # Task scenario ID
+            task_lifecycle_status=task_json.get("task_lifecycle_status"),  # Task lifecycle status
         )
         return task
 
