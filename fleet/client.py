@@ -1223,8 +1223,11 @@ class Fleet:
         params = {}
         if project_key:
             params["project_key"] = project_key
+        # Exclude version field - it causes issues in the API's upsert path
+        # when combined with other fields like output_json_schema
+        task_data = task.model_dump(exclude={"version"})
         response = self.client.request(
-            "POST", "/v1/tasks", json=task.model_dump(), params=params
+            "POST", "/v1/tasks", json=task_data, params=params
         )
         return response
 
