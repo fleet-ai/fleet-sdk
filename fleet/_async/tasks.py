@@ -44,6 +44,12 @@ class Task(BaseModel):
     task_modality: Optional[str] = Field(
         None, description="Task modality (computer_use, tool_use, browser)"
     )
+    factual_answer: Optional[Any] = Field(
+        None, description="Expected answer for research/factual tasks"
+    )
+    task_scenario_id: Optional[str] = Field(
+        None, description="ID of the task scenario this task belongs to"
+    )
 
     @validator("key")
     def validate_key_format(cls, v):
