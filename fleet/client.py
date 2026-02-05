@@ -959,7 +959,6 @@ class Fleet:
             output_json_schema=task_json.get("output_json_schema"),  # JSON schema for output
             factual_answer=task_json.get("factual_answer"),  # Expected answer for research/factual tasks
             task_modality=task_json.get("task_modality"),  # Task modality (computer_use, tool_use, browser)
-            factual_answer=task_json.get("factual_answer"),  # Expected answer for research tasks
             task_scenario_id=task_json.get("task_scenario_id"),  # Task scenario ID
         )
         return task
@@ -1144,7 +1143,6 @@ class Fleet:
                 output_json_schema=getattr(task_response, "output_json_schema", None),  # Get output_json_schema if available
                 factual_answer=getattr(task_response, "factual_answer", None),  # Get factual_answer if available
                 task_modality=getattr(task_response, "task_modality", None),  # Get task_modality if available
-                factual_answer=getattr(task_response, "factual_answer", None),  # Get factual_answer if available
                 task_scenario_id=getattr(task_response, "task_scenario_id", None),  # Get task_scenario_id if available
             )
             tasks.append(task)
