@@ -76,13 +76,33 @@ class Task(BaseModel):
         return self.env_key
 
     @property
-    def data_key(self) -> Optional[str]:
-        """Get the data key combining data_id and data_version."""
+    def data_spec(self) -> Optional[str]:
+        """Get the data spec string (data_id:data_version) for instance creation."""
         if self.data_id and self.data_version:
             return f"{self.data_id}:{self.data_version}"
         elif self.data_id:
             return self.data_id
         return None
+
+    @property
+    def data_key(self) -> Optional[str]:
+        """Alias for data_spec for backward compatibility."""
+        return self.data_spec
+
+    @property
+    def has_verifier(self) -> bool:
+        """Whether this task has a verifier function."""
+        return self.verifier is not None or self.verifier_func is not None
+
+    @property
+    def is_research_based(self) -> bool:
+        """Whether this task is research/factual (has a factual_answer)."""
+        return self.factual_answer is not None
+
+    @property
+    def is_action_based(self) -> bool:
+        """Whether this task is action-based (no factual_answer)."""
+        return self.factual_answer is None
 
     class Config:
         """Pydantic model configuration."""
