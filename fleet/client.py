@@ -1135,6 +1135,7 @@ class Fleet:
                 verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
                 metadata=metadata,
                 output_json_schema=getattr(task_response, "output_json_schema", None),  # Get output_json_schema if available
+                task_modality=getattr(task_response, "task_modality", None),  # Get task_modality if available
             )
             tasks.append(task)
 
