@@ -200,6 +200,7 @@ class TaskResponse(BaseModel):
     verifier: Optional[VerifierData] = Field(None, title="Verifier")
     metadata: Optional[Dict[str, Any]] = Field(None, title="Metadata")
     output_json_schema: Optional[Dict[str, Any]] = Field(None, title="Output Json Schema")
+    task_modality: Optional[str] = Field(None, title="Task Modality", description="Task modality (computer_use, tool_use, browser)")
 
 
 class ValidationError(BaseModel):
