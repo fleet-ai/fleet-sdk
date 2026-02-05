@@ -942,7 +942,7 @@ class Fleet:
         task = Task(
             key=task_json.get("key", task_json.get("id")),
             prompt=task_json["prompt"],
-            env_key=task_json.get("environment_id") or task_json.get("env_key"),  # API returns environment_id, JSON files use env_key
+            env_key=task_json.get("environment_id") or task_json.get("env_id"),  # API returns environment_id, also support env_id for backward compat
             created_at=task_json.get("created_at"),
             version=task_json.get("version"),
             data_id=task_json.get("data_id"),
