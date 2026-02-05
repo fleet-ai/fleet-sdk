@@ -554,6 +554,8 @@ class SessionInfo(BaseModel):
 class TaskInfo(BaseModel):
     """Task information for session transcript."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     key: str = Field(..., title="Key")
     prompt: str = Field(..., title="Prompt")
     env_key: str = Field(..., title="Env Key", alias="env_id")
