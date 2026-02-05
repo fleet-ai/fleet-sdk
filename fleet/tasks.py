@@ -274,7 +274,7 @@ class Task(BaseModel):
         from fleet.env import make
 
         return make(
-            env_key=self.env_key,
+            env_key=self.get_env_key(),
             data_key=self.data_key,
             region=region,
             env_variables=self.env_variables if self.env_variables else None,
