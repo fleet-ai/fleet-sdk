@@ -20,7 +20,7 @@ class Task(BaseModel):
 
     key: str = Field(..., description="Unique task key identifier")
     prompt: str = Field(..., description="Task prompt or instruction")
-    env_key: str = Field(..., description="Environment key", alias="environment_id")
+    env_key: str = Field(..., description="Environment key")
     env_variables: Optional[Dict[str, Any]] = Field(
         default_factory=dict, description="Environment variables"
     )

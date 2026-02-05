@@ -1207,8 +1207,14 @@ class AsyncFleet:
         params = {}
         if project_key:
             params["project_key"] = project_key
+        
+        # Convert task to dict and map env_key -> env_id for API compatibility
+        task_data = task.model_dump()
+        if "env_key" in task_data:
+            task_data["env_id"] = task_data.pop("env_key")
+        
         response = await self.client.request(
-            "POST", "/v1/tasks", json=task.model_dump(), params=params
+            "POST", "/v1/tasks", json=task_data, params=params
         )
         return response
 
