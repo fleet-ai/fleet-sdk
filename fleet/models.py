@@ -220,6 +220,9 @@ class TaskResponse(BaseModel):
     task_scenario_id: Optional[int] = Field(
         None, title="Task Scenario ID", description="ID of the task scenario this task belongs to"
     )
+    task_lifecycle_status: Optional[str] = Field(
+        None, title="Task Lifecycle Status", description="Task lifecycle status (production, development, staging, etc.)"
+    )
 
 
 class ScenarioResponse(BaseModel):

@@ -1143,6 +1143,7 @@ class Fleet:
                 factual_answer=getattr(task_response, "factual_answer", None),  # Get factual_answer if available
                 task_modality=getattr(task_response, "task_modality", None),  # Get task_modality if available
                 task_scenario_id=getattr(task_response, "task_scenario_id", None),  # Get task_scenario_id if available
+                task_lifecycle_status=getattr(task_response, "task_lifecycle_status", None),  # Get task_lifecycle_status if available
             )
             tasks.append(task)
 

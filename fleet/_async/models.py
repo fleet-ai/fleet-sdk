@@ -203,6 +203,7 @@ class TaskResponse(BaseModel):
     task_modality: Optional[str] = Field(None, title="Task Modality", description="Task modality (computer_use, tool_use, browser)")
     factual_answer: Optional[Any] = Field(None, title="Factual Answer", description="Expected answer for research/factual tasks")
     task_scenario_id: Optional[int] = Field(None, title="Task Scenario ID", description="ID of the task scenario this task belongs to")
+    task_lifecycle_status: Optional[str] = Field(None, title="Task Lifecycle Status", description="Task lifecycle status (production, development, staging, etc.)")
 
 
 class ScenarioResponse(BaseModel):
