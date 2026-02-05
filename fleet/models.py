@@ -214,6 +214,9 @@ class TaskResponse(BaseModel):
     factual_answer: Optional[Any] = Field(
         None, title="Factual Answer", description="Expected answer for research/factual tasks"
     )
+    task_modality: Optional[str] = Field(
+        None, title="Task Modality", description="Task modality (computer_use, tool_use, browser)"
+    )
 
 
 class ValidationError(BaseModel):

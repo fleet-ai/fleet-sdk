@@ -942,6 +942,7 @@ class AsyncFleet:
             verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
             metadata=task_json.get("metadata", {}),  # Default empty metadata
             output_json_schema=task_json.get("output_json_schema"),  # JSON schema for output
+            task_modality=task_json.get("task_modality"),  # Task modality (computer_use, tool_use, browser)
         )
         return task
 
@@ -1116,6 +1117,7 @@ class AsyncFleet:
                 verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
                 metadata=metadata,
                 output_json_schema=getattr(task_response, "output_json_schema", None),  # Get output_json_schema if available
+                task_modality=getattr(task_response, "task_modality", None),  # Get task_modality if available
             )
             tasks.append(task)
 
