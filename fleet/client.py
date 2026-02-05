@@ -1207,26 +1207,26 @@ class Fleet:
             project_key: Optional project key to associate with the task
 
         Returns:
-            Response from the API, or None if the import failed
-        """
-        try:
-            # Validate that verifier_func exists
-            if not task.verifier_func:
-                raise ValueError(
-                    f"Task {task.key} is missing verifier_func. "
-                    "All tasks must have a verifier_func to be imported."
-                )
+            Response from the API
 
-            params = {}
-            if project_key:
-                params["project_key"] = project_key
-            response = self.client.request(
-                "POST", "/v1/tasks", json=task.model_dump(), params=params
+        Raises:
+            ValueError: If task is missing verifier_func
+            Exception: If the API request fails
+        """
+        # Validate that verifier_func exists
+        if not task.verifier_func:
+            raise ValueError(
+                f"Task {task.key} is missing verifier_func. "
+                "All tasks must have a verifier_func to be imported."
             )
-            return response
-        except Exception as e:
-            # logger.error(f"Failed to import task {task.key}: {e}")
-            return None
+
+        params = {}
+        if project_key:
+            params["project_key"] = project_key
+        response = self.client.request(
+            "POST", "/v1/tasks", json=task.model_dump(), params=params
+        )
+        return response
 
     def import_tasks(self, filename: str, project_key: Optional[str] = None):
         """Import tasks from a JSON file.
