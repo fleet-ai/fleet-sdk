@@ -1265,10 +1265,15 @@ class Fleet:
             tasks.append(task)
 
         # Use ThreadPoolExecutor to parallelize the imports with max 20 workers
+        # Wrap import_single_task to catch exceptions and return None for failed imports
+        def safe_import(task):
+            try:
+                return self.import_single_task(task, project_key)
+            except Exception:
+                return None
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
-            responses = list(
-                executor.map(lambda t: self.import_single_task(t, project_key), tasks)
-            )
+            responses = list(executor.map(safe_import, tasks))
 
         # Filter out None values (failed imports)
         return [r for r in responses if r is not None]

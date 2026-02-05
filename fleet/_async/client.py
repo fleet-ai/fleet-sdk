@@ -1253,8 +1253,12 @@ class AsyncFleet:
         semaphore = asyncio.Semaphore(20)
 
         async def import_with_semaphore(task):
+            """Import a task with semaphore, catching exceptions to allow partial success."""
             async with semaphore:
-                return await self.import_single_task(task, project_key)
+                try:
+                    return await self.import_single_task(task, project_key)
+                except Exception:
+                    return None
 
         # Use asyncio.gather to parallelize the imports
         responses = await asyncio.gather(
