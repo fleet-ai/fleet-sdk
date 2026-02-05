@@ -601,7 +601,7 @@ class Fleet:
         return instance
 
     def make_for_task(self, task: Task) -> SyncEnv:
-        return self.make(env_key=f"{task.env_key}:{task.version}")
+        return self.make(env_key=task.env_spec)
 
     def instances(
         self, status: Optional[str] = None, region: Optional[str] = None, run_id: Optional[str] = None, profile_id: Optional[str] = None
@@ -1127,7 +1127,7 @@ class Fleet:
             task = Task(
                 key=task_response.key,
                 prompt=task_response.prompt,
-                env_key=task_response.environment_id,  # Map environment_id -> env_key
+                env_key=task_response.env_key,
                 created_at=task_response.created_at,
                 version=task_response.version,
                 data_id=getattr(task_response, "data_id", None),  # Get data_id if available

@@ -68,8 +68,9 @@ class Task(BaseModel):
         """Serialize datetime to ISO format string."""
         return dt.isoformat() if dt else None
 
-    def get_env_key(self) -> str:
-        """Get the environment key combining env_key and version."""
+    @property
+    def env_spec(self) -> str:
+        """Get the env spec string (env_key:version) for instance creation."""
         if self.version and self.version != "None" and ":" not in self.env_key:
             return f"{self.env_key}:{self.version}"
         return self.env_key
@@ -279,7 +280,7 @@ class Task(BaseModel):
         from fleet.env import make_async
 
         return await make_async(
-            env_key=self.get_env_key(),
+            env_key=self.env_spec,
             data_key=self.data_key,
             region=region,
             env_variables=self.env_variables if self.env_variables else None,
