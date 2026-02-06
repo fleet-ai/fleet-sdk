@@ -202,7 +202,7 @@ class TaskResponse(BaseModel):
     key: str = Field(..., title="Key")
     prompt: str = Field(..., title="Prompt")
     team_id: str = Field(..., title="Team Id")
-    env_key: Optional[str] = Field(None, title="Env Key", alias="environment_id")
+    env_key: str = Field(..., title="Env Key", alias="environment_id")
     created_at: str = Field(..., title="Created At")
     verifier_id: Optional[str] = Field(None, title="Verifier Id")
     verifier_func: Optional[str] = Field(None, title="Verifier Func")
