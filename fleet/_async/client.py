@@ -591,8 +591,6 @@ class AsyncFleet:
         return instance
 
     async def make_for_task(self, task: Task) -> AsyncEnv:
-        if not task.env_key:
-            raise ValueError(f"Task '{task.key}' has no env_key defined")
         return await self.make(env_key=task.env_spec)
 
     async def instances(

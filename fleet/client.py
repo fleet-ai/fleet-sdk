@@ -601,8 +601,6 @@ class Fleet:
         return instance
 
     def make_for_task(self, task: Task) -> SyncEnv:
-        if not task.env_key:
-            raise ValueError(f"Task '{task.key}' has no env_key defined")
         return self.make(env_key=task.env_spec)
 
     def instances(
