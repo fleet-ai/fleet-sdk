@@ -19,7 +19,7 @@ class Task(BaseModel):
 
     key: str = Field(..., description="Unique task key identifier")
     prompt: str = Field(..., description="Task prompt or instruction")
-    env_key: str = Field(..., description="Environment key")
+    env_key: Optional[str] = Field(None, description="Environment key")
     env_variables: Optional[Dict[str, Any]] = Field(
         default_factory=dict, description="Environment variables"
     )
@@ -69,8 +69,10 @@ class Task(BaseModel):
         return dt.isoformat() if dt else None
 
     @property
-    def env_spec(self) -> str:
+    def env_spec(self) -> Optional[str]:
         """Get the env spec string (env_key:version) for instance creation."""
+        if not self.env_key:
+            return None
         if self.version and self.version != "None" and ":" not in self.env_key:
             return f"{self.env_key}:{self.version}"
         return self.env_key
