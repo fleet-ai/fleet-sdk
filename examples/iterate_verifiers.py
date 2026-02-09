@@ -677,12 +677,12 @@ def main():
         epilog="""
 Examples:
   # Extract verifiers from JSON to Python file
-  %(prog)s extract xai-day-10-batch.json verifiers.py
+  %(prog)s extract batch.json verifiers.py
   
   # Edit verifiers.py...
   
   # Apply changes back to JSON file (updates in-place)
-  %(prog)s apply xai-day-10-batch.json verifiers.py
+  %(prog)s apply batch.json verifiers.py
   
   # Validate verifiers file
   %(prog)s validate verifiers.py
