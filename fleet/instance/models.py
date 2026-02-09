@@ -140,3 +140,27 @@ class ExecuteFunctionResponse(BaseModel):
     result: Optional[Any] = None
     error: Optional[str] = None
     message: str
+
+
+class FsDiffRequest(BaseModel):
+    include_content: bool = Field(True, title="Include Content")
+    max_content_size: int = Field(102400, title="Max Content Size")
+    exclude_patterns: Optional[List[str]] = Field(None, title="Exclude Patterns")
+
+
+class FsFileDiffEntry(BaseModel):
+    path: str = Field(..., title="Path")
+    size: int = Field(..., title="Size")
+    modified_time: str = Field(..., title="Modified Time")
+    file_type: str = Field(..., title="File Type")
+    content: Optional[str] = Field(None, title="Content")
+
+
+class FsDiffResponse(BaseModel):
+    success: bool = Field(..., title="Success")
+    files: List[FsFileDiffEntry] = Field(..., title="Files")
+    total_files: int = Field(..., title="Total Files")
+    total_size: int = Field(..., title="Total Size")
+    source: str = Field(..., title="Source")
+    message: str = Field(..., title="Message")
+    error: Optional[str] = Field(None, title="Error")

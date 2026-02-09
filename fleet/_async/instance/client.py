@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from ..resources.sqlite import AsyncSQLiteResource
 from ..resources.browser import AsyncBrowserResource
 from ..resources.api import AsyncAPIResource
+from ..resources.filesystem import AsyncFilesystemResource
 from ..resources.base import Resource
 
 from fleet.verifiers import DatabaseSnapshot
@@ -28,6 +29,8 @@ from ...instance.models import (
     HealthResponse,
     ExecuteFunctionRequest,
     ExecuteFunctionResponse,
+    FsDiffRequest,
+    FsDiffResponse,
 )
 
 
@@ -104,6 +107,19 @@ class AsyncInstanceClient:
         return AsyncBrowserResource(
             self._resources_state[ResourceType.cdp.value][name], self.client
         )
+
+    def fs(self) -> AsyncFilesystemResource:
+        """Returns a filesystem diff resource for inspecting file changes.
+
+        Returns:
+            An AsyncFilesystemResource for querying filesystem diffs
+        """
+        resource_model = ResourceModel(
+            name="fs",
+            type=ResourceType.db,  # Reuse existing type; fs is not a registered resource type
+            mode=ResourceMode.ro,
+        )
+        return AsyncFilesystemResource(resource_model, self.client)
 
     def api(self, name: str, base_url: str) -> AsyncAPIResource:
         """
