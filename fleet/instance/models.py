@@ -164,3 +164,53 @@ class FsDiffResponse(BaseModel):
     source: str = Field(..., title="Source")
     message: str = Field(..., title="Message")
     error: Optional[str] = Field(None, title="Error")
+
+
+class FileStateRequest(BaseModel):
+    path: str = Field(..., title="Path")
+    include_content: bool = Field(True, title="Include Content")
+    max_content_size: int = Field(102400, title="Max Content Size")
+
+
+class FileStateResponse(BaseModel):
+    success: bool = Field(..., title="Success")
+    path: str = Field(..., title="Path")
+    exists: bool = Field(..., title="Exists")
+    size: Optional[int] = Field(None, title="Size")
+    modified_time: Optional[str] = Field(None, title="Modified Time")
+    file_type: Optional[str] = Field(None, title="File Type")
+    content: Optional[str] = Field(None, title="Content")
+    message: Optional[str] = Field(None, title="Message")
+    error: Optional[str] = Field(None, title="Error")
+
+
+class FileStateTextRequest(BaseModel):
+    path: str = Field(..., title="Path")
+    max_content_size: int = Field(102400, title="Max Content Size")
+
+
+class DocTextRequest(BaseModel):
+    path: str = Field(..., title="Path")
+    max_size: int = Field(10485760, title="Max Size")
+
+
+class DocMetadataRequest(BaseModel):
+    path: str = Field(..., title="Path")
+
+
+class DocMetadataResponse(BaseModel):
+    success: bool = Field(..., title="Success")
+    path: str = Field(..., title="Path")
+    file_type: str = Field(..., title="File Type")
+    metadata: Dict[str, Any] = Field(..., title="Metadata")
+
+
+class DocStructuredRequest(BaseModel):
+    path: str = Field(..., title="Path")
+
+
+class DocStructuredResponse(BaseModel):
+    success: bool = Field(..., title="Success")
+    path: str = Field(..., title="Path")
+    file_type: str = Field(..., title="File Type")
+    data: Dict[str, Any] = Field(..., title="Data")
