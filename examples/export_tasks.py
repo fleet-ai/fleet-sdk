@@ -38,6 +38,12 @@ def main():
         help="Output JSON filename (defaults to {team_id}.json)",
         default=None,
     )
+    parser.add_argument(
+        "--skip-missing-verifiers",
+        "-s",
+        action="store_true",
+        help="Skip tasks missing verifier_func instead of erroring",
+    )
 
     args = parser.parse_args()
 
@@ -91,16 +97,32 @@ def main():
             missing_verifier.append(task.key)
 
     if missing_verifier:
-        print(f"\n✗ Error: {len(missing_verifier)} task(s) missing verifier_func:")
-        for key in missing_verifier[:10]:  # Show first 10
-            print(f"  - {key}")
-        if len(missing_verifier) > 10:
-            print(f"  ... and {len(missing_verifier) - 10} more")
-        raise ValueError(
-            "All tasks must have a verifier_func. Cannot export tasks without verifiers."
-        )
-
-    print("✓ All tasks have verifier_func")
+        if args.skip_missing_verifiers:
+            print(
+                f"\n⚠ Skipping {len(missing_verifier)} task(s) missing verifier_func:"
+            )
+            for key in missing_verifier[:10]:  # Show first 10
+                print(f"  - {key}")
+            if len(missing_verifier) > 10:
+                print(f"  ... and {len(missing_verifier) - 10} more")
+            # Filter out tasks without verifiers
+            tasks = [task for task in tasks if task.verifier_func]
+            print(f"\n{len(tasks)} task(s) remaining after filtering")
+            if not tasks:
+                raise ValueError(
+                    "No tasks remaining after filtering. Nothing to export."
+                )
+        else:
+            print(f"\n✗ Error: {len(missing_verifier)} task(s) missing verifier_func:")
+            for key in missing_verifier[:10]:  # Show first 10
+                print(f"  - {key}")
+            if len(missing_verifier) > 10:
+                print(f"  ... and {len(missing_verifier) - 10} more")
+            raise ValueError(
+                "All tasks must have a verifier_func. Cannot export tasks without verifiers."
+            )
+    else:
+        print("✓ All tasks have verifier_func")
 
     # Determine output filename
     output_file = args.output or f"{account.team_id}.json"
