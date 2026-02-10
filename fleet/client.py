@@ -177,6 +177,7 @@ from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import SQLiteResource
 from .resources.browser import BrowserResource
+from .resources.filesystem import FilesystemResource
 from .resources.mcp import SyncMCPResource
 from .resources.api import APIResource
 
@@ -397,6 +398,10 @@ class SyncEnv(EnvironmentBase):
 
     def browser(self, name: str = "cdp") -> BrowserResource:
         return self.instance.browser(name)
+
+    def fs(self) -> FilesystemResource:
+        """Get a filesystem diff resource for inspecting file changes."""
+        return self.instance.fs()
 
     def api(self, name: str = "api") -> APIResource:
         """Get an API resource for making HTTP requests to the app's API.
