@@ -29,8 +29,6 @@ from ...instance.models import (
     HealthResponse,
     ExecuteFunctionRequest,
     ExecuteFunctionResponse,
-    FsDiffRequest,
-    FsDiffResponse,
 )
 
 
