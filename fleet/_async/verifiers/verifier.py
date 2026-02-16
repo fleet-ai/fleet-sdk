@@ -60,43 +60,31 @@ class AsyncVerifierFunction:
 
     def _get_or_create_bundle(self) -> Tuple[bytes, str]:
         """Get or create bundle data and return (bundle_data, sha)."""
-        if self._bundle_data is None or self._bundle_sha is None:
-            # If we have raw code, create a bundle from it
+        if self._bundle_data is None:
             if self._raw_code:
                 import io
                 import zipfile
 
-                # Create zip bundle directly (matching bundler format)
                 zip_buffer = io.BytesIO()
                 with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                    # Add requirements.txt
                     requirements = self.extra_requirements or []
                     if "fleet-python" not in requirements:
                         requirements.append("fleet-python")
                     req_content = "\n".join(requirements)
                     zf.writestr("requirements.txt", req_content)
-
-                    # Add verifier.py with the raw code
                     zf.writestr("verifier.py", self._raw_code)
 
                 self._bundle_data = zip_buffer.getvalue()
-                self._bundle_sha = _get_bundle_sha(self._bundle_data)
-                # logger.debug(
-                #     f"Created bundle from raw code for {self.key} with SHA: {self._bundle_sha}"
-                # )
             else:
-                # Try to create bundle from function source
                 try:
                     self._bundle_data = self._bundler.create_bundle(
                         self.func, self.extra_requirements, self.verifier_id
                     )
-                    self._bundle_sha = _get_bundle_sha(self._bundle_data)
-                    # logger.debug(
-                    #     f"Created bundle for {self.key} with SHA: {self._bundle_sha}"
-                    # )
                 except OSError as e:
-                    # Can't create bundle - no source and no raw code
                     raise OSError(f"Cannot create bundle for {self.key}: {e}")
+
+            if self._bundle_sha is None:
+                self._bundle_sha = _get_bundle_sha(self._bundle_data)
 
         return self._bundle_data, self._bundle_sha
 
