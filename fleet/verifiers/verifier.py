@@ -154,9 +154,16 @@ class SyncVerifierFunction:
                 # Direct score return
                 return float(result)
             elif isinstance(result, dict) and ("score" in result or "result" in result):
-                # Dict with score/result key — return full dict to preserve
-                # structured criteria data
-                return result
+                # If the dict contains structured criteria, return the full dict
+                # so consumers can access criteria breakdown
+                if "criteria" in result:
+                    return result
+                # Otherwise extract just the numeric score
+                score_val = result.get("score", result.get("result"))
+                try:
+                    return float(score_val)
+                except (ValueError, TypeError):
+                    return 0.0
             else:
                 # Try to extract score from object attributes
                 if hasattr(result, "score"):
