@@ -238,7 +238,6 @@ async def main():
     task_count = len(tasks_data)
     task_keys = []
     missing_verifier = []
-    tasks_with_output_schema = []
     for task_data in tasks_data:
         task_key = task_data.get("key") or task_data.get("id")
         if task_key:
@@ -250,10 +249,6 @@ async def main():
         verifier_code = task_data.get("verifier_func") or task_data.get("verifier_code")
         if not verifier_code:
             missing_verifier.append(task_key or "(no key)")
-
-        # Check for output_json_schema
-        if task_data.get("output_json_schema"):
-            tasks_with_output_schema.append(task_key or "(no key)")
 
     # Validate all tasks have verifier_func
     if missing_verifier:
@@ -344,10 +339,6 @@ async def main():
             tasks = passed_tasks
             passed_keys = {t.key for t in passed_tasks}
             tasks_data = [td for td in tasks_data if td.get("key") in passed_keys]
-            # Also filter tasks_with_output_schema
-            tasks_with_output_schema = [
-                k for k in tasks_with_output_schema if k in passed_keys
-            ]
 
             print(f"\nProceeding with {len(tasks)} tasks that passed sanity check")
     else:
@@ -397,45 +388,6 @@ async def main():
 
         print(f"✓ Team: {account.team_name}")
 
-        # Print HUGE warning if any tasks have output_json_schema
-        if tasks_with_output_schema:
-            print("\n")
-            print("!" * 80)
-            print("!" * 80)
-            print("!" * 80)
-            print(
-                "!!!                                                                          !!!"
-            )
-            print(
-                "!!!                          ⚠️  WARNING WARNING WARNING  ⚠️                          !!!"
-            )
-            print(
-                "!!!                                                                          !!!"
-            )
-            print(
-                f"!!!  {len(tasks_with_output_schema)} TASK(S) HAVE OUTPUT_JSON_SCHEMA THAT NEED MANUAL COPYING!  !!!"
-            )
-            print(
-                "!!!                                                                          !!!"
-            )
-            print(
-                "!!!  The output_json_schema field is NOT automatically imported!            !!!"
-            )
-            print(
-                "!!!  You MUST manually copy the output schemas to each task!                !!!"
-            )
-            print(
-                "!!!                                                                          !!!"
-            )
-            print("!" * 80)
-            print("!" * 80)
-            print("!" * 80)
-            print("\nTasks with output_json_schema:")
-            for i, key in enumerate(tasks_with_output_schema[:20], 1):
-                print(f"  {i}. {key}")
-            if len(tasks_with_output_schema) > 20:
-                print(f"  ... and {len(tasks_with_output_schema) - 20} more")
-            print("\n⚠️  REMEMBER TO MANUALLY COPY OUTPUT SCHEMAS! ⚠️\n")
     except Exception as e:
         print(f"\n✗ Error importing tasks: {e}")
         sys.exit(1)
