@@ -59,6 +59,7 @@ from .tasks import Task
 
 if TYPE_CHECKING:
     from .verifiers import SyncVerifierFunction
+    from .judge import SyncJudge
 
 
 def _json_default(x: Any) -> Any:
@@ -348,6 +349,7 @@ class SyncEnv(EnvironmentBase):
         self._client = client
         self._apps: Dict[str, InstanceClient] = {}
         self._instance: Optional[InstanceClient] = None
+        self._judge: Optional["SyncJudge"] = None
         self._manager_url_override: Optional[str] = None  # For URL mode
 
     @property
@@ -430,6 +432,18 @@ class SyncEnv(EnvironmentBase):
     def mcp(self) -> SyncMCPResource:
         mcp_url = f"{self.urls.root}mcp"
         return SyncMCPResource(url=mcp_url, env_key=self.env_key)
+
+    @property
+    def judge(self) -> "SyncJudge":
+        """LLM-as-judge grading via orchestrator API."""
+        if self._judge is None:
+            from .judge import SyncJudge
+
+            self._judge = SyncJudge(
+                client=self._load_client,
+                instance_id=self.instance_id,
+            )
+        return self._judge
 
     def state(self, uri: str) -> Resource:
         return self.instance.state(uri)

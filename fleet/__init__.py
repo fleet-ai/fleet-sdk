@@ -68,12 +68,15 @@ from .tasks import (
 # Import shared types
 from .types import VerifierFunction
 
+# Import judge data classes
+from .judge import Rubric, Criterion, Image, JudgeResult
+
 # Create a module-level env attribute for convenient access
 from . import env
 from . import global_client as _global_client
 from ._async import global_client as _async_global_client
 
-__version__ = "0.2.111"
+__version__ = "0.2.112"
 
 __all__ = [
     # Core classes
@@ -90,6 +93,11 @@ __all__ = [
     # Task models
     "Task",
     "VerifierFunction",
+    # Judge
+    "Rubric",
+    "Criterion",
+    "Image",
+    "JudgeResult",
     # Exceptions
     "FleetError",
     "FleetAPIError",

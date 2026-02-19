@@ -54,6 +54,7 @@ from .tasks import Task
 
 if TYPE_CHECKING:
     from .verifiers import AsyncVerifierFunction
+    from .judge import AsyncJudge
 
 
 def _json_default(x: Any) -> Any:
@@ -344,6 +345,7 @@ class AsyncEnv(EnvironmentBase):
         self._client = client
         self._apps: Dict[str, AsyncInstanceClient] = {}
         self._instance: Optional[AsyncInstanceClient] = None
+        self._judge: Optional["AsyncJudge"] = None
 
     @property
     def instance(self) -> AsyncInstanceClient:
@@ -418,6 +420,18 @@ class AsyncEnv(EnvironmentBase):
     def mcp(self) -> AsyncMCPResource:
         mcp_url = f"{self.urls.root}mcp"
         return AsyncMCPResource(url=mcp_url, env_key=self.env_key)
+
+    @property
+    def judge(self) -> "AsyncJudge":
+        """LLM-as-judge grading via orchestrator API."""
+        if self._judge is None:
+            from .judge import AsyncJudge
+
+            self._judge = AsyncJudge(
+                client=self._load_client,
+                instance_id=self.instance_id,
+            )
+        return self._judge
 
     def state(self, uri: str) -> Resource:
         return self.instance.state(uri)
