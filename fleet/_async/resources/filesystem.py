@@ -301,6 +301,14 @@ class AsyncFilesystemResource(Resource):
         response = await self.client.request(
             "POST", "/fs/file", json=request.model_dump()
         )
+        if response.status_code == 404:
+            return FileStateResponse(
+                success=True, path=path, exists=False,
+                message=response.json().get("detail", "File not found"),
+            )
+        if response.status_code >= 400:
+            detail = response.json().get("detail", response.text)
+            raise RuntimeError(f"Failed to get file state for '{path}': {detail}")
         return FileStateResponse(**response.json())
 
     async def file_text(self, path: str, max_content_size: int = 102400) -> str:
