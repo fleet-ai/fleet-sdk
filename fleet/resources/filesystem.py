@@ -1,7 +1,6 @@
 from typing import Any, Dict, List, Optional
 from ..instance.models import (
     Resource as ResourceModel,
-    FsDiffRequest,
     FsDiffResponse,
     FsFileDiffEntry,
     FileStateRequest,
@@ -24,7 +23,11 @@ if TYPE_CHECKING:
 # Document extensions that need /fs/doc/text for readable content extraction
 _DOC_EXTENSIONS = {
     ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls",
-    ".odt", ".ods", ".odp", ".rtf", ".pdf", ".epub",
+    ".xlsm", ".xltx", ".xltm",
+    ".odt", ".ott", ".odm", ".ods", ".ots", ".odp", ".otp",
+    ".odg", ".otg", ".odf",
+    ".rtf", ".pdf", ".epub",
+    ".xps", ".oxps", ".fb2", ".cbz", ".mobi",
 }
 
 
@@ -246,54 +249,24 @@ class FilesystemResource(Resource):
         include_content: bool = True,
         max_content_size: int = 102400,
         exclude_patterns: Optional[List[str]] = None,
+        extract_documents: bool = True,
     ) -> SyncFilesystemDiff:
         """Get filesystem diff from the environment.
 
         Args:
-            include_content: Whether to include file contents (default True)
-            max_content_size: Max file size to include content for (default 100KB)
-            exclude_patterns: Optional list of glob patterns to exclude
+            include_content: Kept for backwards compatibility, ignored by server
+            max_content_size: Kept for backwards compatibility, ignored by server
+            exclude_patterns: Kept for backwards compatibility, ignored by server
+            extract_documents: Kept for backwards compatibility, ignored by server
 
         Returns:
             SyncFilesystemDiff with assertion helpers
         """
-        request = FsDiffRequest(
-            include_content=include_content,
-            max_content_size=max_content_size,
-            exclude_patterns=exclude_patterns,
-        )
         response = self.client.request(
             "POST",
             "/diff/fs",
-            json=request.model_dump(exclude_none=True),
+            json={},
         )
-        result = response.json()
-        fs_response = FsDiffResponse(**result)
-        if not fs_response.success:
-            raise RuntimeError(
-                f"Filesystem diff failed: {fs_response.error or fs_response.message}"
-            )
-        return SyncFilesystemDiff(fs_response, self)
-
-    def diff_simple(
-        self,
-        include_content: bool = True,
-        max_content_size: int = 102400,
-    ) -> SyncFilesystemDiff:
-        """Get filesystem diff using the simple GET endpoint.
-
-        Args:
-            include_content: Whether to include file contents (default True)
-            max_content_size: Max file size to include content for (default 100KB)
-
-        Returns:
-            SyncFilesystemDiff with assertion helpers
-        """
-        params = {
-            "include_content": include_content,
-            "max_content_size": max_content_size,
-        }
-        response = self.client.request("GET", "/diff/fs", params=params)
         result = response.json()
         fs_response = FsDiffResponse(**result)
         if not fs_response.success:

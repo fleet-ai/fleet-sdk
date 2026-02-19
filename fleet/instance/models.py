@@ -146,6 +146,7 @@ class FsDiffRequest(BaseModel):
     include_content: bool = Field(True, title="Include Content")
     max_content_size: int = Field(102400, title="Max Content Size")
     exclude_patterns: Optional[List[str]] = Field(None, title="Exclude Patterns")
+    extract_documents: bool = Field(True, title="Extract Documents")
 
 
 class FsFileDiffEntry(BaseModel):
