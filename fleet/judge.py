@@ -441,6 +441,12 @@ def _print_accumulators(data: dict) -> None:
         print(json.dumps(grading_details))
         print("<<< GRADING_DETAILS <<<")
 
+    golden_urls = acc.get("golden_urls")
+    if golden_urls:
+        print(">>> GOLDEN_URLS >>>")
+        print(json.dumps(golden_urls))
+        print("<<< GOLDEN_URLS <<<")
+
     timing = acc.get("timing")
     if timing:
         print(
@@ -453,6 +459,34 @@ def _print_accumulators(data: dict) -> None:
 # ---------------------------------------------------------------------------
 # Request body builder (shared by sync and async)
 # ---------------------------------------------------------------------------
+
+
+def _print_judge_call_start(
+    rubric: Union[str, "Rubric"],
+    images: Optional[Dict[str, "Image"]],
+    agentic: bool,
+    model: Optional[str],
+) -> None:
+    """Print info when initiating a judge grading call."""
+    mode = "agentic" if agentic else "standard"
+    model_str = model or "default"
+    print(f"[C] Calling judge ({mode} mode, model={model_str})")
+
+    if isinstance(rubric, Rubric):
+        criteria_names = [c.name for c in rubric.criteria]
+        print(f"[C] Rubric: {len(rubric.criteria)} criteria ({', '.join(criteria_names)}), max={rubric.max_score}")
+
+    if images:
+        for label, img in images.items():
+            src = img.source
+            detail = ""
+            if img.url:
+                detail = f" url={img.url}"
+            elif img.filename:
+                detail = f" file={img.filename}"
+            print(f"[C] Image '{label}': source={src}{detail}")
+    else:
+        print("[C] No images provided")
 
 
 def _build_grade_request(
@@ -525,9 +559,51 @@ def _build_grade_request(
 
 def _parse_grade_response(data: dict) -> JudgeResult:
     """Parse orchestrator response into JudgeResult and print accumulators."""
+    # Print detailed judge grading info
+    _print_judge_result(data)
     _print_accumulators(data)
     score = float(data.get("normalized_score", 0.0))
     return JudgeResult(score, details=data)
+
+
+def _print_judge_result(data: dict) -> None:
+    """Print detailed judge grading result for verifier stdout capture."""
+    model = data.get("model_used", "unknown")
+    provider = data.get("provider_used", "unknown")
+    total = data.get("total_score", 0)
+    max_score = data.get("max_score", 0)
+    normalized = data.get("normalized_score", 0)
+    elapsed = (data.get("accumulators") or {}).get("elapsed_ms")
+
+    print(f"[C] Grading via {model} (provider={provider})")
+    if elapsed is not None:
+        print(f"[C] Judge call completed in {elapsed:.0f}ms")
+
+    criteria = data.get("criteria")
+    if criteria:
+        print(f"[C] Score: {total}/{max_score} ({normalized:.2f})")
+        for c in criteria:
+            name = c.get("name", "?")
+            cscore = c.get("score", "?")
+            cmax = c.get("max_score", "?")
+            reasoning = c.get("reasoning", "")
+            # Truncate long reasoning for stdout readability
+            if len(reasoning) > 200:
+                reasoning = reasoning[:200] + "..."
+            print(f"[C]   {name}: {cscore}/{cmax} — {reasoning}")
+    else:
+        print(f"[C] Score: {normalized:.2f}")
+
+    feedback = data.get("feedback")
+    if feedback:
+        fb_display = feedback if len(feedback) <= 300 else feedback[:300] + "..."
+        print(f"[C] Feedback: {fb_display}")
+
+    # Print golden URLs if present in accumulators
+    golden_urls = (data.get("accumulators") or {}).get("golden_urls")
+    if golden_urls:
+        for url in golden_urls:
+            print(f"[C] Gold reference: {url}")
 
 
 # ---------------------------------------------------------------------------
@@ -599,5 +675,6 @@ class SyncJudge:
             task_id=task_id,
         )
 
+        _print_judge_call_start(rubric, images, agentic, model)
         response = self._client.request("POST", "/v1/judge/grade", json=body)
         return _parse_grade_response(response.json())

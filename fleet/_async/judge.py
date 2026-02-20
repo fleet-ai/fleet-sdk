@@ -15,6 +15,7 @@ from ..judge import (
     _collect_image_from_env_async,
     _guess_media_type,
     _parse_grade_response,
+    _print_judge_call_start,
 )
 
 if TYPE_CHECKING:
@@ -117,5 +118,6 @@ class AsyncJudge:
             task_id=task_id,
         )
 
+        _print_judge_call_start(rubric, resolved_images, agentic, model)
         response = await self._client.request("POST", "/v1/judge/grade", json=body)
         return _parse_grade_response(response.json())
