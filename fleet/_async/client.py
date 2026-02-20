@@ -59,6 +59,7 @@ from .tasks import Task
 
 if TYPE_CHECKING:
     from .verifiers import AsyncVerifierFunction
+    from .judge import AsyncJudge
 
 
 def _json_default(x: Any) -> Any:
@@ -176,6 +177,7 @@ from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
 from .resources.browser import AsyncBrowserResource
+from .resources.filesystem import AsyncFilesystemResource
 from .resources.mcp import AsyncMCPResource
 from .resources.api import AsyncAPIResource
 
@@ -348,6 +350,7 @@ class AsyncEnv(EnvironmentBase):
         self._client = client
         self._apps: Dict[str, AsyncInstanceClient] = {}
         self._instance: Optional[AsyncInstanceClient] = None
+        self._judge: Optional["AsyncJudge"] = None
 
     @property
     def instance(self) -> AsyncInstanceClient:
@@ -391,6 +394,10 @@ class AsyncEnv(EnvironmentBase):
     def browser(self, name: str = "cdp") -> AsyncBrowserResource:
         return self.instance.browser(name)
 
+    def fs(self) -> AsyncFilesystemResource:
+        """Get a filesystem diff resource for inspecting file changes."""
+        return self.instance.fs()
+
     def api(self, name: str = "api") -> AsyncAPIResource:
         """Get an API resource for making HTTP requests to the app's API.
 
@@ -418,6 +425,18 @@ class AsyncEnv(EnvironmentBase):
     def mcp(self) -> AsyncMCPResource:
         mcp_url = f"{self.urls.root}mcp"
         return AsyncMCPResource(url=mcp_url, env_key=self.env_key)
+
+    @property
+    def judge(self) -> "AsyncJudge":
+        """LLM-as-judge grading via orchestrator API."""
+        if self._judge is None:
+            from .judge import AsyncJudge
+
+            self._judge = AsyncJudge(
+                client=self._load_client,
+                instance_id=self.instance_id,
+            )
+        return self._judge
 
     def state(self, uri: str) -> Resource:
         return self.instance.state(uri)
