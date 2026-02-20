@@ -12,6 +12,8 @@ from ..judge import (
     JudgeResult,
     Rubric,
     _build_grade_request,
+    _collect_image_from_env_async,
+    _guess_media_type,
     _parse_grade_response,
 )
 
@@ -75,6 +77,29 @@ class AsyncJudge:
             collect: File patterns for orchestrator to collect (agentic mode).
             task_id: Optional task ID for tracking.
         """
+        # Resolve Image.from_env images asynchronously before building request
+        resolved_images = images
+        if images and not agentic:
+            resolved_images = {}
+            for label, img in images.items():
+                if img.source == "env" and img._env is not None:
+                    b64 = await _collect_image_from_env_async(img._env, img.filename)
+                    if b64 is not None:
+                        resolved_images[label] = Image.from_base64(
+                            b64,
+                            img.filename or "image.png",
+                            _guess_media_type(img.filename or "image.png"),
+                        )
+                    else:
+                        # Async collection failed — use collect source directly
+                        # (don't keep the env image or serialize() will retry sync)
+                        resolved_images[label] = Image(
+                            source="collect",
+                            filename=img.filename,
+                        )
+                else:
+                    resolved_images[label] = img
+
         body = _build_grade_request(
             self._instance_id,
             rubric,
@@ -84,7 +109,7 @@ class AsyncJudge:
             context=context,
             reference_claims=reference_claims,
             conversation=conversation,
-            images=images,
+            images=resolved_images,
             model=model,
             provider=provider,
             agentic=agentic,

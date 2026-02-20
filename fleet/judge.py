@@ -176,6 +176,8 @@ class Image:
                 "data": self.data,
                 "media_type": self.media_type or _guess_media_type(self.filename or "image.png"),
             }
+        elif self.source == "collect":
+            d = {"source": "collect", "selector": self.filename}
         elif self.source == "env":
             if agentic:
                 d = {"source": "collect", "selector": self.filename}
@@ -323,6 +325,86 @@ def _collect_image_from_env(env: Any, filename: str) -> Optional[str]:
             if os.path.exists(fp):
                 with open(fp, "rb") as f:
                     logger.debug("Loaded image from filesystem: %s", fp)
+                    return base64.b64encode(f.read()).decode()
+        except Exception:
+            pass
+
+    return None
+
+
+async def _collect_image_from_env_async(env: Any, filename: str) -> Optional[str]:
+    """Async version of _collect_image_from_env.
+
+    Collects an image from an AsyncEnv using DB -> notebook -> filesystem strategies.
+    Returns base64-encoded image data, or None if not found.
+    """
+    # Strategy 1: DB files table
+    try:
+        current = env.db("current")
+        where = f"path = '{filename}' OR path LIKE '%/{filename}'"
+        rows = _extract_query_rows(
+            await current.query(f"SELECT path, hex(content) AS content_hex FROM files WHERE {where}")
+        )
+        candidates = {}
+        for row in rows:
+            path, chex = row.get("path", ""), row.get("content_hex", "")
+            if path and chex:
+                try:
+                    candidates[path] = bytes.fromhex(chex)
+                except Exception:
+                    pass
+        # Prefer non-dataroom paths
+        non_dr = [p for p in candidates if not p.startswith("dataroom/")]
+        best = sorted(non_dr or list(candidates.keys()), key=len)
+        if best:
+            logger.debug("Loaded image from DB (async): %s", best[0])
+            return base64.b64encode(candidates[best[0]]).decode()
+    except Exception as e:
+        logger.debug("DB image query failed (async): %s", e)
+
+    # Strategy 2: Notebook cell outputs
+    try:
+        current = env.db("current")
+        nb_rows = _extract_query_rows(
+            await current.query(
+                "SELECT path, hex(content) AS content_hex FROM files "
+                "WHERE path LIKE 'notebooks/%.ipynb'"
+            )
+        )
+        for nb_row in nb_rows:
+            chex = nb_row.get("content_hex", "")
+            if not chex:
+                continue
+            try:
+                nb_bytes = bytes.fromhex(chex)
+                nb = json.loads(nb_bytes.decode("utf-8"))
+                for cell in reversed(nb.get("cells", [])):
+                    for output in cell.get("outputs", []):
+                        if output.get("output_type") in ("display_data", "execute_result"):
+                            img_data = output.get("data", {}).get("image/png")
+                            if img_data:
+                                if isinstance(img_data, list):
+                                    img_data = "".join(img_data)
+                                img_data = img_data.strip()
+                                if img_data:
+                                    logger.debug("Loaded image from notebook (async): %s", nb_row.get("path"))
+                                    return img_data
+            except Exception:
+                pass
+    except Exception as e:
+        logger.debug("Notebook image query failed (async): %s", e)
+
+    # Strategy 3: Filesystem fallback
+    search_paths = [
+        filename,
+        f"/app/workspace/{filename}",
+        f"/workspace/{filename}",
+    ]
+    for fp in search_paths:
+        try:
+            if os.path.exists(fp):
+                with open(fp, "rb") as f:
+                    logger.debug("Loaded image from filesystem (async): %s", fp)
                     return base64.b64encode(f.read()).decode()
         except Exception:
             pass
