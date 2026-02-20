@@ -38,6 +38,47 @@ def _guess_media_type(filename: str) -> str:
     }.get(ext, "image/png")
 
 
+def _guess_file_media_type(filename: str) -> str:
+    """Guess media type from filename extension for arbitrary files.
+
+    Broader than _guess_media_type — covers documents, CAD, data formats, etc.
+    """
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    return {
+        # Images
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "gif": "image/gif",
+        "webp": "image/webp",
+        "svg": "image/svg+xml",
+        # Documents
+        "pdf": "application/pdf",
+        "txt": "text/plain",
+        "md": "text/markdown",
+        "html": "text/html",
+        "htm": "text/html",
+        "csv": "text/csv",
+        "tsv": "text/tab-separated-values",
+        # Data
+        "json": "application/json",
+        "xml": "application/xml",
+        "yaml": "application/x-yaml",
+        "yml": "application/x-yaml",
+        # CAD / Engineering
+        "step": "application/step",
+        "stp": "application/step",
+        "stl": "model/stl",
+        "iges": "model/iges",
+        "igs": "model/iges",
+        "obj": "model/obj",
+        # Archives
+        "zip": "application/zip",
+        "gz": "application/gzip",
+        "tar": "application/x-tar",
+    }.get(ext, "application/octet-stream")
+
+
 @dataclass
 class Criterion:
     """A single rubric criterion for grading.
@@ -193,6 +234,99 @@ class Image:
                     }
         else:
             raise ValueError(f"Unknown image source: {self.source}")
+
+        if label is not None:
+            d["label"] = label
+        return d
+
+
+class File:
+    """Reference to an arbitrary file for LLM judge grading.
+
+    Supports any file type (PDF, CSV, STEP, STL, etc.) via the Anthropic
+    Files API. Use the static constructors to create instances:
+        File.s3("s3://bucket/key")                     - S3 URL, fetched server-side
+        File.from_base64(data, "part.step", "application/step") - Inline base64 data
+        File.from_env(env, "exported_part.step")        - Collect from environment
+    """
+
+    def __init__(
+        self,
+        *,
+        source: str,
+        url: Optional[str] = None,
+        data: Optional[str] = None,
+        filename: Optional[str] = None,
+        media_type: Optional[str] = None,
+        _env: Optional[Any] = None,
+    ):
+        self.source = source
+        self.url = url
+        self.data = data
+        self.filename = filename
+        self.media_type = media_type
+        self._env = _env
+
+    @staticmethod
+    def s3(url: str, media_type: Optional[str] = None) -> "File":
+        """Reference a file in S3. The orchestrator fetches it server-side."""
+        return File(source="s3", url=url, media_type=media_type)
+
+    @staticmethod
+    def from_base64(
+        data: str, filename: str, media_type: Optional[str] = None
+    ) -> "File":
+        """Inline base64 file data."""
+        return File(
+            source="base64",
+            data=data,
+            filename=filename,
+            media_type=media_type or _guess_file_media_type(filename),
+        )
+
+    @staticmethod
+    def from_env(env: Any, filename: str) -> "File":
+        """Collect a file from the environment.
+
+        In non-agentic mode, the SDK collects the file client-side (DB -> filesystem)
+        and sends base64 to the orchestrator.
+
+        In agentic mode, only the filename hint is sent and the orchestrator collects it.
+        """
+        return File(source="env", filename=filename, _env=env)
+
+    def serialize(self, *, label: Optional[str] = None, agentic: bool = False) -> dict:
+        """Serialize for the orchestrator API request body."""
+        d: dict
+        if self.source == "s3":
+            d = {"source": "s3", "url": self.url}
+            if self.media_type:
+                d["media_type"] = self.media_type
+        elif self.source == "base64":
+            d = {
+                "source": "base64",
+                "data": self.data,
+                "filename": self.filename,
+                "media_type": self.media_type or _guess_file_media_type(self.filename or "file"),
+            }
+        elif self.source == "collect":
+            d = {"source": "collect", "selector": self.filename}
+        elif self.source == "env":
+            if agentic:
+                d = {"source": "collect", "selector": self.filename}
+            else:
+                b64 = _collect_file_from_env(self._env, self.filename)
+                if b64 is None:
+                    d = {"source": "collect", "selector": self.filename}
+                else:
+                    d = {
+                        "source": "base64",
+                        "data": b64,
+                        "filename": self.filename,
+                        "media_type": _guess_file_media_type(self.filename or "file"),
+                    }
+        else:
+            raise ValueError(f"Unknown file source: {self.source}")
 
         if label is not None:
             d["label"] = label
@@ -412,6 +546,102 @@ async def _collect_image_from_env_async(env: Any, filename: str) -> Optional[str
     return None
 
 
+def _collect_file_from_env(env: Any, filename: str) -> Optional[str]:
+    """Collect a file from the environment using DB -> filesystem strategies.
+
+    Similar to _collect_image_from_env but skips notebook cell output strategy
+    (which is image-specific). Returns base64-encoded file data, or None if not found.
+    """
+    # Strategy 1: DB files table
+    try:
+        current = env.db("current")
+        where = f"path = '{filename}' OR path LIKE '%/{filename}'"
+        rows = _extract_query_rows(
+            current.query(f"SELECT path, hex(content) AS content_hex FROM files WHERE {where}")
+        )
+        candidates = {}
+        for row in rows:
+            path, chex = row.get("path", ""), row.get("content_hex", "")
+            if path and chex:
+                try:
+                    candidates[path] = bytes.fromhex(chex)
+                except Exception:
+                    pass
+        # Prefer non-dataroom paths
+        non_dr = [p for p in candidates if not p.startswith("dataroom/")]
+        best = sorted(non_dr or list(candidates.keys()), key=len)
+        if best:
+            logger.debug("Loaded file from DB: %s", best[0])
+            return base64.b64encode(candidates[best[0]]).decode()
+    except Exception as e:
+        logger.debug("DB file query failed: %s", e)
+
+    # Strategy 2: Filesystem fallback
+    search_paths = [
+        filename,
+        f"/app/workspace/{filename}",
+        f"/workspace/{filename}",
+    ]
+    for fp in search_paths:
+        try:
+            if os.path.exists(fp):
+                with open(fp, "rb") as f:
+                    logger.debug("Loaded file from filesystem: %s", fp)
+                    return base64.b64encode(f.read()).decode()
+        except Exception:
+            pass
+
+    return None
+
+
+async def _collect_file_from_env_async(env: Any, filename: str) -> Optional[str]:
+    """Async version of _collect_file_from_env.
+
+    Collects a file from an AsyncEnv using DB -> filesystem strategies.
+    Returns base64-encoded file data, or None if not found.
+    """
+    # Strategy 1: DB files table
+    try:
+        current = env.db("current")
+        where = f"path = '{filename}' OR path LIKE '%/{filename}'"
+        rows = _extract_query_rows(
+            await current.query(f"SELECT path, hex(content) AS content_hex FROM files WHERE {where}")
+        )
+        candidates = {}
+        for row in rows:
+            path, chex = row.get("path", ""), row.get("content_hex", "")
+            if path and chex:
+                try:
+                    candidates[path] = bytes.fromhex(chex)
+                except Exception:
+                    pass
+        # Prefer non-dataroom paths
+        non_dr = [p for p in candidates if not p.startswith("dataroom/")]
+        best = sorted(non_dr or list(candidates.keys()), key=len)
+        if best:
+            logger.debug("Loaded file from DB (async): %s", best[0])
+            return base64.b64encode(candidates[best[0]]).decode()
+    except Exception as e:
+        logger.debug("DB file query failed (async): %s", e)
+
+    # Strategy 2: Filesystem fallback
+    search_paths = [
+        filename,
+        f"/app/workspace/{filename}",
+        f"/workspace/{filename}",
+    ]
+    for fp in search_paths:
+        try:
+            if os.path.exists(fp):
+                with open(fp, "rb") as f:
+                    logger.debug("Loaded file from filesystem (async): %s", fp)
+                    return base64.b64encode(f.read()).decode()
+        except Exception:
+            pass
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Accumulator printing (verifier protocol)
 # ---------------------------------------------------------------------------
@@ -447,6 +677,12 @@ def _print_accumulators(data: dict) -> None:
         print(json.dumps(golden_urls))
         print("<<< GOLDEN_URLS <<<")
 
+    agent_steps = acc.get("agent_steps")
+    if agent_steps:
+        print(">>> AGENT_STEPS >>>")
+        print(json.dumps(agent_steps))
+        print("<<< AGENT_STEPS <<<")
+
     timing = acc.get("timing")
     if timing:
         print(
@@ -466,6 +702,7 @@ def _print_judge_call_start(
     images: Optional[Dict[str, "Image"]],
     agentic: bool,
     model: Optional[str],
+    files: Optional[Dict[str, "File"]] = None,
 ) -> None:
     """Print info when initiating a judge grading call."""
     mode = "agentic" if agentic else "standard"
@@ -488,6 +725,18 @@ def _print_judge_call_start(
     else:
         print("[C] No images provided")
 
+    if files:
+        for label, f in files.items():
+            src = f.source
+            detail = ""
+            if f.url:
+                detail = f" url={f.url}"
+            elif f.filename:
+                detail = f" file={f.filename}"
+            if f.media_type:
+                detail += f" type={f.media_type}"
+            print(f"[C] File '{label}': source={src}{detail}")
+
 
 def _build_grade_request(
     instance_id: str,
@@ -500,6 +749,7 @@ def _build_grade_request(
     reference_claims: Optional[str] = None,
     conversation: Optional[List[dict]] = None,
     images: Optional[Dict[str, Image]] = None,
+    files: Optional[Dict[str, "File"]] = None,
     model: Optional[str] = None,
     provider: Optional[str] = None,
     agentic: bool = False,
@@ -554,6 +804,13 @@ def _build_grade_request(
             for label, img in images.items()
         ]
 
+    # Serialize files as labeled array
+    if files:
+        body["files"] = [
+            f.serialize(label=label, agentic=agentic)
+            for label, f in files.items()
+        ]
+
     return body
 
 
@@ -605,6 +862,26 @@ def _print_judge_result(data: dict) -> None:
         for url in golden_urls:
             print(f"[C] Gold reference: {url}")
 
+    # Print agentic judge steps if present
+    agent_steps = (data.get("accumulators") or {}).get("agent_steps")
+    if agent_steps:
+        print(f"[C] Agentic judge: {len(agent_steps)} steps")
+        for step in agent_steps:
+            stype = step.get("type", "?")
+            if stype == "mcp_connect":
+                print(f"[C]   MCP connected ({step.get('tools_available', '?')} tools)")
+            elif stype == "tool_call":
+                tool = step.get("tool", "?")
+                turn = step.get("turn", "?")
+                is_err = step.get("is_error", False)
+                result_preview = step.get("result", "")[:100]
+                status = "ERROR" if is_err else "ok"
+                print(f"[C]   Turn {turn}: {tool}() → {status}: {result_preview}")
+            elif stype == "final_response":
+                print(f"[C]   Turn {step.get('turn', '?')}: final response")
+            elif stype == "max_turns_reached":
+                print(f"[C]   Max turns reached ({step.get('turns_used', '?')})")
+
 
 # ---------------------------------------------------------------------------
 # Sync judge
@@ -632,6 +909,7 @@ class SyncJudge:
         reference_claims: Optional[str] = None,
         conversation: Optional[List[dict]] = None,
         images: Optional[Dict[str, Image]] = None,
+        files: Optional[Dict[str, File]] = None,
         model: Optional[str] = None,
         provider: Optional[str] = None,
         agentic: bool = False,
@@ -651,7 +929,8 @@ class SyncJudge:
             context: Additional context for the judge.
             reference_claims: Reference analysis claims (folded into context).
             conversation: Conversation history as list of message dicts.
-            images: List of Image objects for the judge.
+            images: Named Image objects for the judge.
+            files: Named File objects for the judge (PDF, CSV, STEP, etc.).
             model: Override LLM model (server picks default if None).
             provider: Override LLM provider (server picks default if None).
             agentic: If True, the orchestrator collects artifacts from the instance.
@@ -668,6 +947,7 @@ class SyncJudge:
             reference_claims=reference_claims,
             conversation=conversation,
             images=images,
+            files=files,
             model=model,
             provider=provider,
             agentic=agentic,
@@ -675,6 +955,6 @@ class SyncJudge:
             task_id=task_id,
         )
 
-        _print_judge_call_start(rubric, images, agentic, model)
+        _print_judge_call_start(rubric, images, agentic, model, files=files)
         response = self._client.request("POST", "/v1/judge/grade", json=body)
         return _parse_grade_response(response.json())

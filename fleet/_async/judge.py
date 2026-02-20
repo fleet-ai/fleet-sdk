@@ -8,11 +8,14 @@ from typing import Dict, List, Optional, Union, TYPE_CHECKING
 # Import shared classes and helpers from the sync module
 from ..judge import (
     Criterion,
+    File,
     Image,
     JudgeResult,
     Rubric,
     _build_grade_request,
+    _collect_file_from_env_async,
     _collect_image_from_env_async,
+    _guess_file_media_type,
     _guess_media_type,
     _parse_grade_response,
     _print_judge_call_start,
@@ -25,6 +28,7 @@ if TYPE_CHECKING:
 __all__ = [
     "AsyncJudge",
     "Criterion",
+    "File",
     "Image",
     "JudgeResult",
     "Rubric",
@@ -52,6 +56,7 @@ class AsyncJudge:
         reference_claims: Optional[str] = None,
         conversation: Optional[List[dict]] = None,
         images: Optional[Dict[str, Image]] = None,
+        files: Optional[Dict[str, File]] = None,
         model: Optional[str] = None,
         provider: Optional[str] = None,
         agentic: bool = False,
@@ -72,6 +77,7 @@ class AsyncJudge:
             reference_claims: Reference analysis claims.
             conversation: Conversation history as list of message dicts.
             images: Named images for the judge (e.g., gold reference, agent output).
+            files: Named files for the judge (PDF, CSV, STEP, etc.).
             model: Override LLM model (server picks default if None).
             provider: Override LLM provider (server picks default if None).
             agentic: If True, the orchestrator collects artifacts from the instance.
@@ -101,6 +107,28 @@ class AsyncJudge:
                 else:
                     resolved_images[label] = img
 
+        # Resolve File.from_env files asynchronously before building request
+        resolved_files = files
+        if files and not agentic:
+            resolved_files = {}
+            for label, f in files.items():
+                if f.source == "env" and f._env is not None:
+                    b64 = await _collect_file_from_env_async(f._env, f.filename)
+                    if b64 is not None:
+                        resolved_files[label] = File.from_base64(
+                            b64,
+                            f.filename or "file",
+                            _guess_file_media_type(f.filename or "file"),
+                        )
+                    else:
+                        # Async collection failed — use collect source directly
+                        resolved_files[label] = File(
+                            source="collect",
+                            filename=f.filename,
+                        )
+                else:
+                    resolved_files[label] = f
+
         body = _build_grade_request(
             self._instance_id,
             rubric,
@@ -111,6 +139,7 @@ class AsyncJudge:
             reference_claims=reference_claims,
             conversation=conversation,
             images=resolved_images,
+            files=resolved_files,
             model=model,
             provider=provider,
             agentic=agentic,
@@ -118,6 +147,6 @@ class AsyncJudge:
             task_id=task_id,
         )
 
-        _print_judge_call_start(rubric, resolved_images, agentic, model)
+        _print_judge_call_start(rubric, resolved_images, agentic, model, files=resolved_files)
         response = await self._client.request("POST", "/v1/judge/grade", json=body)
         return _parse_grade_response(response.json())

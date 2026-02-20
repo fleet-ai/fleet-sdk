@@ -69,14 +69,14 @@ from .tasks import (
 from .types import VerifierFunction
 
 # Import judge data classes
-from .judge import Rubric, Criterion, Image, JudgeResult
+from .judge import Rubric, Criterion, File, Image, JudgeResult
 
 # Create a module-level env attribute for convenient access
 from . import env
 from . import global_client as _global_client
 from ._async import global_client as _async_global_client
 
-__version__ = "0.2.114"
+__version__ = "0.2.115"
 
 __all__ = [
     # Core classes
@@ -96,6 +96,7 @@ __all__ = [
     # Judge
     "Rubric",
     "Criterion",
+    "File",
     "Image",
     "JudgeResult",
     # Exceptions
