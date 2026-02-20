@@ -28,6 +28,7 @@ from .client import Fleet, SyncEnv, Session
 from ._async.client import AsyncFleet, AsyncEnv, AsyncSession
 from .models import InstanceResponse, Environment, Run
 from .instance.models import Resource, ResetResponse
+from ._async.resources.s3 import S3Resource
 
 # Import sync verifiers with explicit naming
 from .verifiers import (
@@ -87,6 +88,8 @@ __all__ = [
     "Resource",
     "ResetResponse",
     "Run",
+    # S3 Resources
+    "S3Resource",
     # Task models
     "Task",
     "VerifierFunction",
