@@ -823,6 +823,54 @@ def _parse_grade_response(data: dict) -> JudgeResult:
     return JudgeResult(score, details=data)
 
 
+def _print_criteria_markers(criteria: list) -> None:
+    """Emit ``>>> CRITERIA >>>`` stdout markers for structured criteria display.
+
+    The orchestrator (theseus PR #1967) scans verifier stdout for these
+    markers and wraps the execution result so the client (client PR #1737)
+    can render an expandable rubric breakdown.
+
+    Converts from the orchestrator judge-response format::
+
+        {"name": str, "score": int, "max_score": int, "reasoning": str}
+
+    to the client-expected marker format::
+
+        {"criteria": str, "score": float, "score_out_of": float, "description"?: str}
+
+    Each criterion's score is normalised to a 0.0–1.0 float using its own
+    ``max_score``.
+    """
+    marker_criteria = []
+    for c in criteria:
+        name = c.get("name", "")
+        cscore = c.get("score", 0)
+        cmax = c.get("max_score", 0)
+
+        # Normalise per-criterion score to 0.0–1.0
+        if cmax and float(cmax) > 0:
+            norm_score = float(cscore) / float(cmax)
+        else:
+            norm_score = float(cscore)
+
+        entry: dict = {
+            "criteria": name,
+            "score": round(norm_score, 4),
+            "score_out_of": 1.0,
+        }
+
+        reasoning = c.get("reasoning", "")
+        if reasoning:
+            entry["description"] = reasoning
+
+        marker_criteria.append(entry)
+
+    if marker_criteria:
+        print(">>> CRITERIA >>>")
+        print(json.dumps(marker_criteria))
+        print("<<< CRITERIA <<<")
+
+
 def _print_judge_result(data: dict) -> None:
     """Print detailed judge grading result for verifier stdout capture."""
     model = data.get("model_used", "unknown")
@@ -848,6 +896,12 @@ def _print_judge_result(data: dict) -> None:
             if len(reasoning) > 200:
                 reasoning = reasoning[:200] + "..."
             print(f"[C]   {name}: {cscore}/{cmax} — {reasoning}")
+
+        # Emit structured criteria via stdout markers so the orchestrator
+        # (_extract_criteria_from_stdout) and client can render a rubric
+        # breakdown.  Schema per element:
+        #   {"criteria": str, "score": float, "score_out_of": float, "description"?: str}
+        _print_criteria_markers(criteria)
     else:
         print(f"[C] Score: {normalized:.2f}")
 
