@@ -601,7 +601,6 @@ class AsyncFleet:
         )
 
         instance = AsyncEnv(client=self.client, **response.json())
-        await instance.instance.load()
         return instance
 
     async def make_for_task(self, task: Task) -> AsyncEnv:
@@ -653,7 +652,6 @@ class AsyncFleet:
         else:
             response = await self.client.request("GET", f"/v1/env/instances/{instance_id}")
             instance = AsyncEnv(client=self.client, **response.json())
-            await instance.instance.load()
             return instance
 
     def _create_url_instance(self, base_url: str) -> AsyncEnv:
