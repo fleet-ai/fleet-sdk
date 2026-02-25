@@ -141,8 +141,13 @@ def main():
         print("Error: FLEET_API_KEY env var or --api-key required")
         sys.exit(1)
 
-    # Resolve team_id from API key unless overridden
-    team_id = args.team_id or resolve_team_id(args.api_key)
+    # Only pass team_id to task GET if explicitly provided (requires admin).
+    # Otherwise, resolve team info just for display.
+    if args.team_id:
+        team_id = args.team_id
+    else:
+        resolve_team_id(args.api_key)
+        team_id = None
 
     output_dir = Path(args.output_dir) if args.output_dir else Path(args.task_key)
     output_dir.mkdir(parents=True, exist_ok=True)
