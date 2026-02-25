@@ -613,7 +613,6 @@ class Fleet:
         )
 
         instance = SyncEnv(client=self.client, **response.json())
-        instance.instance.load()
         return instance
 
     def make_for_task(self, task: Task) -> SyncEnv:
@@ -665,7 +664,6 @@ class Fleet:
         else:
             response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
             instance = SyncEnv(client=self.client, **response.json())
-            instance.instance.load()
             return instance
 
     def _create_url_instance(self, base_url: str) -> SyncEnv:
