@@ -98,10 +98,11 @@ class SyncDatabaseSnapshot:
         self,
         other: "SyncDatabaseSnapshot",
         ignore_config: Optional[IgnoreConfig] = None,
+        use_structured_diff: bool = False,
     ) -> "SyncSnapshotDiff":
         """Compare this snapshot with another."""
         # No need to fetch all data upfront - diff will fetch on demand
-        return SyncSnapshotDiff(self, other, ignore_config)
+        return SyncSnapshotDiff(self, other, ignore_config, use_structured_diff=use_structured_diff)
 
 
 class SyncSnapshotQueryBuilder:
@@ -274,10 +275,12 @@ class SyncSnapshotDiff:
         before: SyncDatabaseSnapshot,
         after: SyncDatabaseSnapshot,
         ignore_config: Optional[IgnoreConfig] = None,
+        use_structured_diff: bool = False,
     ):
         self.before = before
         self.after = after
         self.ignore_config = ignore_config or IgnoreConfig()
+        self.use_structured_diff = use_structured_diff
         self._cached: Optional[Dict[str, Any]] = None
         self._targeted_mode = False  # Flag to use targeted queries
 
@@ -1814,8 +1817,7 @@ class SyncSnapshotDiff:
             return self._expect_no_changes()
 
         resource = self.after.resource
-        # Disabled: structured diff endpoint not yet available
-        if False and resource.client is not None and resource._mode == "http":
+        if self.use_structured_diff and resource.client is not None and resource._mode == "http":
             api_diff = None
             try:
                 payload = {}
@@ -2516,19 +2518,22 @@ class SQLiteResource(Resource):
         self,
         other: "SQLiteResource",
         ignore_config: Optional[IgnoreConfig] = None,
+        use_structured_diff: bool = False,
     ) -> SyncSnapshotDiff:
-        """Compare this database with another AsyncSQLiteResource.
+        """Compare this database with another SQLiteResource.
 
         Args:
-            other: Another AsyncSQLiteResource to compare against
+            other: Another SQLiteResource to compare against
             ignore_config: Optional configuration for ignoring specific tables/fields
+            use_structured_diff: If True, use server-side structured diff API in expect_only_v2.
+                Defaults to False (local diff only).
 
         Returns:
-            AsyncSnapshotDiff: Object containing the differences between the two databases
+            SyncSnapshotDiff: Object containing the differences between the two databases
         """
         # Create snapshots of both databases
         before_snapshot = self.snapshot(name=f"before_{datetime.utcnow().isoformat()}")
         after_snapshot = other.snapshot(name=f"after_{datetime.utcnow().isoformat()}")
 
         # Return the diff between the snapshots
-        return before_snapshot.diff(after_snapshot, ignore_config)
+        return before_snapshot.diff(after_snapshot, ignore_config, use_structured_diff=use_structured_diff)

@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from ..resources.sqlite import SQLiteResource
 from ..resources.browser import BrowserResource
 from ..resources.api import APIResource
+from ..resources.filesystem import FilesystemResource
 from ..resources.base import Resource
 
 from fleet.verifiers import DatabaseSnapshot
@@ -102,6 +103,19 @@ class InstanceClient:
         return BrowserResource(
             self._resources_state[ResourceType.cdp.value][name], self.client
         )
+
+    def fs(self) -> FilesystemResource:
+        """Returns a filesystem diff resource for inspecting file changes.
+
+        Returns:
+            A FilesystemResource for querying filesystem diffs
+        """
+        resource_model = ResourceModel(
+            name="fs",
+            type=ResourceType.db,  # Reuse existing type; fs is not a registered resource type
+            mode=ResourceMode.ro,
+        )
+        return FilesystemResource(resource_model, self.client)
 
     def api(self, name: str, base_url: str) -> APIResource:
         """
