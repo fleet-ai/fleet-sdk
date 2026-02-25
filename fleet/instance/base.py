@@ -4,29 +4,26 @@ from typing import Dict, Any, Optional
 
 
 def default_httpx_client(max_retries: int, timeout: float) -> httpx.Client:
+    limits = httpx.Limits(
+        max_connections=300,
+        max_keepalive_connections=100,
+        keepalive_expiry=30.0,
+    )
+    pool_timeout = httpx.Timeout(timeout, pool=30.0)
+
     if max_retries <= 0:
-        return httpx.Client(timeout=timeout)
+        return httpx.Client(timeout=pool_timeout, limits=limits)
 
     policy = httpx_retries.Retry(
         total=max_retries,
-        status_forcelist=[
-            404,
-            429,
-            500,
-            502,
-            503,
-            504,
-        ],
+        status_forcelist=[404, 429, 500, 502, 503, 504],
         allowed_methods=["GET", "POST", "PATCH", "DELETE"],
         backoff_factor=0.5,
     )
     retry = httpx_retries.RetryTransport(
         transport=httpx.HTTPTransport(retries=2), retry=policy
     )
-    return httpx.Client(
-        timeout=timeout,
-        transport=retry,
-    )
+    return httpx.Client(timeout=pool_timeout, transport=retry, limits=limits)
 
 
 class BaseWrapper:
