@@ -132,7 +132,14 @@ def upload_task(api_key: str, task: dict, new_key: str) -> dict:
         "metadata": task.get("metadata"),
         "data_id": task.get("data_id"),
         "data_version": task.get("data_version"),
+        "task_modality": task.get("task_modality"),
+        "task_lifecycle_status": task.get("task_lifecycle_status"),
+        "factual_answer": task.get("factual_answer"),
+        "output_json_schema": task.get("output_json_schema"),
     }
+    # Strip None values so the API uses its defaults
+    payload = {k: v for k, v in payload.items() if v is not None}
+
     # Include verifier code if present
     verifier = task.get("verifier")
     if verifier and verifier.get("code"):
