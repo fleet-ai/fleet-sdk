@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
 """
-Upload a task bundle (task.json + files/) as a new task.
+Upload a task bundle (task.json + files/) as a new task, then launch a job.
 
 Usage:
-    python upload_task.py --dir ./my_task --key my_new_task
+    # Auto-generate key, upload, and launch job:
+    python upload_task.py --dir ./my_task
+
+    # Explicit key:
+    python upload_task.py --dir ./my_task --key my_custom_key
+
+    # Skip job launch:
+    python upload_task.py --dir ./my_task --no-launch-job
+
+    # Custom pass_k:
+    python upload_task.py --dir ./my_task --pass-k 3
 
 Steps:
   1. Validates the bundle (same checks as validate_task.py)
-  2. Uploads files first (creates file-set, gets presigned upload URLs, POSTs files)
-  3. Creates the task via POST /v1/tasks
+  2. Checks task key doesn't already exist on server
+  3. Uploads files (creates file-set, gets presigned upload URLs, POSTs files)
+  4. Creates the task via POST /v1/tasks
+  5. Launches a job via POST /v1/jobs (unless --no-launch-job)
 
 Requires: FLEET_API_KEY env var (or --api-key)
 """
@@ -17,6 +29,7 @@ import argparse
 import json
 import os
 import sys
+import uuid
 from pathlib import Path
 
 import requests
@@ -31,6 +44,12 @@ except ImportError:
 from validate_task import validate
 
 DEFAULT_BASE_URL = "https://orchestrator.fleetai.com"
+
+DEFAULT_MODELS = [
+    "google/gemini-3.1-pro-preview",
+    "anthropic/claude-opus-4.6",
+    "openai/gpt-5.2",
+]
 
 
 def get_api_base() -> str:
@@ -58,6 +77,12 @@ def resolve_team_id(api_key: str) -> str:
     return team_id
 
 
+def check_task_exists(api_key: str, key: str) -> bool:
+    """GET /v1/tasks/{key} — returns True if the task already exists."""
+    resp = requests.get(f"{get_api_base()}/tasks/{key}", headers=headers(api_key))
+    return resp.status_code == 200
+
+
 def upload_files(
     api_key: str,
     new_key: str,
@@ -67,11 +92,11 @@ def upload_files(
     """Create file-set + upload files via presigned URLs."""
     all_files = [p for p in files_dir.rglob("*") if p.is_file()]
     if not all_files:
-        print("\n2. No files to upload, skipping file-set creation.")
+        print("\n3. No files to upload, skipping file-set creation.")
         return
 
     filenames = [str(p.relative_to(files_dir)) for p in all_files]
-    print(f"\n2. Uploading {len(filenames)} files to file-set: {new_key}")
+    print(f"\n3. Uploading {len(filenames)} files to file-set: {new_key}")
 
     # Create file-set
     resp = requests.post(
@@ -122,7 +147,7 @@ def upload_files(
 
 def upload_task(api_key: str, task: dict, new_key: str) -> dict:
     """POST /v1/tasks → create task with new key."""
-    print(f"\n3. Creating task with key: {new_key}")
+    print(f"\n4. Creating task with key: {new_key}")
     payload = {
         "key": new_key,
         "prompt": task["prompt"],
@@ -151,14 +176,42 @@ def upload_task(api_key: str, task: dict, new_key: str) -> dict:
     return result
 
 
+def launch_job(api_key: str, task_key: str, models: list[str], pass_k: int) -> dict:
+    """POST /v1/jobs → launch a job for the task."""
+    print(f"\n5. Launching job for task: {task_key}")
+    print(f"   Models: {', '.join(models)}")
+    print(f"   pass_k: {pass_k}")
+    payload = {
+        "task_key": task_key,
+        "models": models,
+        "pass_k": pass_k,
+    }
+    resp = requests.post(
+        f"{get_api_base()}/jobs",
+        headers=headers(api_key),
+        json=payload,
+    )
+    if not resp.ok:
+        print(f"   ERROR {resp.status_code}: {resp.text[:500]}")
+        resp.raise_for_status()
+    result = resp.json()
+    job_id = result.get("id", "N/A")
+    status = result.get("status", "N/A")
+    print(f"   Job launched: {job_id} (status: {status})")
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Upload a task bundle as a new task"
+        description="Upload a task bundle as a new task and launch a job"
     )
     parser.add_argument(
         "--dir", required=True, help="Path to the task bundle directory"
     )
-    parser.add_argument("--key", required=True, help="New task key")
+    parser.add_argument(
+        "--key",
+        help="New task key (default: auto-generated from task.json key + UUID)",
+    )
     parser.add_argument(
         "--api-key",
         default=os.environ.get("FLEET_API_KEY"),
@@ -172,6 +225,23 @@ def main():
         "--allow-overwrite",
         action="store_true",
         help="Allow overwriting existing files in S3",
+    )
+    parser.add_argument(
+        "--no-launch-job",
+        action="store_true",
+        help="Skip launching a job after upload",
+    )
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        default=DEFAULT_MODELS,
+        help=f"Models for the job (default: {' '.join(DEFAULT_MODELS)})",
+    )
+    parser.add_argument(
+        "--pass-k",
+        type=int,
+        default=1,
+        help="pass_k for the job (default: 1)",
     )
     args = parser.parse_args()
 
@@ -194,38 +264,57 @@ def main():
         sys.exit(1)
 
     task = json.loads(task_path.read_text())
-
-    # Safety: new key must differ from original
     original_key = task.get("key", "")
-    if args.key == original_key:
-        print(
-            f"Error: --key '{args.key}' is the same as the original task key. "
-            "Use a different key to avoid overwriting the original."
-        )
-        sys.exit(1)
+
+    # Derive key if not provided
+    if args.key:
+        new_key = args.key
+    else:
+        suffix = uuid.uuid4().hex[:8]
+        new_key = f"{original_key}_{suffix}"
+        print(f"Auto-generated task key: {new_key}")
 
     # Step 1: Validate
     print("1. Validating bundle...")
-    errors = validate(bundle_dir, new_key=args.key)
+    errors = validate(bundle_dir, new_key=new_key)
     if errors:
         print("Bundle validation failed. Fix errors above before uploading.")
         sys.exit(1)
 
+    # Step 2: Check task doesn't already exist on server
+    print(f"\n2. Checking if task key '{new_key}' already exists...")
+    if check_task_exists(args.api_key, new_key):
+        print(
+            f"Error: Task with key '{new_key}' already exists. "
+            "Use a different --key."
+        )
+        sys.exit(1)
+    print(f"   Key '{new_key}' is available.")
+
     files_dir = bundle_dir / "files"
 
-    # Step 2: Upload files first (so a failure here doesn't leave a half-created task)
+    # Step 3: Upload files first (so a failure here doesn't leave a half-created task)
     if files_dir.exists():
-        upload_files(args.api_key, args.key, files_dir, allow_overwrite=args.allow_overwrite)
+        upload_files(args.api_key, new_key, files_dir, allow_overwrite=args.allow_overwrite)
     else:
-        print("\n2. No files/ directory, skipping file-set creation.")
+        print("\n3. No files/ directory, skipping file-set creation.")
 
-    # Step 3: Create the task
-    result = upload_task(args.api_key, task, args.key)
+    # Step 4: Create the task
+    result = upload_task(args.api_key, task, new_key)
 
     print(f"\n-- Upload complete --")
     print(f"   Original key: {original_key}")
-    print(f"   New key:      {args.key}")
+    print(f"   New key:      {new_key}")
     print(f"   Task ID:      {result.get('id', 'N/A')}")
+
+    # Step 5: Launch job (unless --no-launch-job)
+    if not args.no_launch_job:
+        job_result = launch_job(args.api_key, new_key, args.models, args.pass_k)
+        print(f"\n-- Job launched --")
+        print(f"   Job ID:  {job_result.get('id', 'N/A')}")
+        print(f"   Status:  {job_result.get('status', 'N/A')}")
+    else:
+        print("\n   Skipping job launch (--no-launch-job)")
 
 
 if __name__ == "__main__":
