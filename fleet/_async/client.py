@@ -176,6 +176,7 @@ from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
 from .resources.browser import AsyncBrowserResource
+from .resources.filesystem import AsyncFilesystemResource
 from .resources.mcp import AsyncMCPResource
 from .resources.api import AsyncAPIResource
 
@@ -390,6 +391,10 @@ class AsyncEnv(EnvironmentBase):
 
     def browser(self, name: str = "cdp") -> AsyncBrowserResource:
         return self.instance.browser(name)
+
+    def fs(self) -> AsyncFilesystemResource:
+        """Get a filesystem diff resource for inspecting file changes."""
+        return self.instance.fs()
 
     def api(self, name: str = "api") -> AsyncAPIResource:
         """Get an API resource for making HTTP requests to the app's API.
