@@ -80,7 +80,14 @@ def resolve_team_id(api_key: str) -> str:
 def check_task_exists(api_key: str, key: str) -> bool:
     """GET /v1/tasks/{key} — returns True if the task already exists."""
     resp = requests.get(f"{get_api_base()}/tasks/{key}", headers=headers(api_key))
-    return resp.status_code == 200
+    if resp.status_code == 200:
+        return True
+    if resp.status_code == 404:
+        return False
+    # Unexpected status — surface the error rather than silently skipping the check
+    print(f"   ERROR checking task existence: {resp.status_code}: {resp.text[:500]}")
+    resp.raise_for_status()
+    return False  # unreachable, but keeps the type checker happy
 
 
 def upload_files(
@@ -182,7 +189,7 @@ def launch_job(api_key: str, task_key: str, models: list[str], pass_k: int) -> d
     print(f"   Models: {', '.join(models)}")
     print(f"   pass_k: {pass_k}")
     payload = {
-        "task_key": task_key,
+        "task_keys": [task_key],
         "models": models,
         "pass_k": pass_k,
     }
