@@ -61,6 +61,10 @@ eval = [
     "google-genai>=1.0.0",
     "mcp==1.24.0; python_version >= '3.10'"
 ]
+judge = [
+    "anthropic>=0.40.0",
+    "httpx>=0.27.0",
+]
 
 [project.urls]
 Homepage = "https://fleetai.com"
