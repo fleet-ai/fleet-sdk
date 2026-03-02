@@ -202,9 +202,11 @@ def launch_job(api_key: str, task_key: str, models: list[str], pass_k: int) -> d
         print(f"   ERROR {resp.status_code}: {resp.text[:500]}")
         resp.raise_for_status()
     result = resp.json()
-    job_id = result.get("id", "N/A")
+    job_id = result.get("job_id", result.get("id", "N/A"))
     status = result.get("status", "N/A")
     print(f"   Job launched: {job_id} (status: {status})")
+    if job_id != "N/A":
+        print(f"   Dashboard:    https://fleetai.com/dashboard/jobs/{job_id}")
     return result
 
 
@@ -317,9 +319,12 @@ def main():
     # Step 5: Launch job (unless --no-launch-job)
     if not args.no_launch_job:
         job_result = launch_job(args.api_key, new_key, args.models, args.pass_k)
+        job_id = job_result.get("job_id", job_result.get("id", "N/A"))
         print(f"\n-- Job launched --")
-        print(f"   Job ID:  {job_result.get('id', 'N/A')}")
+        print(f"   Job ID:  {job_id}")
         print(f"   Status:  {job_result.get('status', 'N/A')}")
+        if job_id != "N/A":
+            print(f"   URL:     https://fleetai.com/dashboard/jobs/{job_id}")
     else:
         print("\n   Skipping job launch (--no-launch-job)")
 
