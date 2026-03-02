@@ -164,8 +164,10 @@ def main():
     task_path.write_text(json.dumps(task, indent=2))
     print(f"   Saved to: {task_path}")
 
-    # Download data files
-    downloaded = download_files(args.api_key, args.task_key, files_dir)
+    # Download data files — use TASK_KEY env variable as file-set key if available,
+    # since the file-set key may differ from the task key (e.g., without version suffix)
+    file_set_key = (task.get("env_variables") or {}).get("TASK_KEY", args.task_key)
+    downloaded = download_files(args.api_key, file_set_key, files_dir)
 
     print(f"\n-- Download complete --")
     print(f"   Task JSON: {task_path}")
