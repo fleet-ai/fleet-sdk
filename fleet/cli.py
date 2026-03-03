@@ -1124,7 +1124,7 @@ def login():
     thread.start()
     server_ready.wait()
 
-    login_url = f"https://app.fleetai.com/cli-login?port={port}&state={state}"
+    login_url = f"https://fleetai.com/cli-login?port={port}&state={state}"
     console.print(f"[bold]Opening Fleet login in your browser...[/bold]")
     console.print(f"[dim]If the browser didn't open, visit:[/dim] {login_url}")
     webbrowser.open(login_url)
