@@ -129,12 +129,9 @@ def validate(bundle_dir: Path, new_key: str | None = None) -> list[str]:
             # URLs like .../&lt;TASK_KEY&gt;/solutions/gold_plot.png.  The TASK_KEY
             # env variable must appear as a path segment in every such URL,
             # otherwise the verifier will silently load the wrong solutions.
-            if code:
-                expected_key = (
-                    new_key
-                    or (task.get("env_variables") or {}).get("TASK_KEY")
-                    or task.get("key", "")
-                )
+            task_key_var = (task.get("env_variables") or {}).get("TASK_KEY")
+            if code and task_key_var:
+                expected_key = task_key_var
                 s3_urls = re.findall(
                     r'https?://[^"\']+\.s3[^"\']*\.amazonaws\.com/[^"\'\s]+',
                     code,
