@@ -82,16 +82,24 @@ def format_status(status: Optional[str]) -> str:
 
 
 def get_client() -> Fleet:
-    """Get a Fleet client using environment variables."""
+    """Get a Fleet client, preferring FLEET_API_KEY env var then stored credentials."""
     api_key = os.getenv("FLEET_API_KEY")
-    if not api_key:
-        console.print(
-            "[red]Error:[/red] FLEET_API_KEY environment variable not set",
-            style="bold",
-        )
-        raise typer.Exit(1)
     base_url = os.getenv("FLEET_BASE_URL", CLI_DEFAULT_BASE_URL)
-    return Fleet(api_key=api_key, base_url=base_url)
+
+    if api_key:
+        return Fleet(api_key=api_key, base_url=base_url)
+
+    from .auth import get_valid_token
+    result = get_valid_token()
+    if result:
+        jwt, team_id = result
+        return Fleet(jwt=jwt, team_id=team_id, base_url=base_url)
+
+    console.print(
+        "[red]Not authenticated.[/red] Run [bold]flt login[/bold] or set FLEET_API_KEY.",
+        style="bold",
+    )
+    raise typer.Exit(1)
 
 
 def _run_oversight(job_id: str, model: str = "anthropic/claude-sonnet-4"):
@@ -1050,6 +1058,146 @@ def eval_run(
             console.print(f"[dim]Check status: flt jobs get {job_id}[/dim]")
             if oversight:
                 console.print(f"[dim]Run oversight manually: flt jobs oversight {job_id}[/dim]")
+
+
+@app.command()
+def login():
+    """Authenticate the CLI by logging in through the Fleet web app."""
+    import secrets
+    import socket
+    import threading
+    import webbrowser
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from urllib.parse import parse_qs, urlparse
+
+    from .auth import save_credentials
+
+    state = secrets.token_urlsafe(16)
+    result: dict = {}
+    server_ready = threading.Event()
+    done = threading.Event()
+
+    # Pick a random available port
+    with socket.socket() as s:
+        s.bind(("localhost", 0))
+        port = s.getsockname()[1]
+
+    class CallbackHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(self.path)
+            if parsed.path != "/callback":
+                self.send_response(404)
+                self.end_headers()
+                return
+
+            params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+
+            if params.get("state") != state:
+                self.send_response(403)
+                self.end_headers()
+                return
+
+            result.update(params)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(
+                b"<html><body style='font-family:sans-serif;text-align:center;padding:4rem'>"
+                b"<h2>&#10003; Authenticated!</h2>"
+                b"<p>You can close this tab and return to your terminal.</p>"
+                b"</body></html>"
+            )
+            done.set()
+
+        def log_message(self, *args):
+            pass  # suppress request logs
+
+    server = HTTPServer(("localhost", port), CallbackHandler)
+
+    def serve():
+        server_ready.set()
+        while not done.is_set():
+            server.handle_request()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    server_ready.wait()
+
+    login_url = f"https://fleetai.com/cli-login?port={port}&state={state}"
+    console.print(f"[bold]Opening Fleet login in your browser...[/bold]")
+    console.print(f"[dim]If the browser didn't open, visit:[/dim] {login_url}")
+    webbrowser.open(login_url)
+
+    console.print("[dim]Waiting for authentication (Ctrl+C to cancel)...[/dim]")
+    try:
+        done.wait(timeout=300)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Login cancelled.[/yellow]")
+        raise typer.Exit(1)
+    finally:
+        server.server_close()
+
+    if not result.get("access_token"):
+        console.print("[red]Login failed — no token received.[/red]")
+        raise typer.Exit(1)
+
+    save_credentials({
+        "email": result.get("email", ""),
+        "access_token": result["access_token"],
+        "refresh_token": result.get("refresh_token", ""),
+        "team_id": result["team_id"],
+        "team_name": result.get("team_name", ""),
+    })
+
+    email = result.get("email", "")
+    team_name = result.get("team_name", result["team_id"])
+    console.print(f"\n[green]✓[/green] Logged in as [bold]{email}[/bold] (Team: {team_name})")
+
+
+@app.command()
+def logout():
+    """Clear stored Fleet credentials."""
+    from .auth import clear_credentials, load_credentials
+
+    creds = load_credentials()
+    if not creds:
+        console.print("[dim]Not logged in.[/dim]")
+        return
+
+    clear_credentials()
+    email = creds.get("email", "")
+    console.print(f"[green]✓[/green] Logged out{f' ({email})' if email else ''}.")
+
+
+@app.command()
+def whoami():
+    """Show current authentication status."""
+    from .auth import load_credentials, get_valid_token, CREDENTIALS_FILE
+
+    api_key = os.getenv("FLEET_API_KEY")
+    if api_key:
+        console.print(f"[bold]Auth:[/bold] API key (FLEET_API_KEY)")
+        console.print(f"[bold]Key:[/bold] {api_key[:8]}...{api_key[-4:]}")
+        return
+
+    creds = load_credentials()
+    if not creds:
+        console.print("[dim]Not logged in.[/dim] Run [bold]flt login[/bold].")
+        return
+
+    token_result = get_valid_token()
+    if not token_result:
+        console.print("[yellow]Stored credentials are expired.[/yellow] Run [bold]flt login[/bold] again.")
+        return
+
+    console.print(f"[bold]Auth:[/bold] Browser login ({CREDENTIALS_FILE})")
+    if creds.get("email"):
+        console.print(f"[bold]Email:[/bold] {creds['email']}")
+    if creds.get("team_name"):
+        console.print(f"[bold]Team:[/bold] {creds['team_name']}")
+    if creds.get("team_id"):
+        console.print(f"[bold]Team ID:[/bold] {creds['team_id']}")
 
 
 def main():
