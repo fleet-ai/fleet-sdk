@@ -134,8 +134,13 @@ class SyncVerifierFunction:
         # logger.info(f"Bundle {bundle_sha[:8]}... needs to be uploaded")
         return bundle_sha, True  # Upload needed
 
-    def __call__(self, env: "SyncEnv", *args, **kwargs) -> float:
-        """Local execution of the verifier function with env as first parameter."""
+    def __call__(self, env: "SyncEnv", *args, **kwargs):
+        """Local execution of the verifier function with env as first parameter.
+
+        Returns:
+            float or dict: A plain score (float) or a dict with structured
+            criteria (e.g. {"result": 0.84, "criteria": [...]}).
+        """
         try:
             if self._is_async:
                 # For async functions, await the result
@@ -148,9 +153,17 @@ class SyncVerifierFunction:
             if isinstance(result, (int, float)):
                 # Direct score return
                 return float(result)
-            elif isinstance(result, dict) and "score" in result:
-                # For local execution, return the full dict if that's what the function returns
-                return result
+            elif isinstance(result, dict) and ("score" in result or "result" in result):
+                # If the dict contains structured criteria, return the full dict
+                # so consumers can access criteria breakdown
+                if "criteria" in result:
+                    return result
+                # Otherwise extract just the numeric score
+                score_val = result.get("score", result.get("result"))
+                try:
+                    return float(score_val)
+                except (ValueError, TypeError):
+                    return 0.0
             else:
                 # Try to extract score from object attributes
                 if hasattr(result, "score"):
@@ -165,8 +178,13 @@ class SyncVerifierFunction:
             # Return error score 0
             return 0.0
 
-    def remote(self, env: "SyncEnv", *args, **kwargs) -> float:
-        """Remote execution of the verifier function with SHA-based bundle caching."""
+    def remote(self, env: "SyncEnv", *args, **kwargs):
+        """Remote execution of the verifier function with SHA-based bundle caching.
+
+        Returns:
+            float or dict: A plain score (float) or a dict with structured
+            criteria (e.g. {"result": 0.84, "criteria": [...]}).
+        """
         response = self.remote_with_response(env, *args, **kwargs)
 
         # Handle response
@@ -177,13 +195,27 @@ class SyncVerifierFunction:
         else:
             self._raise_remote_error(response.error)
 
-    def _process_result(self, result: Any) -> float:
-        """Process remote execution result, handling different return types."""
+    def _process_result(self, result: Any):
+        """Process remote execution result, handling different return types.
+
+        Returns:
+            float or dict: A plain score (float) or a dict with structured
+            criteria (e.g. {"result": 0.84, "criteria": [...]}).
+        """
         # Handle different return types like local execution
         if isinstance(result, (int, float)):
             return float(result)
-        elif isinstance(result, dict) and "score" in result:
-            return float(result["score"])
+        elif isinstance(result, dict) and ("score" in result or "result" in result):
+            # If the dict contains structured criteria, return the full dict
+            # so consumers can access criteria breakdown
+            if "criteria" in result:
+                return result
+            # Otherwise extract just the numeric score
+            score = result.get("score", result.get("result"))
+            try:
+                return float(score)
+            except (ValueError, TypeError):
+                return 0.0
         else:
             # Try to extract score from object attributes
             if hasattr(result, "score"):
