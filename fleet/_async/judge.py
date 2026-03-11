@@ -2,11 +2,14 @@
 
 Provides env.judge.grade() for async verifier scripts.
 
-By default routes through the Fleet orchestrator. Pass an ``llm_provider``
-to route calls to an external LLM endpoint instead.
+Provider resolution order:
+
+1. Explicit ``llm_provider`` kwarg (highest priority)
+2. ``FLEET_LLM_API_KEY`` env var → auto-builds ``ExternalProvider``
+3. Fleet orchestrator (default fallback)
 """
 
-from typing import Dict, List, Optional, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
 # Import shared classes and helpers from the sync module
 from ..judge import (
@@ -22,6 +25,7 @@ from ..judge import (
     _guess_media_type,
     _parse_grade_response,
     _print_judge_call_start,
+    _UNSET,
 )
 
 if TYPE_CHECKING:
@@ -44,8 +48,11 @@ class AsyncJudge:
 
     Accessed as ``env.judge`` on AsyncEnv instances.
 
-    By default routes through the Fleet orchestrator API. Pass an
-    ``llm_provider`` to route calls to an external LLM endpoint instead.
+    Provider resolution order:
+
+    1. Explicit ``llm_provider`` kwarg (highest priority)
+    2. ``FLEET_LLM_API_KEY`` env var → auto-builds ``ExternalProvider``
+    3. Fleet orchestrator (default fallback)
     """
 
     def __init__(
@@ -53,11 +60,16 @@ class AsyncJudge:
         client: Optional["AsyncWrapper"],
         instance_id: str,
         *,
-        llm_provider: Optional["LLMProvider"] = None,
+        llm_provider: Any = _UNSET,
     ):
         self._client = client
         self._instance_id = instance_id
-        self._llm_provider = llm_provider
+
+        if llm_provider is _UNSET:
+            from ..llm_provider import resolve_provider
+            self._llm_provider = resolve_provider()
+        else:
+            self._llm_provider = llm_provider
 
     async def grade(
         self,

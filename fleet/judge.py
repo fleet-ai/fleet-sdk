@@ -160,6 +160,7 @@ class Image:
         Image.from_url("https://...")          - HTTP URL, fetched server-side
         Image.from_base64(data, "file.png")    - Inline base64 data
         Image.from_env(env, "plot.png")        - Collect from environment
+        Image.from_local("/path/to/image.png") - Read from local filesystem
     """
 
     def __init__(
@@ -171,6 +172,7 @@ class Image:
         filename: Optional[str] = None,
         media_type: Optional[str] = None,
         _env: Optional[Any] = None,
+        _local_path: Optional[str] = None,
     ):
         self.source = source
         self.url = url
@@ -178,6 +180,7 @@ class Image:
         self.filename = filename
         self.media_type = media_type
         self._env = _env
+        self._local_path = _local_path
 
     @staticmethod
     def s3(url: str, media_type: Optional[str] = None) -> "Image":
@@ -212,6 +215,38 @@ class Image:
         """
         return Image(source="env", filename=filename, _env=env)
 
+    @staticmethod
+    def from_local(path: str, media_type: Optional[str] = None) -> "Image":
+        """Read an image from a local file path.
+
+        The file is read and base64-encoded at serialization time (lazy), so
+        the path must be valid when ``serialize()`` or an external provider
+        processes the image.  For on-prem deployments this is the primary way
+        to supply reference images without S3 access.
+
+        Args:
+            path: Absolute or relative path to the image file.
+            media_type: Optional MIME type override (auto-detected from extension).
+        """
+        fname = os.path.basename(path)
+        return Image(
+            source="local",
+            filename=fname,
+            media_type=media_type or _guess_media_type(fname),
+            _local_path=path,
+        )
+
+    def _resolve_local(self) -> Optional[str]:
+        """Read the local file and return base64 data, or None on failure."""
+        if not self._local_path:
+            return None
+        try:
+            with open(self._local_path, "rb") as f:
+                return base64.b64encode(f.read()).decode("ascii")
+        except (OSError, IOError) as e:
+            logger.warning("Failed to read local image %s: %s", self._local_path, e)
+            return None
+
     def serialize(self, *, label: Optional[str] = None, agentic: bool = False) -> dict:
         """Serialize for the orchestrator API request body."""
         d: dict
@@ -229,6 +264,16 @@ class Image:
                 "data": self.data,
                 "media_type": self.media_type or _guess_media_type(self.filename or "image.png"),
             }
+        elif self.source == "local":
+            b64 = self._resolve_local()
+            if b64 is not None:
+                d = {
+                    "source": "base64",
+                    "data": b64,
+                    "media_type": self.media_type or _guess_media_type(self.filename or "image.png"),
+                }
+            else:
+                raise ValueError(f"Cannot read local image: {self._local_path}")
         elif self.source == "collect":
             d = {"source": "collect", "selector": self.filename}
         elif self.source == "env":
@@ -260,6 +305,7 @@ class File:
         File.s3("s3://bucket/key")                     - S3 URL, fetched server-side
         File.from_base64(data, "part.step", "application/step") - Inline base64 data
         File.from_env(env, "exported_part.step")        - Collect from environment
+        File.from_local("/path/to/file.pdf")            - Read from local filesystem
     """
 
     def __init__(
@@ -271,6 +317,7 @@ class File:
         filename: Optional[str] = None,
         media_type: Optional[str] = None,
         _env: Optional[Any] = None,
+        _local_path: Optional[str] = None,
     ):
         self.source = source
         self.url = url
@@ -278,6 +325,7 @@ class File:
         self.filename = filename
         self.media_type = media_type
         self._env = _env
+        self._local_path = _local_path
 
     @staticmethod
     def s3(url: str, media_type: Optional[str] = None) -> "File":
@@ -307,6 +355,38 @@ class File:
         """
         return File(source="env", filename=filename, _env=env)
 
+    @staticmethod
+    def from_local(path: str, media_type: Optional[str] = None) -> "File":
+        """Read a file from a local file path.
+
+        The file is read and base64-encoded at serialization time (lazy), so
+        the path must be valid when ``serialize()`` or an external provider
+        processes the file.  For on-prem deployments this is the primary way
+        to supply reference files without S3 access.
+
+        Args:
+            path: Absolute or relative path to the file.
+            media_type: Optional MIME type override (auto-detected from extension).
+        """
+        fname = os.path.basename(path)
+        return File(
+            source="local",
+            filename=fname,
+            media_type=media_type or _guess_file_media_type(fname),
+            _local_path=path,
+        )
+
+    def _resolve_local(self) -> Optional[str]:
+        """Read the local file and return base64 data, or None on failure."""
+        if not self._local_path:
+            return None
+        try:
+            with open(self._local_path, "rb") as f:
+                return base64.b64encode(f.read()).decode("ascii")
+        except (OSError, IOError) as e:
+            logger.warning("Failed to read local file %s: %s", self._local_path, e)
+            return None
+
     def serialize(self, *, label: Optional[str] = None, agentic: bool = False) -> dict:
         """Serialize for the orchestrator API request body."""
         d: dict
@@ -321,6 +401,17 @@ class File:
                 "filename": self.filename,
                 "media_type": self.media_type or _guess_file_media_type(self.filename or "file"),
             }
+        elif self.source == "local":
+            b64 = self._resolve_local()
+            if b64 is not None:
+                d = {
+                    "source": "base64",
+                    "data": b64,
+                    "filename": self.filename,
+                    "media_type": self.media_type or _guess_file_media_type(self.filename or "file"),
+                }
+            else:
+                raise ValueError(f"Cannot read local file: {self._local_path}")
         elif self.source == "collect":
             d = {"source": "collect", "selector": self.filename}
         elif self.source == "env":
@@ -954,13 +1045,27 @@ def _print_judge_result(data: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+_UNSET = object()  # sentinel — distinguishes "not passed" from None
+
+
 class SyncJudge:
     """LLM-as-judge grading.
 
     Accessed as ``env.judge`` on SyncEnv instances.
 
-    By default routes through the Fleet orchestrator API. Pass an
-    ``llm_provider`` to route calls to an external LLM endpoint instead::
+    Provider resolution order:
+
+    1. Explicit ``llm_provider`` kwarg (highest priority)
+    2. ``FLEET_LLM_API_KEY`` env var → auto-builds ``ExternalProvider``
+    3. Fleet orchestrator (default fallback)
+
+    Set env vars for zero-code external routing::
+
+        export FLEET_LLM_API_KEY="sk-or-..."
+        export FLEET_LLM_BASE_URL="https://openrouter.ai/api/v1"
+        export FLEET_LLM_MODEL="anthropic/claude-sonnet-4"
+
+    Or pass a provider explicitly::
 
         from fleet.llm_provider import ExternalProvider
 
@@ -977,11 +1082,17 @@ class SyncJudge:
         client: Optional["SyncWrapper"],
         instance_id: str,
         *,
-        llm_provider: Optional["LLMProvider"] = None,
+        llm_provider: Any = _UNSET,
     ):
         self._client = client
         self._instance_id = instance_id
-        self._llm_provider = llm_provider
+
+        if llm_provider is _UNSET:
+            # Auto-detect from env vars; None means "use Fleet orchestrator"
+            from .llm_provider import resolve_provider
+            self._llm_provider = resolve_provider()
+        else:
+            self._llm_provider = llm_provider
 
     def grade(
         self,

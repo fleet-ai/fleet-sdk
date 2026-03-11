@@ -6,10 +6,14 @@ Validates:
 - ExternalProvider parses LLM JSON responses into GradeResponse
 - SyncJudge routes through LLMProvider when configured
 - Backward compatibility: SyncJudge still works without an LLMProvider
+- resolve_provider() reads env vars and builds ExternalProvider
+- Image.from_local / File.from_local read from local filesystem
 """
 
+import base64
 import json
-from io import StringIO
+import os
+import tempfile
 from typing import Any, Dict, Optional
 from unittest.mock import MagicMock, patch, AsyncMock
 
@@ -17,17 +21,26 @@ import pytest
 
 from fleet.judge import (
     Criterion,
+    File,
+    Image,
     JudgeResult,
     Rubric,
     SyncJudge,
     _parse_grade_response,
 )
 from fleet.llm_provider import (
+    ENV_LLM_API_KEY,
+    ENV_LLM_BASE_URL,
+    ENV_LLM_MODEL,
+    ENV_LLM_MAX_TOKENS,
+    ENV_LLM_TEMPERATURE,
+    ENV_LLM_TIMEOUT,
     ExternalProvider,
     FleetProvider,
     GradeRequest,
     GradeResponse,
     LLMProvider,
+    resolve_provider,
     _build_judge_user_message,
     _parse_llm_judge_response,
 )
@@ -80,6 +93,13 @@ def _mock_llm_json_response() -> str:
         ],
         "feedback": "Good submission overall.",
     })
+
+
+def _clean_llm_env(monkeypatch):
+    """Remove all FLEET_LLM_* env vars for a clean test."""
+    for var in [ENV_LLM_API_KEY, ENV_LLM_BASE_URL, ENV_LLM_MODEL,
+                ENV_LLM_TEMPERATURE, ENV_LLM_MAX_TOKENS, ENV_LLM_TIMEOUT]:
+        monkeypatch.delenv(var, raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -342,13 +362,119 @@ class TestCustomProvider:
 
 
 # ---------------------------------------------------------------------------
-# SyncJudge integration
+# resolve_provider() — env var auto-configuration
+# ---------------------------------------------------------------------------
+
+
+class TestResolveProvider:
+    def test_returns_none_when_no_api_key(self, monkeypatch):
+        """Without FLEET_LLM_API_KEY, resolve_provider returns None."""
+        _clean_llm_env(monkeypatch)
+        assert resolve_provider() is None
+
+    def test_returns_external_provider_with_api_key(self, monkeypatch):
+        """With FLEET_LLM_API_KEY set, returns ExternalProvider."""
+        _clean_llm_env(monkeypatch)
+        monkeypatch.setenv(ENV_LLM_API_KEY, "sk-test-key-123")
+        provider = resolve_provider()
+        assert isinstance(provider, ExternalProvider)
+        assert provider.api_key == "sk-test-key-123"
+        # Defaults
+        assert provider.base_url == "https://openrouter.ai/api/v1"
+        assert provider.model == "anthropic/claude-sonnet-4"
+        assert provider.temperature == 0.0
+        assert provider.max_tokens == 4096
+
+    def test_all_env_vars_respected(self, monkeypatch):
+        """All FLEET_LLM_* env vars are picked up."""
+        _clean_llm_env(monkeypatch)
+        monkeypatch.setenv(ENV_LLM_API_KEY, "sk-custom")
+        monkeypatch.setenv(ENV_LLM_BASE_URL, "https://my-llm.example.com/v1")
+        monkeypatch.setenv(ENV_LLM_MODEL, "my-org/my-model")
+        monkeypatch.setenv(ENV_LLM_TEMPERATURE, "0.7")
+        monkeypatch.setenv(ENV_LLM_MAX_TOKENS, "8192")
+        monkeypatch.setenv(ENV_LLM_TIMEOUT, "600")
+
+        provider = resolve_provider()
+        assert isinstance(provider, ExternalProvider)
+        assert provider.api_key == "sk-custom"
+        assert provider.base_url == "https://my-llm.example.com/v1"
+        assert provider.model == "my-org/my-model"
+        assert provider.temperature == pytest.approx(0.7)
+        assert provider.max_tokens == 8192
+        assert provider.timeout == pytest.approx(600.0)
+
+    def test_invalid_temperature_uses_default(self, monkeypatch):
+        _clean_llm_env(monkeypatch)
+        monkeypatch.setenv(ENV_LLM_API_KEY, "sk-test")
+        monkeypatch.setenv(ENV_LLM_TEMPERATURE, "not-a-number")
+        provider = resolve_provider()
+        assert provider.temperature == 0.0
+
+    def test_invalid_max_tokens_uses_default(self, monkeypatch):
+        _clean_llm_env(monkeypatch)
+        monkeypatch.setenv(ENV_LLM_API_KEY, "sk-test")
+        monkeypatch.setenv(ENV_LLM_MAX_TOKENS, "banana")
+        provider = resolve_provider()
+        assert provider.max_tokens == 4096
+
+
+# ---------------------------------------------------------------------------
+# SyncJudge auto-resolve from env vars
+# ---------------------------------------------------------------------------
+
+
+class TestSyncJudgeEnvAutoResolve:
+    def test_auto_resolves_from_env(self, monkeypatch):
+        """SyncJudge auto-detects FLEET_LLM_API_KEY and routes externally."""
+        _clean_llm_env(monkeypatch)
+        monkeypatch.setenv(ENV_LLM_API_KEY, "sk-auto-test")
+        monkeypatch.setenv(ENV_LLM_MODEL, "test/auto-model")
+
+        judge = SyncJudge(client=None, instance_id="auto-test")
+        assert judge._llm_provider is not None
+        assert isinstance(judge._llm_provider, ExternalProvider)
+        assert judge._llm_provider.model == "test/auto-model"
+
+    def test_defaults_to_fleet_when_no_env(self, monkeypatch):
+        """Without env vars, SyncJudge._llm_provider is None (Fleet route)."""
+        _clean_llm_env(monkeypatch)
+        mock_client = MagicMock()
+        judge = SyncJudge(client=mock_client, instance_id="fleet-test")
+        assert judge._llm_provider is None
+
+    def test_explicit_provider_overrides_env(self, monkeypatch):
+        """Explicit llm_provider kwarg takes priority over env vars."""
+        _clean_llm_env(monkeypatch)
+        monkeypatch.setenv(ENV_LLM_API_KEY, "sk-from-env")
+
+        class CustomProv(LLMProvider):
+            def grade(self, request):
+                return GradeResponse(normalized_score=0.42)
+
+        custom = CustomProv()
+        judge = SyncJudge(client=None, instance_id="test", llm_provider=custom)
+        assert judge._llm_provider is custom
+
+    def test_explicit_none_disables_env_auto(self, monkeypatch):
+        """Passing llm_provider=None explicitly skips env auto-detect."""
+        _clean_llm_env(monkeypatch)
+        monkeypatch.setenv(ENV_LLM_API_KEY, "sk-should-be-ignored")
+
+        mock_client = MagicMock()
+        judge = SyncJudge(client=mock_client, instance_id="test", llm_provider=None)
+        assert judge._llm_provider is None
+
+
+# ---------------------------------------------------------------------------
+# SyncJudge integration (from earlier tests)
 # ---------------------------------------------------------------------------
 
 
 class TestSyncJudgeWithProvider:
-    def test_routes_through_llm_provider(self):
+    def test_routes_through_llm_provider(self, monkeypatch):
         """When llm_provider is set, grade() uses it instead of the client."""
+        _clean_llm_env(monkeypatch)
 
         class StubProvider(LLMProvider):
             def __init__(self):
@@ -384,8 +510,9 @@ class TestSyncJudgeWithProvider:
         assert result.criteria is not None
         assert len(result.criteria) == 2
 
-    def test_default_routes_through_client(self):
+    def test_default_routes_through_client(self, monkeypatch):
         """Without llm_provider, grade() uses the orchestrator client."""
+        _clean_llm_env(monkeypatch)
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.json.return_value = _mock_orchestrator_response()
@@ -397,8 +524,9 @@ class TestSyncJudgeWithProvider:
         mock_client.request.assert_called_once()
         assert float(result) == pytest.approx(0.87, abs=0.01)
 
-    def test_reference_claims_folded_into_context(self):
+    def test_reference_claims_folded_into_context(self, monkeypatch):
         """reference_claims should be folded into context for both paths."""
+        _clean_llm_env(monkeypatch)
 
         class CapturingProvider(LLMProvider):
             def __init__(self):
@@ -425,13 +553,155 @@ class TestSyncJudgeWithProvider:
 
 
 # ---------------------------------------------------------------------------
+# Image.from_local / File.from_local
+# ---------------------------------------------------------------------------
+
+
+class TestImageFromLocal:
+    def test_from_local_creates_local_source(self):
+        img = Image.from_local("/tmp/test.png")
+        assert img.source == "local"
+        assert img._local_path == "/tmp/test.png"
+        assert img.filename == "test.png"
+        assert img.media_type == "image/png"
+
+    def test_from_local_serializes_to_base64(self):
+        """from_local reads the file and serializes as base64."""
+        raw_bytes = b"\x89PNG\r\n\x1a\nfake-png-content"
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(raw_bytes)
+            path = f.name
+        try:
+            img = Image.from_local(path)
+            d = img.serialize()
+            assert d["source"] == "base64"
+            assert d["media_type"] == "image/png"
+            # Verify the data decodes back to original bytes
+            assert base64.b64decode(d["data"]) == raw_bytes
+        finally:
+            os.unlink(path)
+
+    def test_from_local_raises_on_missing_file(self):
+        img = Image.from_local("/tmp/nonexistent_image_12345.png")
+        with pytest.raises(ValueError, match="Cannot read local image"):
+            img.serialize()
+
+    def test_from_local_media_type_override(self):
+        img = Image.from_local("/tmp/photo.webp", media_type="image/webp")
+        assert img.media_type == "image/webp"
+
+    def test_from_local_guesses_jpeg(self):
+        img = Image.from_local("/tmp/photo.jpg")
+        assert img.media_type == "image/jpeg"
+
+    def test_s3_still_works(self):
+        """Ensure S3 constructor is not broken."""
+        img = Image.s3("s3://bucket/key.png", media_type="image/png")
+        assert img.source == "s3"
+        d = img.serialize()
+        assert d["source"] == "s3"
+        assert d["url"] == "s3://bucket/key.png"
+
+    def test_from_url_still_works(self):
+        """Ensure URL constructor is not broken."""
+        img = Image.from_url("https://example.com/img.png")
+        assert img.source == "url"
+        d = img.serialize()
+        assert d["source"] == "url"
+        assert d["url"] == "https://example.com/img.png"
+
+
+class TestFileFromLocal:
+    def test_from_local_creates_local_source(self):
+        f = File.from_local("/tmp/report.pdf")
+        assert f.source == "local"
+        assert f._local_path == "/tmp/report.pdf"
+        assert f.filename == "report.pdf"
+        assert f.media_type == "application/pdf"
+
+    def test_from_local_serializes_to_base64(self):
+        raw_bytes = b"%PDF-1.4 fake pdf content"
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tf:
+            tf.write(raw_bytes)
+            path = tf.name
+        try:
+            f = File.from_local(path)
+            d = f.serialize()
+            assert d["source"] == "base64"
+            assert d["media_type"] == "application/pdf"
+            assert d["filename"] == os.path.basename(path)
+            assert base64.b64decode(d["data"]) == raw_bytes
+        finally:
+            os.unlink(path)
+
+    def test_from_local_raises_on_missing_file(self):
+        f = File.from_local("/tmp/nonexistent_file_12345.pdf")
+        with pytest.raises(ValueError, match="Cannot read local file"):
+            f.serialize()
+
+    def test_from_local_csv(self):
+        raw_bytes = b"name,value\nalice,42\n"
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tf:
+            tf.write(raw_bytes)
+            path = tf.name
+        try:
+            f = File.from_local(path)
+            assert f.media_type == "text/csv"
+            d = f.serialize()
+            assert base64.b64decode(d["data"]) == raw_bytes
+        finally:
+            os.unlink(path)
+
+    def test_s3_still_works(self):
+        """Ensure S3 constructor is not broken."""
+        f = File.s3("s3://bucket/data.csv", media_type="text/csv")
+        assert f.source == "s3"
+        d = f.serialize()
+        assert d["source"] == "s3"
+        assert d["url"] == "s3://bucket/data.csv"
+
+
+# ---------------------------------------------------------------------------
+# ExternalProvider with local images
+# ---------------------------------------------------------------------------
+
+
+class TestExternalProviderLocalImages:
+    def test_local_image_resolved_in_request_body(self):
+        """Local images are resolved to base64 in the LLM request body."""
+        raw_bytes = b"\x89PNG\r\n\x1a\nfake-png"
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(raw_bytes)
+            path = f.name
+        try:
+            provider = ExternalProvider(api_key="sk-test", model="test/model")
+            img = Image.from_local(path)
+            req = GradeRequest(
+                rubric="Test rubric",
+                submission="Answer",
+                images={"screenshot": img},
+            )
+            body = provider._build_request_body(req)
+
+            # The user message should contain an image_url block with data: URI
+            user_msg = body["messages"][1]
+            content_blocks = user_msg["content"]
+            image_blocks = [b for b in content_blocks if b.get("type") == "image_url"]
+            assert len(image_blocks) == 1
+            assert image_blocks[0]["image_url"]["url"].startswith("data:image/png;base64,")
+        finally:
+            os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
 # End-to-end: ExternalProvider + SyncJudge
 # ---------------------------------------------------------------------------
 
 
 class TestEndToEnd:
-    def test_external_provider_with_sync_judge(self):
+    def test_external_provider_with_sync_judge(self, monkeypatch):
         """Full integration: ExternalProvider → SyncJudge → JudgeResult."""
+        _clean_llm_env(monkeypatch)
         provider = ExternalProvider(
             api_key="sk-test",
             model="test/model",
@@ -466,3 +736,40 @@ class TestEndToEnd:
             assert float(result) > 0
             assert result.criteria is not None
             assert len(result.criteria) == 2
+
+    def test_env_var_auto_config_e2e(self, monkeypatch):
+        """Full e2e: env vars → auto ExternalProvider → SyncJudge → JudgeResult."""
+        _clean_llm_env(monkeypatch)
+        monkeypatch.setenv(ENV_LLM_API_KEY, "sk-auto-e2e")
+        monkeypatch.setenv(ENV_LLM_BASE_URL, "https://e2e-api.example.com/v1")
+        monkeypatch.setenv(ENV_LLM_MODEL, "test/e2e-model")
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": _mock_llm_json_response(),
+                },
+            }],
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("httpx.Client") as MockClient:
+            mock_client_instance = MagicMock()
+            mock_client_instance.post.return_value = mock_response
+            mock_client_instance.__enter__ = MagicMock(return_value=mock_client_instance)
+            mock_client_instance.__exit__ = MagicMock(return_value=False)
+            MockClient.return_value = mock_client_instance
+
+            # No explicit provider — should auto-detect from env
+            judge = SyncJudge(client=None, instance_id="env-e2e")
+            assert isinstance(judge._llm_provider, ExternalProvider)
+
+            result = judge.grade(_make_rubric(), "The answer is 42.")
+
+            # Verify it called the right URL
+            call_args = mock_client_instance.post.call_args
+            assert call_args[0][0] == "https://e2e-api.example.com/v1/chat/completions"
+
+            assert isinstance(result, JudgeResult)
+            assert float(result) > 0

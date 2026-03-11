@@ -5,12 +5,19 @@ the Fleet orchestrator (default) or external providers like OpenRouter,
 Anthropic API, etc. This enables on-prem deployments that don't depend
 on Fleet's internal orchestrator endpoints.
 
-Usage::
+Configuration via environment variables (auto-detected at judge init)::
 
-    # Default — routes through Fleet orchestrator (no change needed)
-    result = env.judge.grade(rubric, submission)
+    # Set these env vars to route judge calls to an external provider.
+    # When FLEET_LLM_API_KEY is unset, calls route through Fleet orchestrator.
+    export FLEET_LLM_API_KEY="sk-or-..."                          # required
+    export FLEET_LLM_BASE_URL="https://openrouter.ai/api/v1"     # optional (default: OpenRouter)
+    export FLEET_LLM_MODEL="anthropic/claude-sonnet-4"            # optional (default: anthropic/claude-sonnet-4)
+    export FLEET_LLM_TEMPERATURE="0.0"                            # optional (default: 0.0)
+    export FLEET_LLM_MAX_TOKENS="4096"                            # optional (default: 4096)
+    export FLEET_LLM_TIMEOUT="300"                                # optional (default: 300s)
 
-    # External provider — direct LLM API calls
+Or configure programmatically::
+
     from fleet.llm_provider import ExternalProvider
 
     provider = ExternalProvider(
@@ -24,6 +31,7 @@ Usage::
 
 import json
 import logging
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -35,6 +43,18 @@ if TYPE_CHECKING:
     from .judge import Rubric, Image, File
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Environment variable names
+# ---------------------------------------------------------------------------
+
+ENV_LLM_API_KEY = "FLEET_LLM_API_KEY"
+ENV_LLM_BASE_URL = "FLEET_LLM_BASE_URL"
+ENV_LLM_MODEL = "FLEET_LLM_MODEL"
+ENV_LLM_TEMPERATURE = "FLEET_LLM_TEMPERATURE"
+ENV_LLM_MAX_TOKENS = "FLEET_LLM_MAX_TOKENS"
+ENV_LLM_TIMEOUT = "FLEET_LLM_TIMEOUT"
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +328,22 @@ def _build_anthropic_messages(
     # Add images as base64 content blocks (Anthropic vision format)
     if request.images:
         for label, img in request.images.items():
+            # Resolve local images to base64 first
+            if img.source == "local" and img._local_path:
+                b64 = img._resolve_local()
+                if b64:
+                    user_content.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": img.media_type or "image/png",
+                            "data": b64,
+                        },
+                    })
+                else:
+                    logger.warning("Skipping unreadable local image: %s", img._local_path)
+                continue
+
             if img.data:  # base64 data available
                 user_content.append({
                     "type": "image",
@@ -542,3 +578,74 @@ class ExternalProvider(LLMProvider):
         )
         result.accumulators = {"elapsed_ms": elapsed_ms}
         return result
+
+
+# ---------------------------------------------------------------------------
+# Auto-configuration from environment variables
+# ---------------------------------------------------------------------------
+
+
+def resolve_provider() -> Optional[LLMProvider]:
+    """Build an LLM provider from environment variables.
+
+    Reads ``FLEET_LLM_*`` env vars and returns an ``ExternalProvider`` when
+    ``FLEET_LLM_API_KEY`` is set, otherwise returns ``None`` (meaning the
+    caller should fall back to the Fleet orchestrator).
+
+    Env vars::
+
+        FLEET_LLM_API_KEY       (required to activate external routing)
+        FLEET_LLM_BASE_URL      (default: https://openrouter.ai/api/v1)
+        FLEET_LLM_MODEL         (default: anthropic/claude-sonnet-4)
+        FLEET_LLM_TEMPERATURE   (default: 0.0)
+        FLEET_LLM_MAX_TOKENS    (default: 4096)
+        FLEET_LLM_TIMEOUT       (default: 300)
+
+    Returns:
+        An ``ExternalProvider`` if ``FLEET_LLM_API_KEY`` is set, else ``None``.
+    """
+    api_key = os.environ.get(ENV_LLM_API_KEY)
+    if not api_key:
+        return None
+
+    base_url = os.environ.get(ENV_LLM_BASE_URL) or None
+    model = os.environ.get(ENV_LLM_MODEL) or None
+
+    temperature = 0.0
+    temp_str = os.environ.get(ENV_LLM_TEMPERATURE)
+    if temp_str:
+        try:
+            temperature = float(temp_str)
+        except ValueError:
+            logger.warning("Invalid %s=%r, using default 0.0", ENV_LLM_TEMPERATURE, temp_str)
+
+    max_tokens = 4096
+    mt_str = os.environ.get(ENV_LLM_MAX_TOKENS)
+    if mt_str:
+        try:
+            max_tokens = int(mt_str)
+        except ValueError:
+            logger.warning("Invalid %s=%r, using default 4096", ENV_LLM_MAX_TOKENS, mt_str)
+
+    timeout = 300.0
+    to_str = os.environ.get(ENV_LLM_TIMEOUT)
+    if to_str:
+        try:
+            timeout = float(to_str)
+        except ValueError:
+            logger.warning("Invalid %s=%r, using default 300", ENV_LLM_TIMEOUT, to_str)
+
+    logger.info(
+        "LLM provider configured from env: base_url=%s model=%s",
+        base_url or ExternalProvider.DEFAULT_BASE_URL,
+        model or ExternalProvider.DEFAULT_MODEL,
+    )
+
+    return ExternalProvider(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+    )

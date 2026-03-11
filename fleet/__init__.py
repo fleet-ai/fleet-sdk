@@ -72,7 +72,7 @@ from .types import VerifierFunction
 from .judge import Rubric, Criterion, File, Image, JudgeResult
 
 # Import LLM provider interface
-from .llm_provider import LLMProvider, FleetProvider, ExternalProvider
+from .llm_provider import LLMProvider, FleetProvider, ExternalProvider, resolve_provider
 
 # Create a module-level env attribute for convenient access
 from . import env
@@ -106,6 +106,7 @@ __all__ = [
     "LLMProvider",
     "FleetProvider",
     "ExternalProvider",
+    "resolve_provider",
     # Exceptions
     "FleetError",
     "FleetAPIError",
