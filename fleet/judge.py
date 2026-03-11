@@ -155,7 +155,16 @@ class Rubric:
 class Image:
     """Reference to an image for LLM judge grading.
 
-    Use the static constructors to create instances:
+    Preferred constructor (source-agnostic)::
+
+        Image.from_path("screenshots/gold.png")
+        Image.from_path("s3://bucket/key.png")
+        Image.from_path("https://example.com/img.png")
+
+    The LLM provider resolves the path at grade-time, so verifier code
+    stays independent of storage backends.
+
+    Legacy constructors (still supported for backward compat):
         Image.s3("s3://bucket/key")           - S3 URL, fetched server-side
         Image.from_url("https://...")          - HTTP URL, fetched server-side
         Image.from_base64(data, "file.png")    - Inline base64 data
@@ -173,6 +182,7 @@ class Image:
         media_type: Optional[str] = None,
         _env: Optional[Any] = None,
         _local_path: Optional[str] = None,
+        _path: Optional[str] = None,
     ):
         self.source = source
         self.url = url
@@ -181,6 +191,7 @@ class Image:
         self.media_type = media_type
         self._env = _env
         self._local_path = _local_path
+        self._path = _path
 
     @staticmethod
     def s3(url: str, media_type: Optional[str] = None) -> "Image":
@@ -236,6 +247,34 @@ class Image:
             _local_path=path,
         )
 
+    @staticmethod
+    def from_path(path: str, media_type: Optional[str] = None) -> "Image":
+        """Create a source-agnostic image reference from a path or URI.
+
+        The path is resolved at grade-time by the LLM provider's
+        ``resolve_image()`` method.  This keeps verifier code independent
+        of storage backends (S3, local filesystem, HTTP, etc.).
+
+        Examples::
+
+            Image.from_path("screenshots/gold.png")            # relative
+            Image.from_path("/abs/path/to/gold.png")           # absolute local
+            Image.from_path("s3://bucket/screenshots/gold.png") # S3 URI
+            Image.from_path("https://example.com/gold.png")    # HTTP URL
+
+        Args:
+            path: Path or URI to the image.  Scheme detection and fetching
+                are handled by the provider at resolve-time.
+            media_type: Optional MIME type override (auto-detected from extension).
+        """
+        fname = os.path.basename(path)
+        return Image(
+            source="path",
+            filename=fname,
+            media_type=media_type or _guess_media_type(fname),
+            _path=path,
+        )
+
     def _resolve_local(self) -> Optional[str]:
         """Read the local file and return base64 data, or None on failure."""
         if not self._local_path:
@@ -274,6 +313,29 @@ class Image:
                 }
             else:
                 raise ValueError(f"Cannot read local image: {self._local_path}")
+        elif self.source == "path":
+            # Auto-detect scheme as fallback when no provider resolved this.
+            path = self._path or self.filename or ""
+            if path.startswith("s3://"):
+                d = {"source": "s3", "url": path}
+                if self.media_type:
+                    d["media_type"] = self.media_type
+            elif path.startswith(("http://", "https://")):
+                d = {"source": "url", "url": path}
+                if self.media_type:
+                    d["media_type"] = self.media_type
+            else:
+                # Treat as local file
+                self._local_path = path
+                b64 = self._resolve_local()
+                if b64 is not None:
+                    d = {
+                        "source": "base64",
+                        "data": b64,
+                        "media_type": self.media_type or _guess_media_type(self.filename or "image.png"),
+                    }
+                else:
+                    raise ValueError(f"Cannot read image path: {path}")
         elif self.source == "collect":
             d = {"source": "collect", "selector": self.filename}
         elif self.source == "env":
@@ -300,8 +362,15 @@ class Image:
 class File:
     """Reference to an arbitrary file for LLM judge grading.
 
-    Supports any file type (PDF, CSV, STEP, STL, etc.) via the Anthropic
-    Files API. Use the static constructors to create instances:
+    Preferred constructor (source-agnostic)::
+
+        File.from_path("reports/output.pdf")
+        File.from_path("s3://bucket/data.csv")
+
+    The LLM provider resolves the path at grade-time, so verifier code
+    stays independent of storage backends.
+
+    Legacy constructors (still supported for backward compat):
         File.s3("s3://bucket/key")                     - S3 URL, fetched server-side
         File.from_base64(data, "part.step", "application/step") - Inline base64 data
         File.from_env(env, "exported_part.step")        - Collect from environment
@@ -318,6 +387,7 @@ class File:
         media_type: Optional[str] = None,
         _env: Optional[Any] = None,
         _local_path: Optional[str] = None,
+        _path: Optional[str] = None,
     ):
         self.source = source
         self.url = url
@@ -326,6 +396,7 @@ class File:
         self.media_type = media_type
         self._env = _env
         self._local_path = _local_path
+        self._path = _path
 
     @staticmethod
     def s3(url: str, media_type: Optional[str] = None) -> "File":
@@ -376,6 +447,33 @@ class File:
             _local_path=path,
         )
 
+    @staticmethod
+    def from_path(path: str, media_type: Optional[str] = None) -> "File":
+        """Create a source-agnostic file reference from a path or URI.
+
+        The path is resolved at grade-time by the LLM provider's
+        ``resolve_file()`` method.  This keeps verifier code independent
+        of storage backends (S3, local filesystem, HTTP, etc.).
+
+        Examples::
+
+            File.from_path("reports/output.pdf")            # relative
+            File.from_path("/abs/path/to/data.csv")         # absolute local
+            File.from_path("s3://bucket/reports/output.pdf") # S3 URI
+
+        Args:
+            path: Path or URI to the file.  Scheme detection and fetching
+                are handled by the provider at resolve-time.
+            media_type: Optional MIME type override (auto-detected from extension).
+        """
+        fname = os.path.basename(path)
+        return File(
+            source="path",
+            filename=fname,
+            media_type=media_type or _guess_file_media_type(fname),
+            _path=path,
+        )
+
     def _resolve_local(self) -> Optional[str]:
         """Read the local file and return base64 data, or None on failure."""
         if not self._local_path:
@@ -412,6 +510,26 @@ class File:
                 }
             else:
                 raise ValueError(f"Cannot read local file: {self._local_path}")
+        elif self.source == "path":
+            # Auto-detect scheme as fallback when no provider resolved this.
+            path = self._path or self.filename or ""
+            if path.startswith("s3://"):
+                d = {"source": "s3", "url": path}
+                if self.media_type:
+                    d["media_type"] = self.media_type
+            else:
+                # Treat as local file
+                self._local_path = path
+                b64 = self._resolve_local()
+                if b64 is not None:
+                    d = {
+                        "source": "base64",
+                        "data": b64,
+                        "filename": self.filename,
+                        "media_type": self.media_type or _guess_file_media_type(self.filename or "file"),
+                    }
+                else:
+                    raise ValueError(f"Cannot read file path: {path}")
         elif self.source == "collect":
             d = {"source": "collect", "selector": self.filename}
         elif self.source == "env":
@@ -1145,7 +1263,14 @@ class SyncJudge:
             else:
                 effective_context = f"## Reference Claims\n{reference_claims}"
 
-        _print_judge_call_start(rubric, images, agentic, model, files=files)
+        # Resolve path-based images/files through the provider
+        resolved_images = images
+        resolved_files = files
+        if self._llm_provider is not None:
+            resolved_images = self._llm_provider.resolve_images(images)
+            resolved_files = self._llm_provider.resolve_files(files)
+
+        _print_judge_call_start(rubric, resolved_images, agentic, model, files=resolved_files)
 
         if self._llm_provider is not None:
             # Route through pluggable LLM provider
@@ -1158,8 +1283,8 @@ class SyncJudge:
                 problem=problem,
                 context=effective_context,
                 conversation=conversation,
-                images=images,
-                files=files,
+                images=resolved_images,
+                files=resolved_files,
                 model=model,
                 provider=provider,
                 agentic=agentic,
@@ -1171,6 +1296,7 @@ class SyncJudge:
             return _parse_grade_response(grade_response.to_dict())
 
         # Default: route through Fleet orchestrator
+        # (path-based images/files auto-resolve in serialize() fallback)
         body = _build_grade_request(
             self._instance_id,
             rubric,
@@ -1180,8 +1306,8 @@ class SyncJudge:
             context=effective_context,
             reference_claims=None,  # already folded into context
             conversation=conversation,
-            images=images,
-            files=files,
+            images=resolved_images,
+            files=resolved_files,
             model=model,
             provider=provider,
             agentic=agentic,

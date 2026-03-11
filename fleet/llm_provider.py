@@ -133,7 +133,80 @@ class LLMProvider(ABC):
     Implementations must provide ``grade()`` (sync) and/or ``agrade()``
     (async). The judge classes call whichever variant matches their
     execution model.
+
+    Providers can override ``resolve_image()`` / ``resolve_file()`` to
+    customise how ``source="path"`` references are resolved (e.g. prepend
+    an S3 prefix, fetch from GCS, etc.).  The default implementation
+    auto-detects the URI scheme and delegates to the appropriate legacy
+    constructor.
     """
+
+    # ------------------------------------------------------------------
+    # Path resolution (override for custom storage backends)
+    # ------------------------------------------------------------------
+
+    def resolve_image(self, image: Any) -> Any:
+        """Resolve a path-based Image to a concrete source.
+
+        Override in subclasses for custom resolution logic (e.g. prepending
+        an S3 bucket prefix, fetching from GCS/Azure Blob, etc.).
+
+        The default implementation auto-detects the URI scheme:
+
+        - ``s3://``       → ``Image.s3()``
+        - ``http(s)://``  → ``Image.from_url()``
+        - anything else   → ``Image.from_local()``
+
+        Non-path images are returned unchanged.
+        """
+        if getattr(image, "source", None) != "path":
+            return image
+
+        from .judge import Image as _Image
+
+        path = image._path or image.filename or ""
+        mt = image.media_type
+
+        if path.startswith("s3://"):
+            return _Image.s3(path, media_type=mt)
+        elif path.startswith(("http://", "https://")):
+            return _Image.from_url(path, media_type=mt)
+        else:
+            return _Image.from_local(path, media_type=mt)
+
+    def resolve_file(self, file: Any) -> Any:
+        """Resolve a path-based File to a concrete source.
+
+        Same semantics as ``resolve_image()`` but for File objects.
+        """
+        if getattr(file, "source", None) != "path":
+            return file
+
+        from .judge import File as _File
+
+        path = file._path or file.filename or ""
+        mt = file.media_type
+
+        if path.startswith("s3://"):
+            return _File.s3(path, media_type=mt)
+        else:
+            return _File.from_local(path, media_type=mt)
+
+    def resolve_images(self, images: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Resolve all path-based images in a dict."""
+        if not images:
+            return images
+        return {label: self.resolve_image(img) for label, img in images.items()}
+
+    def resolve_files(self, files: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Resolve all path-based files in a dict."""
+        if not files:
+            return files
+        return {label: self.resolve_file(f) for label, f in files.items()}
+
+    # ------------------------------------------------------------------
+    # Grading (must implement)
+    # ------------------------------------------------------------------
 
     @abstractmethod
     def grade(self, request: GradeRequest) -> GradeResponse:
@@ -328,6 +401,35 @@ def _build_anthropic_messages(
     # Add images as base64 content blocks (Anthropic vision format)
     if request.images:
         for label, img in request.images.items():
+            # Resolve path-based images to base64 (fallback if not pre-resolved)
+            if img.source == "path" and img._path:
+                path = img._path
+                if path.startswith(("http://", "https://")):
+                    user_content.append({
+                        "type": "image",
+                        "source": {
+                            "type": "url",
+                            "url": path,
+                        },
+                    })
+                else:
+                    # Treat as local file
+                    import base64 as _b64
+                    try:
+                        with open(path, "rb") as fh:
+                            b64 = _b64.b64encode(fh.read()).decode("ascii")
+                        user_content.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": img.media_type or "image/png",
+                                "data": b64,
+                            },
+                        })
+                    except (OSError, IOError):
+                        logger.warning("Skipping unreadable path image: %s", path)
+                continue
+
             # Resolve local images to base64 first
             if img.source == "local" and img._local_path:
                 b64 = img._resolve_local()

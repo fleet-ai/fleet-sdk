@@ -122,15 +122,21 @@ class AsyncJudge:
             else:
                 effective_context = f"## Reference Claims\n{reference_claims}"
 
-        # Resolve Image.from_env images asynchronously before building request
+        # Resolve path-based images/files through the provider first
         resolved_images = images
-        if images and not agentic:
-            resolved_images = {}
-            for label, img in images.items():
+        resolved_files = files
+        if self._llm_provider is not None:
+            resolved_images = self._llm_provider.resolve_images(images)
+            resolved_files = self._llm_provider.resolve_files(files)
+
+        # Resolve Image.from_env images asynchronously before building request
+        if resolved_images and not agentic:
+            env_resolved = {}
+            for label, img in resolved_images.items():
                 if img.source == "env" and img._env is not None:
                     b64 = await _collect_image_from_env_async(img._env, img.filename)
                     if b64 is not None:
-                        resolved_images[label] = Image.from_base64(
+                        env_resolved[label] = Image.from_base64(
                             b64,
                             img.filename or "image.png",
                             _guess_media_type(img.filename or "image.png"),
@@ -138,34 +144,35 @@ class AsyncJudge:
                     else:
                         # Async collection failed — use collect source directly
                         # (don't keep the env image or serialize() will retry sync)
-                        resolved_images[label] = Image(
+                        env_resolved[label] = Image(
                             source="collect",
                             filename=img.filename,
                         )
                 else:
-                    resolved_images[label] = img
+                    env_resolved[label] = img
+            resolved_images = env_resolved
 
         # Resolve File.from_env files asynchronously before building request
-        resolved_files = files
-        if files and not agentic:
-            resolved_files = {}
-            for label, f in files.items():
+        if resolved_files and not agentic:
+            env_resolved_files = {}
+            for label, f in resolved_files.items():
                 if f.source == "env" and f._env is not None:
                     b64 = await _collect_file_from_env_async(f._env, f.filename)
                     if b64 is not None:
-                        resolved_files[label] = File.from_base64(
+                        env_resolved_files[label] = File.from_base64(
                             b64,
                             f.filename or "file",
                             _guess_file_media_type(f.filename or "file"),
                         )
                     else:
                         # Async collection failed — use collect source directly
-                        resolved_files[label] = File(
+                        env_resolved_files[label] = File(
                             source="collect",
                             filename=f.filename,
                         )
                 else:
-                    resolved_files[label] = f
+                    env_resolved_files[label] = f
+            resolved_files = env_resolved_files
 
         _print_judge_call_start(rubric, resolved_images, agentic, model, files=resolved_files)
 

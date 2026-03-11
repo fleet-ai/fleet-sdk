@@ -773,3 +773,298 @@ class TestEndToEnd:
 
             assert isinstance(result, JudgeResult)
             assert float(result) > 0
+
+
+# ---------------------------------------------------------------------------
+# Image.from_path — source-agnostic constructor
+# ---------------------------------------------------------------------------
+
+
+class TestImageFromPath:
+    def test_creates_path_source(self):
+        img = Image.from_path("screenshots/gold.png")
+        assert img.source == "path"
+        assert img._path == "screenshots/gold.png"
+        assert img.filename == "gold.png"
+        assert img.media_type == "image/png"
+
+    def test_s3_uri(self):
+        img = Image.from_path("s3://bucket/screenshots/gold.png")
+        assert img.source == "path"
+        assert img._path == "s3://bucket/screenshots/gold.png"
+
+    def test_http_url(self):
+        img = Image.from_path("https://example.com/gold.png")
+        assert img.source == "path"
+        assert img._path == "https://example.com/gold.png"
+
+    def test_absolute_local(self):
+        img = Image.from_path("/data/images/gold.png")
+        assert img.source == "path"
+        assert img._path == "/data/images/gold.png"
+
+    def test_media_type_override(self):
+        img = Image.from_path("image.webp", media_type="image/webp")
+        assert img.media_type == "image/webp"
+
+    def test_serialize_s3_fallback(self):
+        """When no provider resolves, serialize auto-detects s3:// scheme."""
+        img = Image.from_path("s3://bucket/key.png")
+        d = img.serialize()
+        assert d["source"] == "s3"
+        assert d["url"] == "s3://bucket/key.png"
+
+    def test_serialize_http_fallback(self):
+        """When no provider resolves, serialize auto-detects https:// scheme."""
+        img = Image.from_path("https://example.com/img.png")
+        d = img.serialize()
+        assert d["source"] == "url"
+        assert d["url"] == "https://example.com/img.png"
+
+    def test_serialize_local_fallback(self):
+        """When no provider resolves, serialize reads local file."""
+        raw_bytes = b"\x89PNG\r\n\x1a\nfake-png-content"
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(raw_bytes)
+            path = f.name
+        try:
+            img = Image.from_path(path)
+            d = img.serialize()
+            assert d["source"] == "base64"
+            assert d["media_type"] == "image/png"
+            assert base64.b64decode(d["data"]) == raw_bytes
+        finally:
+            os.unlink(path)
+
+    def test_serialize_missing_local_raises(self):
+        img = Image.from_path("/nonexistent/path/img.png")
+        with pytest.raises(ValueError, match="Cannot read image path"):
+            img.serialize()
+
+
+# ---------------------------------------------------------------------------
+# File.from_path — source-agnostic constructor
+# ---------------------------------------------------------------------------
+
+
+class TestFileFromPath:
+    def test_creates_path_source(self):
+        f = File.from_path("reports/output.pdf")
+        assert f.source == "path"
+        assert f._path == "reports/output.pdf"
+        assert f.filename == "output.pdf"
+        assert f.media_type == "application/pdf"
+
+    def test_s3_uri(self):
+        f = File.from_path("s3://bucket/data.csv")
+        assert f.source == "path"
+        assert f._path == "s3://bucket/data.csv"
+
+    def test_serialize_s3_fallback(self):
+        f = File.from_path("s3://bucket/data.csv")
+        d = f.serialize()
+        assert d["source"] == "s3"
+        assert d["url"] == "s3://bucket/data.csv"
+
+    def test_serialize_local_fallback(self):
+        raw_bytes = b"name,value\nalice,42\n"
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tf:
+            tf.write(raw_bytes)
+            path = tf.name
+        try:
+            f = File.from_path(path)
+            d = f.serialize()
+            assert d["source"] == "base64"
+            assert d["media_type"] == "text/csv"
+            assert base64.b64decode(d["data"]) == raw_bytes
+        finally:
+            os.unlink(path)
+
+    def test_serialize_missing_local_raises(self):
+        f = File.from_path("/nonexistent/path/file.pdf")
+        with pytest.raises(ValueError, match="Cannot read file path"):
+            f.serialize()
+
+
+# ---------------------------------------------------------------------------
+# LLMProvider.resolve_image / resolve_file
+# ---------------------------------------------------------------------------
+
+
+class TestProviderResolve:
+    def test_resolve_image_s3(self):
+        """resolve_image converts s3:// path to Image.s3()."""
+        provider = ExternalProvider(api_key="sk-test")
+        img = Image.from_path("s3://bucket/key.png")
+        resolved = provider.resolve_image(img)
+        assert resolved.source == "s3"
+        assert resolved.url == "s3://bucket/key.png"
+
+    def test_resolve_image_http(self):
+        """resolve_image converts https:// path to Image.from_url()."""
+        provider = ExternalProvider(api_key="sk-test")
+        img = Image.from_path("https://example.com/img.png")
+        resolved = provider.resolve_image(img)
+        assert resolved.source == "url"
+        assert resolved.url == "https://example.com/img.png"
+
+    def test_resolve_image_local(self):
+        """resolve_image converts bare path to Image.from_local()."""
+        provider = ExternalProvider(api_key="sk-test")
+        img = Image.from_path("/data/images/gold.png")
+        resolved = provider.resolve_image(img)
+        assert resolved.source == "local"
+        assert resolved._local_path == "/data/images/gold.png"
+
+    def test_resolve_image_noop_for_non_path(self):
+        """resolve_image passes through non-path images unchanged."""
+        provider = ExternalProvider(api_key="sk-test")
+        img = Image.s3("s3://bucket/key.png")
+        resolved = provider.resolve_image(img)
+        assert resolved is img  # same object
+
+    def test_resolve_file_s3(self):
+        provider = ExternalProvider(api_key="sk-test")
+        f = File.from_path("s3://bucket/data.csv")
+        resolved = provider.resolve_file(f)
+        assert resolved.source == "s3"
+        assert resolved.url == "s3://bucket/data.csv"
+
+    def test_resolve_file_local(self):
+        provider = ExternalProvider(api_key="sk-test")
+        f = File.from_path("/data/reports/output.pdf")
+        resolved = provider.resolve_file(f)
+        assert resolved.source == "local"
+        assert resolved._local_path == "/data/reports/output.pdf"
+
+    def test_resolve_images_dict(self):
+        provider = ExternalProvider(api_key="sk-test")
+        images = {
+            "gold": Image.from_path("s3://bucket/gold.png"),
+            "agent": Image.from_path("/local/agent.png"),
+            "ref": Image.s3("s3://bucket/ref.png"),  # non-path, should pass through
+        }
+        resolved = provider.resolve_images(images)
+        assert resolved["gold"].source == "s3"
+        assert resolved["agent"].source == "local"
+        assert resolved["ref"].source == "s3"
+        assert resolved["ref"] is images["ref"]  # unchanged
+
+    def test_resolve_images_none(self):
+        provider = ExternalProvider(api_key="sk-test")
+        assert provider.resolve_images(None) is None
+
+    def test_resolve_files_dict(self):
+        provider = ExternalProvider(api_key="sk-test")
+        files = {
+            "report": File.from_path("s3://bucket/report.pdf"),
+            "local": File.from_path("/data/local.csv"),
+        }
+        resolved = provider.resolve_files(files)
+        assert resolved["report"].source == "s3"
+        assert resolved["local"].source == "local"
+
+
+# ---------------------------------------------------------------------------
+# Custom provider with resolve override
+# ---------------------------------------------------------------------------
+
+
+class TestCustomProviderResolve:
+    def test_custom_resolve_prepends_s3_prefix(self, monkeypatch):
+        """Custom provider can override resolve to prepend S3 prefix."""
+        _clean_llm_env(monkeypatch)
+
+        class S3PrefixProvider(LLMProvider):
+            """Provider that prepends an S3 bucket prefix to bare paths."""
+
+            def __init__(self, bucket: str):
+                self.bucket = bucket
+
+            def resolve_image(self, image):
+                if getattr(image, "source", None) != "path":
+                    return image
+                path = image._path or image.filename or ""
+                if not path.startswith(("s3://", "http://", "https://")):
+                    # Prepend S3 bucket prefix
+                    s3_url = f"s3://{self.bucket}/{path}"
+                    return Image.s3(s3_url, media_type=image.media_type)
+                return super().resolve_image(image)
+
+            def grade(self, request):
+                return GradeResponse(normalized_score=1.0)
+
+        provider = S3PrefixProvider(bucket="my-images-bucket")
+
+        # Bare path → gets s3 prefix
+        img = Image.from_path("screenshots/gold.png")
+        resolved = provider.resolve_image(img)
+        assert resolved.source == "s3"
+        assert resolved.url == "s3://my-images-bucket/screenshots/gold.png"
+
+        # Already has s3:// → passed through normally
+        img2 = Image.from_path("s3://other-bucket/img.png")
+        resolved2 = provider.resolve_image(img2)
+        assert resolved2.source == "s3"
+        assert resolved2.url == "s3://other-bucket/img.png"
+
+    def test_judge_calls_resolve_before_grade(self, monkeypatch):
+        """SyncJudge calls provider.resolve_images before grade."""
+        _clean_llm_env(monkeypatch)
+
+        class TrackingProvider(LLMProvider):
+            def __init__(self):
+                self.resolved_images = None
+
+            def resolve_image(self, image):
+                if getattr(image, "source", None) != "path":
+                    return image
+                # Convert all paths to base64 with marker data
+                return Image.from_base64("RESOLVED", image.filename or "img.png")
+
+            def grade(self, request):
+                self.resolved_images = request.images
+                return GradeResponse(normalized_score=1.0)
+
+        provider = TrackingProvider()
+        judge = SyncJudge(client=None, instance_id="test", llm_provider=provider)
+        judge.grade(
+            "test rubric",
+            "submission",
+            images={"gold": Image.from_path("gold.png")},
+        )
+
+        assert provider.resolved_images is not None
+        assert provider.resolved_images["gold"].source == "base64"
+        assert provider.resolved_images["gold"].data == "RESOLVED"
+
+
+# ---------------------------------------------------------------------------
+# ExternalProvider with from_path images in request body
+# ---------------------------------------------------------------------------
+
+
+class TestExternalProviderPathImages:
+    def test_path_image_resolved_in_request_body(self):
+        """from_path images are resolved to base64 in the LLM request body."""
+        raw_bytes = b"\x89PNG\r\n\x1a\nfake-png"
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(raw_bytes)
+            path = f.name
+        try:
+            provider = ExternalProvider(api_key="sk-test", model="test/model")
+            img = Image.from_path(path)
+            req = GradeRequest(
+                rubric="Test rubric",
+                submission="Answer",
+                images={"screenshot": img},
+            )
+            body = provider._build_request_body(req)
+
+            user_msg = body["messages"][1]
+            content_blocks = user_msg["content"]
+            image_blocks = [b for b in content_blocks if b.get("type") == "image_url"]
+            assert len(image_blocks) == 1
+            assert image_blocks[0]["image_url"]["url"].startswith("data:image/png;base64,")
+        finally:
+            os.unlink(path)
