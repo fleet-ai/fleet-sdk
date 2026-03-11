@@ -1,10 +1,21 @@
-"""Fleet SDK Judge - LLM-as-Judge grading via orchestrator API.
+"""Fleet SDK Judge - LLM-as-Judge grading.
 
 Provides env.judge.grade() for verifier scripts to grade submissions
 using LLM judges without managing API keys, HTTP calls, or response parsing.
 
-All LLM calls happen server-side on the orchestrator — the SDK just sends
-the rubric, submission, and artifacts, and gets back a score.
+By default, LLM calls route through the Fleet orchestrator. For on-prem
+or external deployments, pass an ``llm_provider`` to route calls to
+any OpenAI-compatible endpoint (OpenRouter, Anthropic, local models, etc.)::
+
+    from fleet.llm_provider import ExternalProvider
+
+    provider = ExternalProvider(
+        api_key="sk-or-...",
+        base_url="https://openrouter.ai/api/v1",
+        model="anthropic/claude-sonnet-4",
+    )
+    judge = SyncJudge(client=None, instance_id="local", llm_provider=provider)
+    result = judge.grade(rubric, submission)
 """
 
 import base64
@@ -16,6 +27,7 @@ from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .base import SyncWrapper
+    from .llm_provider import LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -943,14 +955,33 @@ def _print_judge_result(data: dict) -> None:
 
 
 class SyncJudge:
-    """LLM-as-judge grading — calls orchestrator API, not environment API.
+    """LLM-as-judge grading.
 
-    Accessed as env.judge on SyncEnv instances.
+    Accessed as ``env.judge`` on SyncEnv instances.
+
+    By default routes through the Fleet orchestrator API. Pass an
+    ``llm_provider`` to route calls to an external LLM endpoint instead::
+
+        from fleet.llm_provider import ExternalProvider
+
+        provider = ExternalProvider(
+            api_key="sk-or-...",
+            base_url="https://openrouter.ai/api/v1",
+            model="anthropic/claude-sonnet-4",
+        )
+        judge = SyncJudge(client=None, instance_id="local", llm_provider=provider)
     """
 
-    def __init__(self, client: "SyncWrapper", instance_id: str):
+    def __init__(
+        self,
+        client: Optional["SyncWrapper"],
+        instance_id: str,
+        *,
+        llm_provider: Optional["LLMProvider"] = None,
+    ):
         self._client = client
         self._instance_id = instance_id
+        self._llm_provider = llm_provider
 
     def grade(
         self,
@@ -970,7 +1001,11 @@ class SyncJudge:
         collect: Optional[Dict[str, List[str]]] = None,
         task_id: Optional[str] = None,
     ) -> JudgeResult:
-        """Grade a submission using LLM-as-judge via the orchestrator API.
+        """Grade a submission using LLM-as-judge.
+
+        Routes through the Fleet orchestrator by default. If an
+        ``llm_provider`` was set at construction time, calls the external
+        provider directly instead.
 
         Returns a JudgeResult (float subclass with .details, .criteria, .feedback)
         that can be returned directly from a verifier function.
@@ -991,14 +1026,48 @@ class SyncJudge:
             collect: File patterns for orchestrator to collect (agentic mode).
             task_id: Optional task ID for tracking.
         """
+        # Fold reference_claims into context (shared logic regardless of provider)
+        effective_context = context
+        if reference_claims is not None:
+            if effective_context:
+                effective_context = f"{effective_context}\n\n## Reference Claims\n{reference_claims}"
+            else:
+                effective_context = f"## Reference Claims\n{reference_claims}"
+
+        _print_judge_call_start(rubric, images, agentic, model, files=files)
+
+        if self._llm_provider is not None:
+            # Route through pluggable LLM provider
+            from .llm_provider import GradeRequest
+
+            request = GradeRequest(
+                rubric=rubric,
+                submission=submission,
+                ground_truth=ground_truth,
+                problem=problem,
+                context=effective_context,
+                conversation=conversation,
+                images=images,
+                files=files,
+                model=model,
+                provider=provider,
+                agentic=agentic,
+                collect=collect,
+                task_id=task_id,
+                instance_id=self._instance_id,
+            )
+            grade_response = self._llm_provider.grade(request)
+            return _parse_grade_response(grade_response.to_dict())
+
+        # Default: route through Fleet orchestrator
         body = _build_grade_request(
             self._instance_id,
             rubric,
             submission,
             ground_truth=ground_truth,
             problem=problem,
-            context=context,
-            reference_claims=reference_claims,
+            context=effective_context,
+            reference_claims=None,  # already folded into context
             conversation=conversation,
             images=images,
             files=files,
@@ -1009,6 +1078,5 @@ class SyncJudge:
             task_id=task_id,
         )
 
-        _print_judge_call_start(rubric, images, agentic, model, files=files)
         response = self._client.request("POST", "/v1/judge/grade", json=body)
         return _parse_grade_response(response.json())
