@@ -1,5 +1,5 @@
 {
-  "$schema_note": "Analysis task template for Fleet. {VARIABLES} are placeholders for your content. Everything else is fixed boilerplate.",
+  "$schema_note": "Analysis task template for Fleet. Fields marked with {PLACEHOLDER_NAME} are for your content. Everything else is fixed boilerplate.",
   "task_key": "{TASK_KEY}",
   "task_name": "{TASK_NAME}",
   "task_type": "analysis",
