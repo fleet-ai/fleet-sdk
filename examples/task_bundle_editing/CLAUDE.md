@@ -63,6 +63,10 @@ Upload → launch → review results on dashboard → revise rubric → re-uploa
 
 Use pass@1 for initial rubric validation. Only run pass@5+ after confirming the rubric discriminates across models.
 
-## Skills (planned)
+## Skills
 
-Claude Code skills for task authoring, rubric design, and job monitoring are planned for a future update.
+Copy skills from `skills/` to `.claude/skills/` to activate:
+- **task-authoring** — use when creating a new Fleet task bundle, setting up bundle directories, writing task.json, or validating before upload
+- **fleet-status** — use when checking job status, viewing session scores, querying task details, or debugging Fleet API responses
+
+See `skills/README.md` for installation instructions.

@@ -1,0 +1,48 @@
+{
+  "$schema_note": "Task template for Fleet. Fields marked with {PLACEHOLDER} are for your content. This is a design scaffold — consolidate into a valid task.json before upload (flat prompt string, inline Python verifier). Download an existing task to see the final format.",
+  "task_key": "{TASK_KEY}",
+  "task_name": "{TASK_NAME}",
+  "prompt": {
+    "opening": "You are given a task. Your workspace contains files for this task.",
+    "data_location": "Use `list_workspace_files(pattern=\"{TASK_KEY}/data/*\")` to discover available files, then read them as needed.",
+    "task_body": "{TASK_DESCRIPTION}",
+    "output_instructions": "{OUTPUT_FILE_INSTRUCTIONS}",
+    "instructions": [
+      "Explore the provided files to understand their structure.",
+      "{TASK_SPECIFIC_STEPS}",
+      "Save your output files as described above.",
+      "Save files to `/artifacts/` as well for evaluation."
+    ],
+    "important": "IMPORTANT:\n- Directly address the task stated above.\n- Ensure the total size of all saved artifacts is under 2 MB."
+  },
+  "rubric": {
+    "criteria": [
+      {
+        "name": "{CRITERION_NAME}",
+        "max": 2,
+        "levels": {
+          "2": "{SCORE_2_DESCRIPTION}",
+          "1": "{SCORE_1_DESCRIPTION}",
+          "0": "{SCORE_0_DESCRIPTION}"
+        }
+      }
+    ],
+    "_comment": "Each criterion has a name, max score, and level descriptions the judge uses to assign a score."
+  },
+  "context": {
+    "_comment": "Brief factual summary of the task for the judge. No scoring guidance.",
+    "text": "{CONTEXT}"
+  },
+  "reference_claims": {
+    "_comment": "Detailed scoring guidance for the judge: expected outputs, reasoning, and what distinguishes score levels.",
+    "text": "{REFERENCE_CLAIMS}"
+  },
+  "files": {
+    "_comment": "Output files the verifier reads. Maps to File.from_env(env, filename).",
+    "{OUTPUT_NAME}": "{OUTPUT_FILENAME}"
+  },
+  "data_files": {
+    "_comment": "Input files placed in files/notebooks/{TASK_KEY}/data/.",
+    "files": []
+  }
+}

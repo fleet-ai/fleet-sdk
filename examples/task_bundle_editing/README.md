@@ -47,8 +47,12 @@ my_task/
 
 ### 2. Edit the task
 
-Edit `task.json` to change the prompt, verifier, metadata, etc.
-Add/remove/modify files in `files/`.
+A downloaded `task.json` contains the full task definition: `key`, `prompt` (flat string), `verifier` (inline Python with rubric criteria), `environment_id`, and `metadata`. Edit what you need:
+
+- **Prompt:** Modify the `prompt` string. The templates in `templates/` show how prompts are structured (data discovery, task body, output instructions) — use them as a reference for what each section should contain.
+- **Verifier/rubric:** The `verifier.code` field is a Python function that defines rubric criteria and calls `env.judge.grade()`. Edit criteria, level descriptions, context, or reference claims as needed.
+- **Data files:** Add, remove, or replace files in `files/`. Solver-visible data goes in `files/notebooks/<task_key>/data/`; judge-only reference data goes in `files/solutions/`.
+- **Metadata:** Update `metadata` fields (task_name, difficulty, etc.) as needed — these are internal and not shown to the solver.
 
 ### 3. Validate before upload
 
@@ -128,19 +132,24 @@ Override defaults with `DIR=`, `KEY=`, `MODELS=`, `PASS_K=`, `TEAM=`, or `OVERWR
 
 To create a brand new task (rather than editing an existing one):
 
+**Before you start**, download an existing task (`make download`) to see what a real `task.json` looks like. A downloaded task shows the final format: `key`, a flat `prompt` string, `verifier` with inline Python rubric code, `environment_id`, and `metadata`. This is the best reference for what you're building toward.
+
+You will need:
+- A **prompt** — the task description the solver sees
+- A **verifier** — Python code defining rubric criteria that the judge uses to score submissions
+- **Data files** — input files the solver will work with
+
 1. **Create the bundle directory structure:**
 
    ```bash
    mkdir -p my_task/files/notebooks/my_task/data/
    ```
 
-2. **Start from a template:**
+2. **Use a template as a design reference:**
 
-   ```bash
-   cp templates/verifier_template_analysis.json my_task/task.json
-   ```
+   Open `templates/verifier_template.json` as a guide for what your `task.json` needs. The template breaks the prompt and rubric into labeled sections for readability — when building your actual `task.json`, consolidate the prompt sections into a single string and write the verifier as inline Python (see any downloaded task for the final format).
 
-3. **Fill in the `{PLACEHOLDER}` variables** in `task.json` — prompt text, verifier criteria, metadata fields.
+3. **Fill in your task content** — prompt text, verifier criteria, context, reference claims, and metadata fields.
 
 4. **Add data files** to `my_task/files/notebooks/my_task/data/`. These are visible to the solver at runtime.
 
@@ -193,11 +202,10 @@ Default models: `google/gemini-3.1-pro-preview`, `anthropic/claude-opus-4.6`, `o
 
 ## Templates
 
-- `templates/verifier_template_analysis.json` — text-output analysis tasks (solver writes findings to a file, judge evaluates with a rubric)
-- `templates/verifier_template_plot.json` — image comparison tasks (solver produces a plot, judge compares against reference)
+- `templates/verifier_template.json` — generic task scaffold with prompt sections, rubric criteria, context, and reference claims
 
-Both use `{PLACEHOLDER}` variables that you fill in with your task-specific content. They include Fleet boilerplate for workspace discovery and artifact saving.
+This is a **design scaffold** — it breaks the prompt and rubric into labeled sections for readability, with `{PLACEHOLDER}` variables for your content. It is not a directly valid `task.json` file; use it as a reference when building your actual task. Download an existing task (`make download`) to see the final `task.json` format (flat prompt string, inline Python verifier).
 
-## Claude Code Skills (planned)
+## Claude Code Skills
 
-Claude Code skills for guided task authoring, rubric design, and job monitoring workflows are planned for a future update.
+If you use Claude Code, copy the skills from `skills/` to your project's `.claude/skills/` directory. These provide guided workflows for task authoring and job monitoring. See `skills/README.md` for installation instructions.
