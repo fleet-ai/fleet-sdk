@@ -38,6 +38,8 @@ from .verifiers import (
     SnapshotDiff,
     TASK_FAILED_SCORE,
     TASK_SUCCESSFUL_SCORE,
+    execute_verifier_local,
+    LocalEnvironment,
 )
 
 # Import async verifiers (default verifier is async for modern usage)
@@ -114,6 +116,8 @@ __all__ = [
     "SnapshotDiff",
     "TASK_FAILED_SCORE",
     "TASK_SUCCESSFUL_SCORE",
+    "execute_verifier_local",
+    "LocalEnvironment",
     # Environment module
     "env",
     # Global client helpers

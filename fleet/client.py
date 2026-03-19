@@ -844,7 +844,42 @@ class Fleet:
             At least one of run_id or profile_id must be provided.
         """
         return _delete_instances_batch(self.client, run_id=run_id, profile_id=profile_id)
-    
+
+    @staticmethod
+    def execute_verifier_local(
+        verifier_func: str,
+        seed_db: str,
+        current_db: str,
+        final_answer: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Execute a verifier function locally against SQLite database files.
+
+        No authentication or remote server required. The verifier code is executed
+        in an isolated namespace with the same helpers available in production
+        (``normalized_contains``, ``IgnoreConfig``, ``DatabaseSnapshot``, etc.).
+
+        Args:
+            verifier_func: Python source code containing the verifier function definition.
+            seed_db: Path to the seed (before) SQLite database file.
+            current_db: Path to the current (after) SQLite database file.
+            final_answer: Optional final answer string passed to the verifier.
+
+        Returns:
+            Dict with keys ``success``, ``result``, ``error``, and ``stdout``.
+
+        Example::
+
+            result = fleet.execute_verifier_local(
+                verifier_func=verifier_code_string,
+                seed_db="./seed.db",
+                current_db="./current.db",
+            )
+            print(result["result"])  # 1 (TASK_SUCCESSFUL_SCORE) or 0
+        """
+        from .verifiers.local_executor import execute_verifier_local
+
+        return execute_verifier_local(verifier_func, seed_db, current_db, final_answer)
+
     def list_runs(
         self, profile_id: Optional[str] = None, status: Optional[str] = "active"
     ) -> List[Run]:
