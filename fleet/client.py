@@ -880,6 +880,32 @@ class Fleet:
 
         return execute_verifier_local(verifier_func, seed_db, current_db, final_answer)
 
+    @staticmethod
+    def diff_dbs(
+        seed_db: str,
+        current_db: str,
+        ignore_tables: Optional[set] = None,
+        ignore_table_fields: Optional[Dict[str, set]] = None,
+    ) -> Dict[str, Any]:
+        """Compute a structured diff between two local SQLite databases.
+
+        Returns the same format as the runner's ``/diff/structured`` endpoint.
+        No authentication or network access required.
+
+        Args:
+            seed_db: Path to the seed (before) SQLite database file.
+            current_db: Path to the current (after) SQLite database file.
+            ignore_tables: Optional set of table names to skip entirely.
+            ignore_table_fields: Optional mapping of ``{table: {field, ...}}``
+                to strip from the output.
+
+        Returns:
+            Dict with keys ``success``, ``diff``, and ``message``.
+        """
+        from .verifiers.local_executor import diff_dbs
+
+        return diff_dbs(seed_db, current_db, ignore_tables, ignore_table_fields)
+
     def list_runs(
         self, profile_id: Optional[str] = None, status: Optional[str] = "active"
     ) -> List[Run]:

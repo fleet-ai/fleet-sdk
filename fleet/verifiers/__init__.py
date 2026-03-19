@@ -6,7 +6,7 @@ from .verifier import (
     verifier,
     SyncVerifierFunction,
 )
-from .local_executor import execute_verifier_local, LocalEnvironment
+from .local_executor import execute_verifier_local, LocalEnvironment, diff_dbs
 
 __all__ = [
     "DatabaseSnapshot",
@@ -18,4 +18,5 @@ __all__ = [
     "SyncVerifierFunction",
     "execute_verifier_local",
     "LocalEnvironment",
+    "diff_dbs",
 ]

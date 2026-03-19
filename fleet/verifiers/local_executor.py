@@ -1,7 +1,8 @@
-"""Local verifier execution against SQLite files.
+"""Local verifier execution and database diffing against SQLite files.
 
-Executes verifier function code directly against local SQLite database files,
-without requiring authentication or a remote runner API server.
+Executes verifier function code directly against local SQLite database files
+and computes structured diffs, without requiring authentication or a remote
+runner API server.
 """
 
 import inspect
@@ -244,4 +245,127 @@ def execute_verifier_local(
             "result": None,
             "error": error_msg,
             "stdout": captured_stdout.getvalue(),
+        }
+
+
+# ---------------------------------------------------------------------------
+#  Structured database diff (matches /diff/structured response format)
+# ---------------------------------------------------------------------------
+
+def diff_dbs(
+    seed_db: str,
+    current_db: str,
+    ignore_tables: Optional[set] = None,
+    ignore_table_fields: Optional[dict] = None,
+) -> Dict[str, Any]:
+    """Compute a structured diff between two SQLite databases locally.
+
+    Returns the exact same format as the runner's ``/diff/structured`` endpoint:
+
+    .. code-block:: python
+
+        {
+            "success": True,
+            "diff": {
+                "table_name": {
+                    "table_name": str,
+                    "primary_key": [str],
+                    "added_rows": [{"row_id": ..., "data": {...}}],
+                    "removed_rows": [{"row_id": ..., "data": {...}}],
+                    "modified_rows": [{"row_id": ..., "changes": {...}, "data": {...}}],
+                    "unchanged_count": int,
+                    "total_changes": int,
+                }
+            },
+            "message": str,
+        }
+
+    No authentication or network access required.
+
+    Args:
+        seed_db: Path to the seed (before) SQLite database file.
+        current_db: Path to the current (after) SQLite database file.
+        ignore_tables: Optional set of table names to skip entirely.
+        ignore_table_fields: Optional mapping of ``{table_name: {field, ...}}``
+            whose fields are stripped from the diff output.
+
+    Returns:
+        Dict matching the ``StructuredDiffResponse`` schema.
+    """
+    from .sql_differ import SQLiteDiffer
+
+    ignore_tables = ignore_tables or set()
+    ignore_table_fields = ignore_table_fields or {}
+
+    try:
+        differ = SQLiteDiffer(seed_db, current_db)
+        raw_diff = differ.diff_all_tables()
+
+        filtered_diff: Dict[str, Any] = {}
+        for table_name, table_diff in raw_diff.items():
+            if table_name in ignore_tables:
+                continue
+
+            # Skip tables that errored during diffing
+            if "error" in table_diff:
+                continue
+
+            ignored_fields = ignore_table_fields.get(table_name, set())
+
+            # Added rows
+            filtered_added = []
+            for row in table_diff.get("added_rows", []):
+                filtered_data = {
+                    k: v for k, v in row["data"].items() if k not in ignored_fields
+                }
+                filtered_added.append({"row_id": row["row_id"], "data": filtered_data})
+
+            # Removed rows
+            filtered_removed = []
+            for row in table_diff.get("removed_rows", []):
+                filtered_data = {
+                    k: v for k, v in row["data"].items() if k not in ignored_fields
+                }
+                filtered_removed.append({"row_id": row["row_id"], "data": filtered_data})
+
+            # Modified rows
+            filtered_modified = []
+            for row in table_diff.get("modified_rows", []):
+                filtered_changes = {
+                    k: v for k, v in row["changes"].items() if k not in ignored_fields
+                }
+                if filtered_changes:
+                    after_row = row.get("after_row", {})
+                    filtered_data = {
+                        k: v for k, v in after_row.items() if k not in ignored_fields
+                    }
+                    filtered_modified.append({
+                        "row_id": row["row_id"],
+                        "changes": filtered_changes,
+                        "data": filtered_data,
+                    })
+
+            total_changes = len(filtered_added) + len(filtered_removed) + len(filtered_modified)
+
+            filtered_diff[table_name] = {
+                "table_name": table_name,
+                "primary_key": table_diff.get("primary_key", []),
+                "added_rows": filtered_added,
+                "removed_rows": filtered_removed,
+                "modified_rows": filtered_modified,
+                "unchanged_count": table_diff.get("unchanged_count", 0),
+                "total_changes": total_changes,
+            }
+
+        return {
+            "success": True,
+            "diff": filtered_diff,
+            "message": "Structured diff generated successfully",
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "diff": {},
+            "message": f"Failed to generate structured diff: {e}",
         }
