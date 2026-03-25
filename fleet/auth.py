@@ -9,12 +9,7 @@ from typing import Optional, Tuple
 
 import httpx
 
-SUPABASE_URL = "https://ehefoavidbttssbleuyv.supabase.co"
-SUPABASE_ANON_KEY = (
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-    ".eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVoZWZvYXZpZGJ0dHNzYmxldXl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE2ODc4OTg2MjIsImV4cCI6MjAwMzQ3NDYyMn0"
-    ".npXG_66bjHFUXguOXS2jhFWtXC9NdfsmN_30-c8SrRo"
-)
+from ._supabase import SUPABASE_ANON_KEY, SUPABASE_URL
 
 CREDENTIALS_FILE = Path.home() / ".fleet" / "credentials.json"
 
