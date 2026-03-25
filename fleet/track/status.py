@@ -64,9 +64,11 @@ def write_status(status: TrackStatus) -> None:
     try:
         os.write(fd, data.encode())
         os.close(fd)
+        fd = -1  # mark closed so the except block doesn't double-close
         os.replace(tmp, STATUS_FILE)
     except Exception:
-        os.close(fd)
+        if fd != -1:
+            os.close(fd)
         os.unlink(tmp)
         raise
 
