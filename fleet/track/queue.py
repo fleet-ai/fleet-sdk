@@ -94,7 +94,7 @@ class UploadQueue:
 
         paths = [r[0] for r in rows]
         self._conn.execute(
-            f"UPDATE queue SET status = 'in_flight', updated_at = ? WHERE path IN ({','.join('?' * len(paths))})",
+            f"UPDATE queue SET status = 'in_flight', updated_at = ? WHERE status = 'pending' AND path IN ({','.join('?' * len(paths))})",
             [now] + paths,
         )
         self._conn.commit()
