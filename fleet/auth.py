@@ -51,9 +51,9 @@ def is_token_expired(access_token: str) -> bool:
     """Return True if the JWT is expired or within the refresh buffer window."""
     try:
         payload_b64 = access_token.split(".")[1]
-        # Pad to a valid base64 length
-        payload_b64 += "=" * (4 - len(payload_b64) % 4)
-        payload = json.loads(base64.b64decode(payload_b64))
+        # JWT uses base64url; pad to a multiple of 4 (% 4 == 0 needs no padding)
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
         return time.time() > payload["exp"] - _REFRESH_BUFFER_SECS
     except Exception:
         return True
