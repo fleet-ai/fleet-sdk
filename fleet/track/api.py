@@ -19,10 +19,10 @@ import socket
 import httpx
 
 from ..auth import get_valid_token
+from ..config import GLOBAL_BASE_URL
 
 log = logging.getLogger("fleet.track.api")
 
-DEFAULT_BASE_URL = "https://us-west-1.fleetai.com"
 TIMEOUT = 30.0
 
 
@@ -32,7 +32,7 @@ class TrackAPIError(Exception):
 
 class TrackAPIClient:
     def __init__(self, base_url: str = "") -> None:
-        self._base = (base_url or os.getenv("FLEET_TRACK_BASE_URL", DEFAULT_BASE_URL)).rstrip("/")
+        self._base = (base_url or os.getenv("FLEET_TRACK_BASE_URL", GLOBAL_BASE_URL)).rstrip("/")
 
     def _headers(self, device_id: Optional[str] = None) -> dict[str, str]:
         token_info = get_valid_token()
