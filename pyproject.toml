@@ -40,6 +40,7 @@ flt = "fleet.cli:main"
 cli = [
     "typer>=0.9.0",
     "rich>=10.0.0",
+    "watchdog>=4.0.0",
 ]
 dev = [
     "pytest>=7.0.0",

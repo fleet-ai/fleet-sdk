@@ -44,10 +44,13 @@ sessions_app = typer.Typer(help="Manage sessions", no_args_is_help=True)
 eval_app = typer.Typer(help="Run evaluations", no_args_is_help=True)
 projects_app = typer.Typer(help="Manage projects", no_args_is_help=True)
 
+from fleet.track.cli import app as track_app  # noqa: E402
+
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(eval_app, name="eval")
 app.add_typer(projects_app, name="projects")
+app.add_typer(track_app, name="track")
 
 console = Console()
 
