@@ -98,6 +98,7 @@ class Daemon:
         self._confirmed_map: dict[str, str] = {}
         self._confirmed_lock = threading.Lock()
         self._manifest_dirty = False  # set when confirmed_map gains new entries
+        self._drain_lock = threading.Lock()  # serialises claim_batch across threads
 
     # ------------------------------------------------------------------ #
     # Public entry point                                                   #
@@ -272,7 +273,8 @@ class Daemon:
         if not self._pool:
             return
 
-        items = self._queue.claim_batch(n=32)
+        with self._drain_lock:
+            items = self._queue.claim_batch(n=32)
         if not items:
             return
 
