@@ -48,7 +48,7 @@ class TrackAPIClient:
         return headers
 
     def provision(self, device_id: str) -> dict:
-        """Register this device. Returns {device_id, team_id, user_id, s3_prefix, s3_bucket, s3_region}."""
+        """Register this device. Returns {device_id, team_id, user_id}."""
         resp = httpx.post(
             f"{self._base}/v1/track/provision",
             json={
