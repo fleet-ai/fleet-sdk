@@ -138,6 +138,7 @@ RestartSec=5
 StandardOutput=append:{LOG_FILE}
 StandardError=append:{LOG_FILE}
 Environment=PATH={os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")}
+{f'Environment=FLEET_TRACK_BASE_URL={os.environ["FLEET_TRACK_BASE_URL"]}' if os.environ.get("FLEET_TRACK_BASE_URL") else ""}
 
 [Install]
 WantedBy=default.target
