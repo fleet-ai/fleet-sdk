@@ -6,6 +6,7 @@ Failed items are retried with exponential backoff.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 import time
@@ -14,6 +15,8 @@ from pathlib import Path
 from typing import Optional
 
 from .merkle import STATE_DB, TRACK_DIR
+
+log = logging.getLogger("fleet.track.queue")
 
 MAX_ATTEMPTS = 10
 BASE_BACKOFF_SECS = 0.5
@@ -36,10 +39,13 @@ class UploadQueue:
     def __init__(self) -> None:
         TRACK_DIR.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(STATE_DB, timeout=10, check_same_thread=False)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        self._conn.execute("""
+        self._conn = self._open_conn()
+
+    def _open_conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(STATE_DB, timeout=10, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS queue (
                 path TEXT NOT NULL,
                 sha256 TEXT NOT NULL,
@@ -52,8 +58,25 @@ class UploadQueue:
                 UNIQUE(path, sha256)
             )
         """)
-        self._conn.execute("CREATE INDEX IF NOT EXISTS queue_status ON queue(status, next_attempt_at)")
-        self._conn.commit()
+        conn.execute("CREATE INDEX IF NOT EXISTS queue_status ON queue(status, next_attempt_at)")
+        conn.commit()
+
+        result = conn.execute("PRAGMA integrity_check").fetchone()
+        if result[0] != "ok":
+            conn.close()
+            self._wipe_and_reinit()
+            return self._open_conn()
+
+        return conn
+
+    def _wipe_and_reinit(self) -> None:
+        """Delete corrupt database files and start fresh. Queue items are lost but
+        the next reconcile will re-enqueue anything not yet on S3."""
+        log.warning("queue database is corrupt — wiping and reinitialising (next reconcile will re-upload missing files)")
+        for suffix in ("", "-shm", "-wal"):
+            p = Path(str(STATE_DB) + suffix)
+            if p.exists():
+                p.unlink(missing_ok=True)
 
     def enqueue(self, path: str, sha256: str) -> None:
         """Add path to the queue. Idempotent: same (path, sha256) is a no-op."""
