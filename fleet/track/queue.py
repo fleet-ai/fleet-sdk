@@ -141,6 +141,12 @@ class UploadQueue:
                 "UPDATE queue SET status = 'done', updated_at = ? WHERE path = ? AND sha256 = ?",
                 (now, path, sha256),
             )
+            # Prune stale rows for the same path — older sha256 values that failed
+            # or are still pending are now superseded by this successful upload.
+            self._conn.execute(
+                "DELETE FROM queue WHERE path = ? AND sha256 != ? AND status IN ('failed', 'pending')",
+                (path, sha256),
+            )
             self._conn.commit()
 
     def mark_failed(self, path: str, sha256: str, error: str) -> None:
