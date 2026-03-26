@@ -71,8 +71,8 @@ class UploadPool:
 
     def __init__(
         self,
-        on_done: Callable[[str], None],
-        on_failed: Callable[[str, str], None],
+        on_done: Callable[[str, str], None],
+        on_failed: Callable[[str, str, str], None],
     ) -> None:
         self._on_done = on_done
         self._on_failed = on_failed
@@ -80,22 +80,22 @@ class UploadPool:
         self._in_flight: dict[str, Future] = {}
         self._lock = threading.Lock()
 
-    def submit(self, rel_path: str, abs_path: Path, presigned_url: str) -> None:
-        future = self._pool.submit(self._run, rel_path, abs_path, presigned_url)
+    def submit(self, rel_path: str, sha256: str, abs_path: Path, presigned_url: str) -> None:
+        future = self._pool.submit(self._run, rel_path, sha256, abs_path, presigned_url)
         with self._lock:
             self._in_flight[rel_path] = future
 
-    def _run(self, rel_path: str, abs_path: Path, presigned_url: str) -> None:
+    def _run(self, rel_path: str, sha256: str, abs_path: Path, presigned_url: str) -> None:
         try:
             ok = upload_one(abs_path, presigned_url)
             if ok:
                 log.debug("uploaded %s", rel_path)
-                self._on_done(rel_path)
+                self._on_done(rel_path, sha256)
             else:
-                self._on_failed(rel_path, "upload returned failure")
+                self._on_failed(rel_path, sha256, "upload returned failure")
         except Exception as e:
             log.exception("upload error %s", rel_path)
-            self._on_failed(rel_path, str(e))
+            self._on_failed(rel_path, sha256, str(e))
         finally:
             with self._lock:
                 self._in_flight.pop(rel_path, None)

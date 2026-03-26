@@ -285,24 +285,24 @@ class Daemon:
         except TrackAPIError as e:
             log.warning("failed to get upload URLs: %s", e)
             for item in items:
-                self._queue.mark_failed(item.path, str(e))
+                self._queue.mark_failed(item.path, item.sha256, str(e))
             return
 
         home = Path.home()
         for item in items:
             url = url_map.get(item.path)
             if not url:
-                self._queue.mark_failed(item.path, "no presigned URL returned")
+                self._queue.mark_failed(item.path, item.sha256, "no presigned URL returned")
                 continue
             abs_path = home / item.path
-            self._pool.submit(item.path, abs_path, url)
+            self._pool.submit(item.path, item.sha256, abs_path, url)
 
     # ------------------------------------------------------------------ #
     # Upload callbacks                                                     #
     # ------------------------------------------------------------------ #
 
-    def _on_upload_done(self, rel_path: str) -> None:
-        self._queue.mark_done(rel_path)
+    def _on_upload_done(self, rel_path: str, sha256: str) -> None:
+        self._queue.mark_done(rel_path, sha256)
         self._status.files_synced += 1
         # Record this file as confirmed on S3 using the hash we originally computed.
         digest = self._cache.get_stored_digest(rel_path)
@@ -311,8 +311,8 @@ class Daemon:
                 self._confirmed_map[rel_path] = digest
             self._manifest_dirty = True
 
-    def _on_upload_failed(self, rel_path: str, error: str) -> None:
-        self._queue.mark_failed(rel_path, error)
+    def _on_upload_failed(self, rel_path: str, sha256: str, error: str) -> None:
+        self._queue.mark_failed(rel_path, sha256, error)
         log.warning("upload failed %s: %s", rel_path, error)
 
     # ------------------------------------------------------------------ #

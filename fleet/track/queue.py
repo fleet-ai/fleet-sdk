@@ -92,27 +92,32 @@ class UploadQueue:
         if not rows:
             return []
 
-        paths = [r[0] for r in rows]
+        # Match on (path, sha256) — the natural key — so we never transition a
+        # row that wasn't in the SELECT result. Two rows can share a path with
+        # different sha256 values; path-only matching would orphan the extra row
+        # (set to in_flight with no upload attempted and no callback to resolve it).
+        placeholders = ",".join("(?,?)" for _ in rows)
+        pairs = [v for r in rows for v in (r[0], r[1])]
         self._conn.execute(
-            f"UPDATE queue SET status = 'in_flight', updated_at = ? WHERE status = 'pending' AND path IN ({','.join('?' * len(paths))})",
-            [now] + paths,
+            f"UPDATE queue SET status = 'in_flight', updated_at = ? WHERE status = 'pending' AND (path, sha256) IN ({placeholders})",
+            [now] + pairs,
         )
         self._conn.commit()
 
         return [QueueItem(r[0], r[1], r[2], r[3]) for r in rows]
 
-    def mark_done(self, path: str) -> None:
+    def mark_done(self, path: str, sha256: str) -> None:
         now = int(time.time())
         self._conn.execute(
-            "UPDATE queue SET status = 'done', updated_at = ? WHERE path = ?",
-            (now, path),
+            "UPDATE queue SET status = 'done', updated_at = ? WHERE path = ? AND sha256 = ?",
+            (now, path, sha256),
         )
         self._conn.commit()
 
-    def mark_failed(self, path: str, error: str) -> None:
+    def mark_failed(self, path: str, sha256: str, error: str) -> None:
         now = int(time.time())
         row = self._conn.execute(
-            "SELECT attempts FROM queue WHERE path = ?", (path,)
+            "SELECT attempts FROM queue WHERE path = ? AND sha256 = ?", (path, sha256)
         ).fetchone()
         attempts = (row[0] if row else 0) + 1
         status = "failed" if attempts >= MAX_ATTEMPTS else "pending"
@@ -121,9 +126,9 @@ class UploadQueue:
             """
             UPDATE queue
             SET status = ?, attempts = ?, last_error = ?, next_attempt_at = ?, updated_at = ?
-            WHERE path = ?
+            WHERE path = ? AND sha256 = ?
             """,
-            (status, attempts, error[:500], next_attempt, now, path),
+            (status, attempts, error[:500], next_attempt, now, path, sha256),
         )
         self._conn.commit()
 
