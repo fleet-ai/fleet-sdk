@@ -891,9 +891,413 @@ class SnapshotDiff:
         return diff
 
     # ------------------------------------------------------------------
+    def _can_use_targeted_queries(self, allowed_changes: List[Dict[str, Any]]) -> bool:
+        """Check if we can use targeted queries for optimization."""
+        for change in allowed_changes:
+            if "table" not in change or "pk" not in change:
+                return False
+        return True
+
+    def _query_row(self, db_path: str, table: str, pk_columns: List[str], pk: Any) -> Optional[Dict[str, Any]]:
+        """Query a single row by primary key from a SQLite database."""
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            if len(pk_columns) == 1:
+                where_sql = f"{pk_columns[0]} = ?"
+                params = [pk]
+            else:
+                parts = []
+                params = []
+                pk_vals = pk if isinstance(pk, tuple) else (pk,)
+                for col, val in zip(pk_columns, pk_vals):
+                    parts.append(f"{col} = ?")
+                    params.append(val)
+                where_sql = " AND ".join(parts)
+            cursor = conn.execute(
+                f"SELECT rowid, * FROM {table} WHERE {where_sql}", params
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def _get_row_count(self, db_path: str, table: str) -> int:
+        """Get row count for a table."""
+        conn = sqlite3.connect(db_path)
+        try:
+            cursor = conn.execute(f"SELECT COUNT(*) FROM {table}")
+            return cursor.fetchone()[0]
+        finally:
+            conn.close()
+
+    def _get_pk_columns(self, table: str) -> List[str]:
+        """Get primary key columns for a table."""
+        return self._differ.get_primary_key_columns(self._differ.before_db, table) or ["id"]
+
+    def _expect_only_targeted(self, allowed_changes: List[Dict[str, Any]]):
+        """Optimized version that only queries specific rows mentioned in allowed_changes.
+
+        Matches the behavior of the production SyncSnapshotDiff._expect_only_targeted
+        in fleet/resources/sqlite.py: checks specified rows for expected changes, then
+        verifies tables not mentioned in allowed_changes have no row count changes.
+        """
+        # Group allowed changes by table
+        changes_by_table: Dict[str, List[Dict[str, Any]]] = {}
+        for change in allowed_changes:
+            table = change["table"]
+            if table not in changes_by_table:
+                changes_by_table[table] = []
+            changes_by_table[table].append(change)
+
+        errors: List[Exception] = []
+
+        # Check each specified row
+        for table, table_changes in changes_by_table.items():
+            if self.ignore_config.should_ignore_table(table):
+                continue
+
+            pk_columns = self._get_pk_columns(table)
+            pks_to_check = {change["pk"] for change in table_changes}
+
+            for pk in pks_to_check:
+                before_row = self._query_row(self.before.db_path, table, pk_columns, pk)
+                after_row = self._query_row(self.after.db_path, table, pk_columns, pk)
+
+                if before_row and after_row:
+                    # Modified row - check fields
+                    for field in set(before_row.keys()) | set(after_row.keys()):
+                        if self.ignore_config.should_ignore_field(table, field):
+                            continue
+                        before_val = before_row.get(field)
+                        after_val = after_row.get(field)
+                        if not _values_equivalent(before_val, after_val):
+                            # Check if this field change is allowed
+                            allowed = False
+                            for tc in table_changes:
+                                tc_pk = tc.get("pk")
+                                pk_match = (
+                                    str(tc_pk) == str(pk) if tc_pk is not None else False
+                                )
+                                if (
+                                    pk_match
+                                    and tc.get("field") == field
+                                    and _values_equivalent(tc.get("after"), after_val)
+                                ):
+                                    allowed = True
+                                    break
+                            if not allowed:
+                                errors.append(
+                                    AssertionError(
+                                        f"Unexpected change in table '{table}', "
+                                        f"row {pk}, field '{field}': "
+                                        f"{repr(before_val)} -> {repr(after_val)}"
+                                    )
+                                )
+                                break  # Stop checking this row
+                elif not before_row and after_row:
+                    # Added row - check if allowed
+                    allowed = False
+                    for tc in table_changes:
+                        tc_pk = tc.get("pk")
+                        pk_match = (
+                            str(tc_pk) == str(pk) if tc_pk is not None else False
+                        )
+                        if pk_match and _values_equivalent(tc.get("after"), "__added__"):
+                            allowed = True
+                            break
+                    if not allowed:
+                        errors.append(
+                            AssertionError(f"Unexpected row added in table '{table}': {pk}")
+                        )
+                elif before_row and not after_row:
+                    # Removed row - check if allowed
+                    allowed = False
+                    for tc in table_changes:
+                        tc_pk = tc.get("pk")
+                        pk_match = (
+                            str(tc_pk) == str(pk) if tc_pk is not None else False
+                        )
+                        if pk_match and _values_equivalent(tc.get("after"), "__removed__"):
+                            allowed = True
+                            break
+                    if not allowed:
+                        errors.append(
+                            AssertionError(f"Unexpected row removed from table '{table}': {pk}")
+                        )
+
+        if errors:
+            raise errors[0]
+
+        # Check tables not mentioned in allowed_changes for row count changes
+        all_tables = set(self.before.tables()) | set(self.after.tables())
+        for table in all_tables:
+            if table in changes_by_table:
+                continue
+            if self.ignore_config.should_ignore_table(table):
+                continue
+            before_count = self._get_row_count(self.before.db_path, table)
+            after_count = self._get_row_count(self.after.db_path, table)
+            if before_count != after_count:
+                errors.append(
+                    AssertionError(
+                        f"Unexpected change in table '{table}': "
+                        f"row count changed from {before_count} to {after_count}"
+                    )
+                )
+
+        if errors:
+            raise errors[0]
+
+        return self
+
+    def _expect_only_targeted_v2(self, allowed_changes: List[Dict[str, Any]]):
+        """Targeted version of expect_only_v2 that only queries specific rows.
+
+        Matches the behavior of the production SyncSnapshotDiff._expect_only_targeted_v2
+        in fleet/resources/sqlite.py.
+        """
+        # Helper functions for v2 spec validation
+        def _parse_fields_spec(
+            fields_spec: List[tuple],
+        ) -> Dict[str, tuple]:
+            spec_map: Dict[str, tuple] = {}
+            for spec_tuple in fields_spec:
+                if len(spec_tuple) != 2:
+                    raise ValueError(
+                        f"Invalid field spec tuple: {spec_tuple}. "
+                        f"Expected 2-tuple like ('field', value), ('field', None), or ('field', ...)"
+                    )
+                field_name, expected_value = spec_tuple
+                if expected_value is ...:
+                    spec_map[field_name] = (False, None)
+                else:
+                    spec_map[field_name] = (True, expected_value)
+            return spec_map
+
+        def _get_all_specs_for_pk(table: str, pk: Any) -> List[Dict[str, Any]]:
+            specs = []
+            for allowed in allowed_changes:
+                if (
+                    allowed["table"] == table
+                    and str(allowed.get("pk")) == str(pk)
+                ):
+                    specs.append(allowed)
+            return specs
+
+        def _validate_insert_row(
+            table: str, pk: Any, row_data: Dict[str, Any], specs: List[Dict[str, Any]]
+        ) -> Optional[str]:
+            for spec in specs:
+                if spec.get("type") == "insert":
+                    fields_spec = spec.get("fields")
+                    if fields_spec is not None:
+                        spec_map = _parse_fields_spec(fields_spec)
+                        for field_name, field_value in row_data.items():
+                            if field_name == "rowid":
+                                continue
+                            if self.ignore_config.should_ignore_field(table, field_name):
+                                continue
+                            if field_name not in spec_map:
+                                return f"Field '{field_name}' not in insert spec for table '{table}' pk={pk}"
+                            should_check, expected_value = spec_map[field_name]
+                            if should_check and not _values_equivalent(expected_value, field_value):
+                                return (
+                                    f"Insert mismatch in table '{table}' pk={pk}, "
+                                    f"field '{field_name}': expected {repr(expected_value)}, got {repr(field_value)}"
+                                )
+                    return None
+            for spec in specs:
+                if spec.get("fields") is None and spec.get("after") == "__added__":
+                    return None
+            return f"Unexpected row added in table '{table}': pk={pk}"
+
+        def _validate_delete_row(
+            table: str, pk: Any, row_data: Dict[str, Any], specs: List[Dict[str, Any]]
+        ) -> Optional[str]:
+            for spec in specs:
+                if spec.get("type") == "delete":
+                    fields_spec = spec.get("fields")
+                    if fields_spec is not None:
+                        spec_map = _parse_fields_spec(fields_spec)
+                        for field_name, (should_check, expected_value) in spec_map.items():
+                            if field_name not in row_data:
+                                return f"Field '{field_name}' in delete spec not found in row for table '{table}' pk={pk}"
+                            if should_check and not _values_equivalent(expected_value, row_data[field_name]):
+                                return (
+                                    f"Delete mismatch in table '{table}' pk={pk}, "
+                                    f"field '{field_name}': expected {repr(expected_value)}, got {repr(row_data[field_name])}"
+                                )
+                    return None
+            for spec in specs:
+                if spec.get("fields") is None and spec.get("after") == "__removed__":
+                    return None
+            return f"Unexpected row removed from table '{table}': pk={pk}"
+
+        def _validate_modify_row(
+            table: str,
+            pk: Any,
+            before_row: Dict[str, Any],
+            after_row: Dict[str, Any],
+            specs: List[Dict[str, Any]],
+        ) -> Optional[str]:
+            changed_fields: Dict[str, Dict[str, Any]] = {}
+            for field in set(before_row.keys()) | set(after_row.keys()):
+                if self.ignore_config.should_ignore_field(table, field):
+                    continue
+                before_val = before_row.get(field)
+                after_val = after_row.get(field)
+                if not _values_equivalent(before_val, after_val):
+                    changed_fields[field] = {"before": before_val, "after": after_val}
+            if not changed_fields:
+                return None
+            for spec in specs:
+                if spec.get("type") == "modify":
+                    resulting_fields = spec.get("resulting_fields")
+                    if resulting_fields is not None:
+                        if "no_other_changes" not in spec:
+                            raise ValueError(
+                                f"Modify spec for table '{table}' pk={pk} "
+                                f"has 'resulting_fields' but missing required 'no_other_changes' field."
+                            )
+                        no_other_changes = spec["no_other_changes"]
+                        if not isinstance(no_other_changes, bool):
+                            raise ValueError(
+                                f"Modify spec for table '{table}' pk={pk} "
+                                f"'no_other_changes' must be boolean, got {type(no_other_changes).__name__}"
+                            )
+                        spec_map = _parse_fields_spec(resulting_fields)
+                        for field_name, vals in changed_fields.items():
+                            after_val = vals["after"]
+                            if field_name not in spec_map:
+                                if no_other_changes:
+                                    return (
+                                        f"Unexpected field change in table '{table}' pk={pk}: "
+                                        f"field '{field_name}' not in resulting_fields"
+                                    )
+                            else:
+                                should_check, expected_value = spec_map[field_name]
+                                if should_check and not _values_equivalent(expected_value, after_val):
+                                    return (
+                                        f"Modify mismatch in table '{table}' pk={pk}, "
+                                        f"field '{field_name}': expected {repr(expected_value)}, got {repr(after_val)}"
+                                    )
+                        return None
+                    else:
+                        return None
+            # Legacy single-field specs
+            for field_name, vals in changed_fields.items():
+                after_val = vals["after"]
+                field_allowed = False
+                for spec in specs:
+                    if (
+                        spec.get("field") == field_name
+                        and _values_equivalent(spec.get("after"), after_val)
+                    ):
+                        field_allowed = True
+                        break
+                if not field_allowed:
+                    return (
+                        f"Unexpected change in table '{table}' pk={pk}, "
+                        f"field '{field_name}': {repr(vals['before'])} -> {repr(after_val)}"
+                    )
+            return None
+
+        # Group allowed changes by table
+        changes_by_table: Dict[str, List[Dict[str, Any]]] = {}
+        for change in allowed_changes:
+            table = change["table"]
+            if table not in changes_by_table:
+                changes_by_table[table] = []
+            changes_by_table[table].append(change)
+
+        errors: List[Exception] = []
+
+        # Check each specified row
+        for table, table_changes in changes_by_table.items():
+            if self.ignore_config.should_ignore_table(table):
+                continue
+
+            pk_columns = self._get_pk_columns(table)
+            pks_to_check = {change["pk"] for change in table_changes}
+
+            for pk in pks_to_check:
+                before_row = self._query_row(self.before.db_path, table, pk_columns, pk)
+                after_row = self._query_row(self.after.db_path, table, pk_columns, pk)
+                specs = _get_all_specs_for_pk(table, pk)
+
+                if before_row and after_row:
+                    error = _validate_modify_row(table, pk, before_row, after_row, specs)
+                    if error:
+                        errors.append(AssertionError(error))
+                elif not before_row and after_row:
+                    error = _validate_insert_row(table, pk, after_row, specs)
+                    if error:
+                        errors.append(AssertionError(error))
+                elif before_row and not after_row:
+                    error = _validate_delete_row(table, pk, before_row, specs)
+                    if error:
+                        errors.append(AssertionError(error))
+
+        if errors:
+            raise errors[0]
+
+        # Check tables not mentioned in allowed_changes for row count changes
+        all_tables = set(self.before.tables()) | set(self.after.tables())
+        for table in all_tables:
+            if table in changes_by_table:
+                continue
+            if self.ignore_config.should_ignore_table(table):
+                continue
+            before_count = self._get_row_count(self.before.db_path, table)
+            after_count = self._get_row_count(self.after.db_path, table)
+            if before_count != after_count:
+                errors.append(
+                    AssertionError(
+                        f"Unexpected change in table '{table}': "
+                        f"row count changed from {before_count} to {after_count}"
+                    )
+                )
+
+        if errors:
+            raise errors[0]
+
+        return self
+
     def expect_only(self, allowed_changes: List[Dict[str, Any]]):
         """Allowed changes is a list of {table, pk, field, after} (before optional)."""
+        # Normalize pk values
+        for change in allowed_changes:
+            if "pk" in change and isinstance(change["pk"], list):
+                change["pk"] = tuple(change["pk"])
+
+        # Special case: empty allowed_changes means no changes should have occurred
+        if not allowed_changes:
+            diff = self._collect()
+            for tbl, report in diff.items():
+                total = (
+                    len(report.get("added_rows", []))
+                    + len(report.get("removed_rows", []))
+                    + len(report.get("modified_rows", []))
+                )
+                if total > 0:
+                    raise AssertionError(
+                        f"Expected no changes but found {total} change(s) in table '{tbl}'"
+                    )
+            return self
+
+        # Use targeted queries when possible (matches production behavior)
+        if self._can_use_targeted_queries(allowed_changes):
+            return self._expect_only_targeted(allowed_changes)
+
+        # Fall back to full diff for complex cases
         diff = self._collect()
+        return self._validate_diff_against_allowed_changes(diff, allowed_changes)
+
+    def _validate_diff_against_allowed_changes(
+        self, diff: Dict[str, Any], allowed_changes: List[Dict[str, Any]]
+    ):
+        """Validate a collected diff against allowed changes (full-diff fallback)."""
 
         def _is_change_allowed(
             table: str, row_id: str, field: Optional[str], after_value: Any
@@ -1061,6 +1465,31 @@ class SnapshotDiff:
         For modifications, use "resulting_fields" with explicit "no_other_changes".
         For deletions with "fields", all specified fields are validated against the deleted row.
         """
+        # Normalize pk values
+        for change in allowed_changes:
+            if "pk" in change and isinstance(change["pk"], list):
+                change["pk"] = tuple(change["pk"])
+
+        # Special case: empty allowed_changes means no changes should have occurred
+        if not allowed_changes:
+            diff = self._collect()
+            for tbl, report in diff.items():
+                total = (
+                    len(report.get("added_rows", []))
+                    + len(report.get("removed_rows", []))
+                    + len(report.get("modified_rows", []))
+                )
+                if total > 0:
+                    raise AssertionError(
+                        f"Expected no changes but found {total} change(s) in table '{tbl}'"
+                    )
+            return self
+
+        # Use targeted queries when possible (matches production behavior)
+        if self._can_use_targeted_queries(allowed_changes):
+            return self._expect_only_targeted_v2(allowed_changes)
+
+        # Fall back to full diff for complex cases
         diff = self._collect()
 
         def _is_change_allowed(
