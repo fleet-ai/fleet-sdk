@@ -39,10 +39,19 @@ class EnvironmentBase(InstanceResponse):
 
 
 class BaseWrapper:
-    def __init__(self, *, api_key: Optional[str], base_url: Optional[str]):
-        if api_key is None:
-            raise ValueError("api_key is required")
+    def __init__(
+        self,
+        *,
+        api_key: Optional[str],
+        base_url: Optional[str],
+        jwt: Optional[str] = None,
+        team_id: Optional[str] = None,
+    ):
+        if api_key is None and not (jwt and team_id):
+            raise ValueError("Provide api_key or both jwt and team_id")
         self.api_key = api_key
+        self.jwt = jwt
+        self.team_id = team_id
         if base_url is None:
             base_url = GLOBAL_BASE_URL
         self.base_url = base_url
@@ -52,7 +61,11 @@ class BaseWrapper:
             "X-Fleet-SDK-Language": "Python",
             "X-Fleet-SDK-Version": __version__,
         }
-        headers["Authorization"] = f"Bearer {self.api_key}"
+        if self.jwt and self.team_id:
+            headers["X-JWT-Token"] = self.jwt
+            headers["X-Team-ID"] = self.team_id
+        else:
+            headers["Authorization"] = f"Bearer {self.api_key}"
 
         # Add request ID for idempotency (persists across retries)
         if request_id:
@@ -66,7 +79,7 @@ class BaseWrapper:
 
 class SyncWrapper(BaseWrapper):
     def __init__(self, *, httpx_client: httpx.Client, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(**kwargs)  # forwards jwt/team_id/api_key/base_url
         self.httpx_client = httpx_client
 
     def request(
