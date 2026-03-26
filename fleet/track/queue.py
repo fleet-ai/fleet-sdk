@@ -141,6 +141,20 @@ class UploadQueue:
                 "UPDATE queue SET status = 'done', updated_at = ? WHERE path = ? AND sha256 = ?",
                 (now, path, sha256),
             )
+            # Prune rows for the same path that were enqueued *before* this one —
+            # they are older versions superseded by this upload.
+            # Rows enqueued *after* (newer file content) are preserved so they
+            # upload without waiting for the next reconcile.
+            self._conn.execute(
+                """
+                DELETE FROM queue
+                WHERE path = ? AND sha256 != ? AND status IN ('failed', 'pending')
+                  AND enqueued_at <= (
+                      SELECT enqueued_at FROM queue WHERE path = ? AND sha256 = ?
+                  )
+                """,
+                (path, sha256, path, sha256),
+            )
             self._conn.commit()
 
     def mark_failed(self, path: str, sha256: str, error: str) -> None:
