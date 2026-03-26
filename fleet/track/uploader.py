@@ -19,7 +19,9 @@ from .scrubber import scrub_bytes
 log = logging.getLogger("fleet.track.uploader")
 
 WORKERS = 8
-UPLOAD_TIMEOUT_SECS = 120
+# Per-phase timeouts: connect/read can be short, write needs to be generous
+# for large JSONL files on slow connections.
+UPLOAD_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=300.0, pool=10.0)
 
 
 def _read_safe(path: Path) -> Optional[bytes]:
@@ -55,7 +57,7 @@ def upload_one(path: Path, presigned_url: str) -> bool:
             presigned_url,
             content=scrubbed,
             headers={"Content-Type": "application/octet-stream"},
-            timeout=UPLOAD_TIMEOUT_SECS,
+            timeout=UPLOAD_TIMEOUT,
         )
         if resp.status_code not in (200, 204):
             log.warning("upload %s → HTTP %s", path.name, resp.status_code)
