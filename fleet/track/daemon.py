@@ -92,6 +92,7 @@ class Daemon:
         self._bytes_uploaded = 0
         self._run_id = str(uuid.uuid4())[:8]
         self._device_id: str = ""
+        self._identity: dict = {}
         # confirmed_map: path → sha256 for every file we KNOW is on S3.
         # Populated from the remote manifest at startup and updated only on
         # successful upload callbacks. Used to build an honest manifest.json.
@@ -108,6 +109,15 @@ class Daemon:
         write_pid()
         cfg = _load_config()
         self._device_id = cfg["device_id"]
+        self._identity = {
+            "user_id": cfg.get("user_id", ""),
+            "email": cfg.get("email", ""),
+            "team_id": cfg.get("team_id", ""),
+            "team_name": cfg.get("team_name", ""),
+            "device_id": self._device_id,
+            "hostname": cfg.get("hostname", ""),
+            "platform": cfg.get("platform", ""),
+        }
         log.info("daemon starting run_id=%s pid=%s device=%s", self._run_id, os.getpid(), self._device_id)
 
         signal.signal(signal.SIGTERM, self._handle_sigterm)
@@ -247,7 +257,11 @@ class Daemon:
             confirmed = dict(self._confirmed_map)
 
         root = MerkleTree.compute_root(confirmed)
-        manifest = json.dumps({"root_hash": root, "files": confirmed}, separators=(",", ":"))
+        manifest = json.dumps({
+            "root_hash": root,
+            **self._identity,
+            "files": confirmed,
+        }, separators=(",", ":"))
         try:
             url_map = self._api.get_upload_urls(self._device_id, ["manifest.json"])
             url = url_map.get("manifest.json")
