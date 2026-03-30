@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from ..auth import load_credentials
 from .api import TrackAPIClient, TrackAPIError
 from .daemon import main as daemon_main
 from .install import install, is_installed, uninstall
@@ -55,10 +56,16 @@ def enable() -> None:
     try:
         api = TrackAPIClient()
         result = api.provision(device_id)
-        config["s3_prefix"] = result.get("s3_prefix", "")
-        config["s3_bucket"] = result.get("s3_bucket", "fleet-track-sessions")
         config["team_id"] = result.get("team_id", "")
         config["user_id"] = result.get("user_id", "")
+        # Pull email + team_name from stored credentials so the daemon can
+        # embed them in manifest.json for device → user association.
+        creds = load_credentials() or {}
+        config["email"] = creds.get("email", "")
+        config["team_name"] = creds.get("team_name", "")
+        import platform, socket
+        config["hostname"] = socket.gethostname()
+        config["platform"] = platform.system().lower()
         CONFIG_FILE.write_text(json.dumps(config, indent=2))
     except TrackAPIError as e:
         console.print(f"[red]Provision failed:[/red] {e}")
