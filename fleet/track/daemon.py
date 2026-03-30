@@ -92,6 +92,7 @@ class Daemon:
         self._bytes_uploaded = 0
         self._run_id = str(uuid.uuid4())[:8]
         self._device_id: str = ""
+        self._identity: dict = {}
         # confirmed_map: path → sha256 for every file we KNOW is on S3.
         # Populated from the remote manifest at startup and updated only on
         # successful upload callbacks. Used to build an honest manifest.json.
