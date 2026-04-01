@@ -17,6 +17,7 @@ import tempfile
 from typing import Any, Dict, Optional
 from unittest.mock import MagicMock, patch, AsyncMock
 
+import httpx
 import pytest
 
 from fleet.judge import (
@@ -1068,3 +1069,271 @@ class TestExternalProviderPathImages:
             assert image_blocks[0]["image_url"]["url"].startswith("data:image/png;base64,")
         finally:
             os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# ExternalProvider file handling in request body
+# ---------------------------------------------------------------------------
+
+
+class TestExternalProviderFiles:
+    def test_text_file_included_in_request_body(self):
+        """Text files are inlined as text blocks in the LLM request."""
+        with tempfile.NamedTemporaryFile(suffix=".csv", mode="w", delete=False) as f:
+            f.write("name,score\nAlice,95\nBob,87\n")
+            path = f.name
+        try:
+            provider = ExternalProvider(api_key="sk-test", model="test/model")
+            req = GradeRequest(
+                rubric="Test rubric",
+                submission="Answer",
+                files={"data": File.from_local(path, media_type="text/csv")},
+            )
+            body = provider._build_request_body(req)
+
+            user_msg = body["messages"][1]
+            content_blocks = user_msg["content"]
+            text_blocks = [b for b in content_blocks if b.get("type") == "text"]
+            # Should have a file block + the main user message
+            file_blocks = [b for b in text_blocks if "## File:" in b.get("text", "")]
+            assert len(file_blocks) == 1
+            assert "Alice,95" in file_blocks[0]["text"]
+        finally:
+            os.unlink(path)
+
+    def test_base64_file_included_in_request_body(self):
+        """Base64-encoded files are decoded and inlined as text."""
+        content = "Hello, world!"
+        b64_data = base64.b64encode(content.encode()).decode()
+        provider = ExternalProvider(api_key="sk-test", model="test/model")
+        req = GradeRequest(
+            rubric="Test rubric",
+            submission="Answer",
+            files={"readme": File.from_base64(b64_data, "readme.txt", media_type="text/plain")},
+        )
+        body = provider._build_request_body(req)
+
+        user_msg = body["messages"][1]
+        text_blocks = [b for b in user_msg["content"] if b.get("type") == "text"]
+        file_blocks = [b for b in text_blocks if "## File:" in b.get("text", "")]
+        assert len(file_blocks) == 1
+        assert "Hello, world!" in file_blocks[0]["text"]
+
+    def test_path_file_included_in_request_body(self):
+        """from_path files are read from disk and inlined."""
+        with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
+            json.dump({"key": "value"}, f)
+            path = f.name
+        try:
+            provider = ExternalProvider(api_key="sk-test", model="test/model")
+            req = GradeRequest(
+                rubric="Test rubric",
+                submission="Answer",
+                files={"config": File.from_path(path)},
+            )
+            body = provider._build_request_body(req)
+
+            user_msg = body["messages"][1]
+            text_blocks = [b for b in user_msg["content"] if b.get("type") == "text"]
+            file_blocks = [b for b in text_blocks if "## File:" in b.get("text", "")]
+            assert len(file_blocks) == 1
+            assert '"key"' in file_blocks[0]["text"]
+        finally:
+            os.unlink(path)
+
+    def test_unresolvable_file_skipped(self):
+        """Files that can't be resolved are skipped with a warning."""
+        provider = ExternalProvider(api_key="sk-test", model="test/model")
+        req = GradeRequest(
+            rubric="Test rubric",
+            submission="Answer",
+            files={"missing": File.from_local("/nonexistent/file.csv")},
+        )
+        body = provider._build_request_body(req)
+
+        user_msg = body["messages"][1]
+        text_blocks = [b for b in user_msg["content"] if b.get("type") == "text"]
+        file_blocks = [b for b in text_blocks if "## File:" in b.get("text", "")]
+        assert len(file_blocks) == 0
+
+
+# ---------------------------------------------------------------------------
+# ExternalProvider error handling
+# ---------------------------------------------------------------------------
+
+
+class TestExternalProviderErrorHandling:
+    def test_http_error_returns_zero_grade(self):
+        """HTTP errors return GradeResponse with 0.0 score instead of raising."""
+        provider = ExternalProvider(api_key="sk-test", model="test/model")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "Internal Server Error"
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Server Error", request=MagicMock(), response=mock_response,
+        )
+
+        with patch("httpx.Client") as MockClient:
+            mock_client = MagicMock()
+            mock_client.post.return_value = mock_response
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            MockClient.return_value = mock_client
+
+            req = _make_grade_request()
+            resp = provider.grade(req)
+
+            assert resp.normalized_score == 0.0
+            assert "LLM API error" in resp.feedback
+            assert "500" in resp.feedback
+
+    def test_request_error_returns_zero_grade(self):
+        """Network errors return GradeResponse with 0.0 score instead of raising."""
+        provider = ExternalProvider(api_key="sk-test", model="test/model")
+
+        with patch("httpx.Client") as MockClient:
+            mock_client = MagicMock()
+            mock_client.post.side_effect = httpx.RequestError("Connection refused")
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            MockClient.return_value = mock_client
+
+            req = _make_grade_request()
+            resp = provider.grade(req)
+
+            assert resp.normalized_score == 0.0
+            assert "request failed" in resp.feedback.lower()
+
+
+# ---------------------------------------------------------------------------
+# ExternalProvider api_key validation
+# ---------------------------------------------------------------------------
+
+
+class TestExternalProviderValidation:
+    def test_empty_api_key_raises(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            ExternalProvider(api_key="")
+
+    def test_whitespace_api_key_raises(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            ExternalProvider(api_key="   ")
+
+
+# ---------------------------------------------------------------------------
+# Async: ExternalProvider.agrade()
+# ---------------------------------------------------------------------------
+
+
+class TestExternalProviderAsync:
+    @pytest.mark.asyncio
+    async def test_agrade_with_mocked_httpx(self):
+        """ExternalProvider.agrade() uses httpx.AsyncClient correctly."""
+        provider = ExternalProvider(
+            api_key="sk-test",
+            base_url="https://test-api.example.com/v1",
+            model="test/model",
+        )
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": _mock_llm_json_response()}}],
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("fleet.llm_provider.httpx.AsyncClient") as MockAsyncClient:
+            mock_client = AsyncMock()
+            mock_client.post.return_value = mock_response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            MockAsyncClient.return_value = mock_client
+
+            req = _make_grade_request()
+            resp = await provider.agrade(req)
+
+            mock_client.post.assert_called_once()
+            assert resp.normalized_score == pytest.approx(13 / 15, abs=0.01)
+            assert len(resp.criteria) == 2
+
+    @pytest.mark.asyncio
+    async def test_agrade_http_error_returns_zero(self):
+        """Async HTTP errors return GradeResponse with 0.0 score."""
+        provider = ExternalProvider(api_key="sk-test", model="test/model")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.text = "Rate limited"
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Rate limited", request=MagicMock(), response=mock_response,
+        )
+
+        with patch("fleet.llm_provider.httpx.AsyncClient") as MockAsyncClient:
+            mock_client = AsyncMock()
+            mock_client.post.return_value = mock_response
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            MockAsyncClient.return_value = mock_client
+
+            req = _make_grade_request()
+            resp = await provider.agrade(req)
+
+            assert resp.normalized_score == 0.0
+            assert "429" in resp.feedback
+
+
+# ---------------------------------------------------------------------------
+# Async: LLMProvider.agrade() default (run_in_executor)
+# ---------------------------------------------------------------------------
+
+
+class TestLLMProviderAgradeDefault:
+    @pytest.mark.asyncio
+    async def test_default_agrade_calls_grade_without_blocking(self):
+        """Base class agrade() offloads to executor so it doesn't block."""
+
+        class SyncOnlyProvider(LLMProvider):
+            def grade(self, request: GradeRequest) -> GradeResponse:
+                return GradeResponse(
+                    normalized_score=0.75,
+                    model_used="sync-model",
+                    provider_used="sync-provider",
+                )
+
+        provider = SyncOnlyProvider()
+        req = _make_grade_request()
+        resp = await provider.agrade(req)
+
+        assert resp.normalized_score == 0.75
+        assert resp.model_used == "sync-model"
+
+
+# ---------------------------------------------------------------------------
+# Async: AsyncJudge + provider integration
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncJudgeWithProvider:
+    @pytest.mark.asyncio
+    async def test_async_judge_routes_through_provider(self):
+        """AsyncJudge.grade() calls provider.agrade() when provider is set."""
+        from fleet._async.judge import AsyncJudge
+
+        mock_provider = AsyncMock(spec=LLMProvider)
+        mock_provider.agrade.return_value = GradeResponse(
+            normalized_score=0.9,
+            total_score=9,
+            max_score=10,
+            criteria=[{"name": "Test", "score": 9, "max_score": 10, "reasoning": "Good"}],
+            feedback="Nice work",
+            model_used="test-model",
+            provider_used="test-provider",
+        )
+        mock_provider.resolve_images.return_value = None
+        mock_provider.resolve_files.return_value = None
+
+        judge = AsyncJudge(client=None, instance_id="test", llm_provider=mock_provider)
+        result = await judge.grade("Test rubric", "My submission")
+
+        mock_provider.agrade.assert_called_once()
+        assert float(result) == pytest.approx(0.9)

@@ -70,14 +70,14 @@ class GradeRequest:
     independent of whether the call routes through Fleet or an external API.
     """
 
-    rubric: Any  # str or Rubric
+    rubric: Union[str, "Rubric"]
     submission: Optional[str] = None
     ground_truth: Optional[Union[str, dict]] = None
     problem: Optional[str] = None
     context: Optional[str] = None
     conversation: Optional[List[dict]] = None
-    images: Optional[Dict[str, Any]] = None  # Dict[str, Image]
-    files: Optional[Dict[str, Any]] = None  # Dict[str, File]
+    images: Optional[Dict[str, "Image"]] = None
+    files: Optional[Dict[str, "File"]] = None
     model: Optional[str] = None
     provider: Optional[str] = None
     agentic: bool = False
@@ -216,10 +216,14 @@ class LLMProvider(ABC):
     async def agrade(self, request: GradeRequest) -> GradeResponse:
         """Execute an asynchronous grading call.
 
-        Default implementation calls the sync ``grade()`` method.
-        Providers that support native async should override this.
+        Default implementation runs the sync ``grade()`` method in a thread
+        executor so it does not block the event loop.  Providers that support
+        native async should override this.
         """
-        return self.grade(request)
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.grade, request)
 
 
 # ---------------------------------------------------------------------------
@@ -464,12 +468,95 @@ def _build_anthropic_messages(
                     },
                 })
 
+    # Add file contents as text blocks
+    if request.files:
+        _TEXT_MEDIA_TYPES = {
+            "text/plain", "text/markdown", "text/html", "text/csv",
+            "text/tab-separated-values", "application/json", "application/xml",
+            "application/x-yaml",
+        }
+        for label, f in request.files.items():
+            file_text = _resolve_file_text(f)
+            if file_text is not None:
+                mt = getattr(f, "media_type", "") or ""
+                if mt in _TEXT_MEDIA_TYPES or _is_likely_text(file_text):
+                    user_content.append({
+                        "type": "text",
+                        "text": f"## File: {label} ({getattr(f, 'filename', label)})\n\n{file_text}",
+                    })
+                else:
+                    # Binary file — include metadata only
+                    user_content.append({
+                        "type": "text",
+                        "text": (
+                            f"## File: {label} ({getattr(f, 'filename', label)})\n\n"
+                            f"[Binary file, media_type={mt or 'application/octet-stream'}]"
+                        ),
+                    })
+            else:
+                logger.warning("Skipping unresolvable file: %s", label)
+
     # Add text content
     user_text = _build_judge_user_message(request)
     user_content.append({"type": "text", "text": user_text})
 
     messages = [{"role": "user", "content": user_content}]
     return system_prompt, messages
+
+
+def _resolve_file_text(f: Any) -> Optional[str]:
+    """Try to extract text content from a File object.
+
+    Returns the decoded text, or None if the file cannot be resolved.
+    """
+    import base64 as _b64
+
+    # Already has base64 data
+    if getattr(f, "data", None):
+        try:
+            return _b64.b64decode(f.data).decode("utf-8")
+        except (UnicodeDecodeError, Exception):
+            return _b64.b64decode(f.data).decode("latin-1", errors="replace")
+
+    # Local file
+    if getattr(f, "source", None) == "local" and getattr(f, "_local_path", None):
+        try:
+            with open(f._local_path, "rb") as fh:
+                raw = fh.read()
+            try:
+                return raw.decode("utf-8")
+            except UnicodeDecodeError:
+                return raw.decode("latin-1", errors="replace")
+        except (OSError, IOError):
+            return None
+
+    # Path-based file — read from disk
+    if getattr(f, "source", None) == "path" and getattr(f, "_path", None):
+        path = f._path
+        if path.startswith("s3://") or path.startswith(("http://", "https://")):
+            # Can't read remote files inline — skip
+            return None
+        try:
+            with open(path, "rb") as fh:
+                raw = fh.read()
+            try:
+                return raw.decode("utf-8")
+            except UnicodeDecodeError:
+                return raw.decode("latin-1", errors="replace")
+        except (OSError, IOError):
+            return None
+
+    return None
+
+
+def _is_likely_text(content: str) -> bool:
+    """Heuristic: check if content looks like readable text."""
+    if not content:
+        return False
+    # If >95% of first 1024 chars are printable ASCII/unicode, it's text
+    sample = content[:1024]
+    printable = sum(1 for c in sample if c.isprintable() or c in "\n\r\t")
+    return printable / len(sample) > 0.95
 
 
 def _parse_llm_judge_response(
@@ -572,6 +659,8 @@ class ExternalProvider(LLMProvider):
         temperature: float = 0.0,
         max_tokens: int = 4096,
     ):
+        if not api_key or not api_key.strip():
+            raise ValueError("ExternalProvider requires a non-empty api_key")
         self.api_key = api_key
         self.base_url = (base_url or self.DEFAULT_BASE_URL).rstrip("/")
         self.model = model or self.DEFAULT_MODEL
@@ -641,9 +730,26 @@ class ExternalProvider(LLMProvider):
 
         start_ms = time.time() * 1000
 
-        with httpx.Client(timeout=self.timeout) as client:
-            response = client.post(url, json=body, headers=self._get_headers())
-            response.raise_for_status()
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.post(url, json=body, headers=self._get_headers())
+                response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.warning("LLM API HTTP error: %s %s", e.response.status_code, e.response.text[:500])
+            return GradeResponse(
+                normalized_score=0.0,
+                feedback=f"LLM API error: {e.response.status_code} - {e.response.text[:500]}",
+                model_used=model,
+                provider_used=self.base_url,
+            )
+        except httpx.RequestError as e:
+            logger.warning("LLM API request failed: %s", e)
+            return GradeResponse(
+                normalized_score=0.0,
+                feedback=f"LLM API request failed: {e}",
+                model_used=model,
+                provider_used=self.base_url,
+            )
 
         elapsed_ms = time.time() * 1000 - start_ms
         data = response.json()
@@ -665,9 +771,26 @@ class ExternalProvider(LLMProvider):
 
         start_ms = time.time() * 1000
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(url, json=body, headers=self._get_headers())
-            response.raise_for_status()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(url, json=body, headers=self._get_headers())
+                response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.warning("LLM API HTTP error: %s %s", e.response.status_code, e.response.text[:500])
+            return GradeResponse(
+                normalized_score=0.0,
+                feedback=f"LLM API error: {e.response.status_code} - {e.response.text[:500]}",
+                model_used=model,
+                provider_used=self.base_url,
+            )
+        except httpx.RequestError as e:
+            logger.warning("LLM API request failed: %s", e)
+            return GradeResponse(
+                normalized_score=0.0,
+                feedback=f"LLM API request failed: {e}",
+                model_used=model,
+                provider_used=self.base_url,
+            )
 
         elapsed_ms = time.time() * 1000 - start_ms
         data = response.json()
