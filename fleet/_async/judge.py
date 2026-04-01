@@ -1,9 +1,15 @@
 """Fleet SDK Judge - Async version.
 
 Provides env.judge.grade() for async verifier scripts.
+
+Provider resolution order:
+
+1. Explicit ``llm_provider`` kwarg (highest priority)
+2. ``FLEET_LLM_API_KEY`` env var → auto-builds ``ExternalProvider``
+3. Fleet orchestrator (default fallback)
 """
 
-from typing import Dict, List, Optional, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
 # Import shared classes and helpers from the sync module
 from ..judge import (
@@ -19,10 +25,12 @@ from ..judge import (
     _guess_media_type,
     _parse_grade_response,
     _print_judge_call_start,
+    _UNSET,
 )
 
 if TYPE_CHECKING:
     from .base import AsyncWrapper
+    from ..llm_provider import LLMProvider
 
 # Re-export data classes so `from fleet._async.judge import ...` works
 __all__ = [
@@ -36,14 +44,32 @@ __all__ = [
 
 
 class AsyncJudge:
-    """LLM-as-judge grading — calls orchestrator API, not environment API.
+    """LLM-as-judge grading (async).
 
-    Accessed as env.judge on AsyncEnv instances.
+    Accessed as ``env.judge`` on AsyncEnv instances.
+
+    Provider resolution order:
+
+    1. Explicit ``llm_provider`` kwarg (highest priority)
+    2. ``FLEET_LLM_API_KEY`` env var → auto-builds ``ExternalProvider``
+    3. Fleet orchestrator (default fallback)
     """
 
-    def __init__(self, client: "AsyncWrapper", instance_id: str):
+    def __init__(
+        self,
+        client: Optional["AsyncWrapper"],
+        instance_id: str,
+        *,
+        llm_provider: Any = _UNSET,
+    ):
         self._client = client
         self._instance_id = instance_id
+
+        if llm_provider is _UNSET:
+            from ..llm_provider import resolve_provider
+            self._llm_provider = resolve_provider()
+        else:
+            self._llm_provider = llm_provider
 
     async def grade(
         self,
@@ -63,7 +89,11 @@ class AsyncJudge:
         collect: Optional[Dict[str, List[str]]] = None,
         task_id: Optional[str] = None,
     ) -> JudgeResult:
-        """Grade a submission using LLM-as-judge via the orchestrator API.
+        """Grade a submission using LLM-as-judge.
+
+        Routes through the Fleet orchestrator by default. If an
+        ``llm_provider`` was set at construction time, calls the external
+        provider directly instead.
 
         Returns a JudgeResult (float subclass with .details, .criteria, .feedback)
         that can be returned directly from a verifier function.
@@ -84,15 +114,29 @@ class AsyncJudge:
             collect: File patterns for orchestrator to collect (agentic mode).
             task_id: Optional task ID for tracking.
         """
-        # Resolve Image.from_env images asynchronously before building request
+        # Fold reference_claims into context
+        effective_context = context
+        if reference_claims is not None:
+            if effective_context:
+                effective_context = f"{effective_context}\n\n## Reference Claims\n{reference_claims}"
+            else:
+                effective_context = f"## Reference Claims\n{reference_claims}"
+
+        # Resolve path-based images/files through the provider first
         resolved_images = images
-        if images and not agentic:
-            resolved_images = {}
-            for label, img in images.items():
+        resolved_files = files
+        if self._llm_provider is not None:
+            resolved_images = self._llm_provider.resolve_images(images)
+            resolved_files = self._llm_provider.resolve_files(files)
+
+        # Resolve Image.from_env images asynchronously before building request
+        if resolved_images and not agentic:
+            env_resolved = {}
+            for label, img in resolved_images.items():
                 if img.source == "env" and img._env is not None:
                     b64 = await _collect_image_from_env_async(img._env, img.filename)
                     if b64 is not None:
-                        resolved_images[label] = Image.from_base64(
+                        env_resolved[label] = Image.from_base64(
                             b64,
                             img.filename or "image.png",
                             _guess_media_type(img.filename or "image.png"),
@@ -100,43 +144,70 @@ class AsyncJudge:
                     else:
                         # Async collection failed — use collect source directly
                         # (don't keep the env image or serialize() will retry sync)
-                        resolved_images[label] = Image(
+                        env_resolved[label] = Image(
                             source="collect",
                             filename=img.filename,
                         )
                 else:
-                    resolved_images[label] = img
+                    env_resolved[label] = img
+            resolved_images = env_resolved
 
         # Resolve File.from_env files asynchronously before building request
-        resolved_files = files
-        if files and not agentic:
-            resolved_files = {}
-            for label, f in files.items():
+        if resolved_files and not agentic:
+            env_resolved_files = {}
+            for label, f in resolved_files.items():
                 if f.source == "env" and f._env is not None:
                     b64 = await _collect_file_from_env_async(f._env, f.filename)
                     if b64 is not None:
-                        resolved_files[label] = File.from_base64(
+                        env_resolved_files[label] = File.from_base64(
                             b64,
                             f.filename or "file",
                             _guess_file_media_type(f.filename or "file"),
                         )
                     else:
                         # Async collection failed — use collect source directly
-                        resolved_files[label] = File(
+                        env_resolved_files[label] = File(
                             source="collect",
                             filename=f.filename,
                         )
                 else:
-                    resolved_files[label] = f
+                    env_resolved_files[label] = f
+            resolved_files = env_resolved_files
 
+        _print_judge_call_start(rubric, resolved_images, agentic, model, files=resolved_files)
+
+        if self._llm_provider is not None:
+            # Route through pluggable LLM provider
+            from ..llm_provider import GradeRequest
+
+            request = GradeRequest(
+                rubric=rubric,
+                submission=submission,
+                ground_truth=ground_truth,
+                problem=problem,
+                context=effective_context,
+                conversation=conversation,
+                images=resolved_images,
+                files=resolved_files,
+                model=model,
+                provider=provider,
+                agentic=agentic,
+                collect=collect,
+                task_id=task_id,
+                instance_id=self._instance_id,
+            )
+            grade_response = await self._llm_provider.agrade(request)
+            return _parse_grade_response(grade_response.to_dict())
+
+        # Default: route through Fleet orchestrator
         body = _build_grade_request(
             self._instance_id,
             rubric,
             submission,
             ground_truth=ground_truth,
             problem=problem,
-            context=context,
-            reference_claims=reference_claims,
+            context=effective_context,
+            reference_claims=None,  # already folded into context
             conversation=conversation,
             images=resolved_images,
             files=resolved_files,
@@ -147,6 +218,5 @@ class AsyncJudge:
             task_id=task_id,
         )
 
-        _print_judge_call_start(rubric, resolved_images, agentic, model, files=resolved_files)
         response = await self._client.request("POST", "/v1/judge/grade", json=body)
         return _parse_grade_response(response.json())

@@ -55,6 +55,7 @@ from .tasks import Task
 if TYPE_CHECKING:
     from .verifiers import AsyncVerifierFunction
     from .judge import AsyncJudge
+    from ..llm_provider import LLMProvider
 
 
 def _json_default(x: Any) -> Any:
@@ -340,12 +341,19 @@ class AsyncSession:
 
 
 class AsyncEnv(EnvironmentBase):
-    def __init__(self, client: Optional[AsyncWrapper], **kwargs):
+    def __init__(
+        self,
+        client: Optional[AsyncWrapper],
+        *,
+        llm_provider: Optional["LLMProvider"] = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._client = client
         self._apps: Dict[str, AsyncInstanceClient] = {}
         self._instance: Optional[AsyncInstanceClient] = None
         self._judge: Optional["AsyncJudge"] = None
+        self._llm_provider = llm_provider
 
     @property
     def instance(self) -> AsyncInstanceClient:
@@ -423,13 +431,18 @@ class AsyncEnv(EnvironmentBase):
 
     @property
     def judge(self) -> "AsyncJudge":
-        """LLM-as-judge grading via orchestrator API."""
+        """LLM-as-judge grading.
+
+        Routes through Fleet orchestrator by default. Set ``llm_provider``
+        on the environment to route to an external provider instead.
+        """
         if self._judge is None:
             from .judge import AsyncJudge
 
             self._judge = AsyncJudge(
-                client=self._load_client,
+                client=self._client,
                 instance_id=self.instance_id,
+                llm_provider=self._llm_provider,
             )
         return self._judge
 

@@ -60,6 +60,7 @@ from .tasks import Task
 if TYPE_CHECKING:
     from .verifiers import SyncVerifierFunction
     from .judge import SyncJudge
+    from .llm_provider import LLMProvider
 
 
 def _json_default(x: Any) -> Any:
@@ -344,12 +345,19 @@ class Session:
 
 
 class SyncEnv(EnvironmentBase):
-    def __init__(self, client: Optional[SyncWrapper], **kwargs):
+    def __init__(
+        self,
+        client: Optional[SyncWrapper],
+        *,
+        llm_provider: Optional["LLMProvider"] = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._client = client
         self._apps: Dict[str, InstanceClient] = {}
         self._instance: Optional[InstanceClient] = None
         self._judge: Optional["SyncJudge"] = None
+        self._llm_provider = llm_provider
         self._manager_url_override: Optional[str] = None  # For URL mode
 
     @property
@@ -435,13 +443,18 @@ class SyncEnv(EnvironmentBase):
 
     @property
     def judge(self) -> "SyncJudge":
-        """LLM-as-judge grading via orchestrator API."""
+        """LLM-as-judge grading.
+
+        Routes through Fleet orchestrator by default. Set ``llm_provider``
+        on the environment to route to an external provider instead.
+        """
         if self._judge is None:
             from .judge import SyncJudge
 
             self._judge = SyncJudge(
-                client=self._load_client,
+                client=self._client,
                 instance_id=self.instance_id,
+                llm_provider=self._llm_provider,
             )
         return self._judge
 
