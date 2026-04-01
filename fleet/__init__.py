@@ -38,6 +38,9 @@ from .verifiers import (
     SnapshotDiff,
     TASK_FAILED_SCORE,
     TASK_SUCCESSFUL_SCORE,
+    execute_verifier_local,
+    LocalEnvironment,
+    diff_dbs,
 )
 
 # Import async verifiers (default verifier is async for modern usage)
@@ -79,7 +82,7 @@ from . import env
 from . import global_client as _global_client
 from ._async import global_client as _async_global_client
 
-__version__ = "0.2.116"
+__version__ = "0.2.119"
 
 __all__ = [
     # Core classes
@@ -122,6 +125,9 @@ __all__ = [
     "SnapshotDiff",
     "TASK_FAILED_SCORE",
     "TASK_SUCCESSFUL_SCORE",
+    "execute_verifier_local",
+    "LocalEnvironment",
+    "diff_dbs",
     # Environment module
     "env",
     # Global client helpers
