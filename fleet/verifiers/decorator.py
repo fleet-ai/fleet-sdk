@@ -28,8 +28,13 @@ class SyncVerifierFunction:
         # Copy function metadata
         functools.update_wrapper(self, func)
 
-    def __call__(self, env, *args, **kwargs) -> float:
-        """Local execution of the verifier function with env as first parameter."""
+    def __call__(self, env, *args, **kwargs):
+        """Local execution of the verifier function with env as first parameter.
+
+        Returns:
+            float or dict: A plain score (float) or a dict with structured
+            criteria (e.g. {"result": 0.84, "criteria": [...]}).
+        """
         try:
             result = self.func(env, *args, **kwargs)
 
@@ -37,8 +42,17 @@ class SyncVerifierFunction:
             if isinstance(result, (int, float)):
                 # Direct score return
                 return float(result)
-            elif isinstance(result, dict) and "score" in result:
-                return float(result["score"])
+            elif isinstance(result, dict) and ("score" in result or "result" in result):
+                # If the dict contains structured criteria, return the full dict
+                # so consumers can access criteria breakdown
+                if "criteria" in result:
+                    return result
+                # Otherwise extract just the numeric score
+                score_val = result.get("score", result.get("result"))
+                try:
+                    return float(score_val)
+                except (ValueError, TypeError):
+                    return 0.0
             else:
                 # Try to extract score from object attributes
                 if hasattr(result, "score"):
