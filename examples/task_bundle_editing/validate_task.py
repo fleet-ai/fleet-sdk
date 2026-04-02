@@ -123,6 +123,28 @@ def validate(bundle_dir: Path, new_key: str | None = None) -> list[str]:
                             errors.append(
                                 f"Verifier function '{node.name}' missing 'env' parameter"
                             )
+
+            # -- 4b. Verify S3 solution paths reference the correct task key --
+            # Verifiers often load gold-reference images via Image.s3() with
+            # URLs like .../&lt;TASK_KEY&gt;/solutions/gold_plot.png.  The TASK_KEY
+            # env variable must appear as a path segment in every such URL,
+            # otherwise the verifier will silently load the wrong solutions.
+            task_key_var = (task.get("env_variables") or {}).get("TASK_KEY")
+            if code and task_key_var:
+                expected_key = task_key_var
+                s3_urls = re.findall(
+                    r'https?://[^"\']+\.s3[^"\']*\.amazonaws\.com/[^"\'\s]+',
+                    code,
+                )
+                solutions_urls = [u for u in s3_urls if "/solutions/" in u]
+                for url in solutions_urls:
+                    path_segments = url.split("/")
+                    if expected_key not in path_segments:
+                        errors.append(
+                            f"Verifier S3 solutions path does not contain "
+                            f"expected key '{expected_key}' as a path segment: "
+                            f"{url}"
+                        )
     else:
         warnings.append("No verifier in task.json")
 
