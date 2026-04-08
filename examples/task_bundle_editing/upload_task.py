@@ -4,22 +4,22 @@ Upload a task bundle (task.json + files/) as a new task, then launch a job.
 
 Usage:
     # Auto-generate key, upload, and launch job:
-    python upload_task.py --dir ./my_task
+    python upload_task.py --dir ./my_task --env-version v0.0.50
 
     # Explicit key:
-    python upload_task.py --dir ./my_task --key my_custom_key
+    python upload_task.py --dir ./my_task --key my_custom_key --env-version v0.0.50
 
     # Skip job launch:
-    python upload_task.py --dir ./my_task --no-launch-job
+    python upload_task.py --dir ./my_task --env-version v0.0.50 --no-launch-job
 
     # Custom pass_k:
-    python upload_task.py --dir ./my_task --pass-k 3
+    python upload_task.py --dir ./my_task --env-version v0.0.50 --pass-k 3
 
 Steps:
   1. Validates the bundle (same checks as validate_task.py)
   2. Checks task key doesn't already exist on server
-  3. Uploads files (creates file-set, gets presigned upload URLs, POSTs files)
-  4. Creates the task via POST /v1/tasks
+  3. Packages files/ as seed.tar.zst and uploads via POST /v1/seeds
+  4. Creates the task via POST /v1/tasks (with data_id/data_version)
   5. Launches a job via POST /v1/jobs (unless --no-launch-job)
 
 Requires: FLEET_API_KEY env var (or --api-key)
@@ -28,7 +28,10 @@ Requires: FLEET_API_KEY env var (or --api-key)
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -41,14 +44,14 @@ try:
 except ImportError:
     pass
 
+# validate_task.py lives alongside this script
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from validate_task import validate
 
 DEFAULT_BASE_URL = "https://orchestrator.fleetai.com"
 
 DEFAULT_MODELS = [
-    "google/gemini-3.1-pro-preview",
-    "anthropic/claude-opus-4.6",
-    "openai/gpt-5.2",
+    "anthropic/claude-sonnet-4.6",
 ]
 
 
@@ -84,86 +87,139 @@ def check_task_exists(api_key: str, key: str) -> bool:
         return True
     if resp.status_code == 404:
         return False
-    # Unexpected status — surface the error rather than silently skipping the check
     print(f"   ERROR checking task existence: {resp.status_code}: {resp.text[:500]}")
     resp.raise_for_status()
     return False  # unreachable, but keeps the type checker happy
 
 
-def upload_files(
+def upload_seed_tar(
     api_key: str,
-    new_key: str,
+    env_key: str,
+    env_version: str,
     files_dir: Path,
-    allow_overwrite: bool = False,
-) -> None:
-    """Create file-set + upload files via presigned URLs."""
-    all_files = [p for p in files_dir.rglob("*") if p.is_file()]
-    if not all_files:
-        print("\n3. No files to upload, skipping file-set creation.")
-        return
+    data_key: str,
+) -> dict:
+    """Package files/ as seed.tar.zst and upload via presigned URL.
 
-    filenames = [str(p.relative_to(files_dir)) for p in all_files]
-    print(f"\n3. Uploading {len(filenames)} files to file-set: {new_key}")
+    Steps:
+      1. Package files/ into a local seed.tar.zst
+      2. Request a presigned upload URL from the orchestrator
+         (this also registers the data_key in environment_versions)
+      3. PUT the tar directly to S3 via the presigned URL
 
-    # Create file-set
-    resp = requests.post(
-        f"{get_api_base()}/file-sets",
-        headers=headers(api_key),
-        json={"key": new_key, "description": f"Data files for task {new_key}"},
-    )
-    if resp.status_code == 409:
-        print(f"   File-set '{new_key}' already exists, reusing.")
-    elif not resp.ok:
-        print(f"   ERROR {resp.status_code}: {resp.text[:500]}")
-        resp.raise_for_status()
-    else:
-        print(f"   Created file-set: {new_key}")
+    Returns the upload-url response dict with data_key, env_key, version, s3_key.
+    """
+    print(f"\n3. Packaging files as seed.tar.zst...")
 
-    # Get upload URLs
-    resp = requests.post(
-        f"{get_api_base()}/file-sets/{new_key}/upload-urls",
-        headers=headers(api_key),
-        json={"filenames": filenames, "expires_in": 3600},
-        params={"allow_overwrite": str(allow_overwrite).lower()},
-    )
-    if resp.status_code == 409:
-        detail = resp.json().get("detail", {})
-        existing = detail.get("existing_files", [])
-        print(f"\n   ERROR: {len(existing)} file(s) already exist in S3:")
-        for f in existing:
-            print(f"     - {f}")
-        print(f"\n   Use --allow-overwrite to replace them.")
-        sys.exit(1)
-    resp.raise_for_status()
-    upload_data = resp.json()
+    # Check dependencies
+    for cmd in ("tar", "zstd"):
+        if not shutil.which(cmd):
+            print(f"   ERROR: '{cmd}' is not installed. Install it and retry.")
+            sys.exit(1)
 
-    # Upload each file via presigned POST
-    for item in upload_data["urls"]:
-        filename = item["filename"]
-        local_path = files_dir / filename
-        print(f"   Uploading: {filename}")
-        with open(local_path, "rb") as fh:
-            upload_resp = requests.post(
-                item["url"],
-                data=item["fields"],
-                files={"file": fh},
+    with tempfile.NamedTemporaryFile(suffix=".tar.zst", delete=False) as tmp:
+        tar_path = tmp.name
+
+    try:
+        # Package files as tar.zst (piped to avoid holding full tar in memory)
+        tar_proc = subprocess.Popen(
+            ["tar", "cf", "-", "-C", str(files_dir), "."],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        zstd_proc = subprocess.Popen(
+            ["zstd", "-o", tar_path, "-f"],
+            stdin=tar_proc.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        tar_proc.stdout.close()
+        _, zstd_stderr = zstd_proc.communicate()
+        tar_proc.wait()
+        if tar_proc.returncode != 0:
+            print(f"   ERROR: tar failed (exit {tar_proc.returncode})")
+            sys.exit(1)
+        if zstd_proc.returncode != 0:
+            print(f"   ERROR: zstd failed (exit {zstd_proc.returncode}): {zstd_stderr.decode()[:200]}")
+            sys.exit(1)
+
+        tar_size = os.path.getsize(tar_path)
+        print(f"   Created seed.tar.zst ({tar_size:,} bytes)")
+
+        # Get presigned upload URL (also registers data_key)
+        print(f"   Requesting upload URL for {data_key}/{env_key}...")
+        resp = requests.post(
+            f"{get_api_base()}/seeds/{data_key}/{env_key}/upload-url",
+            headers=headers(api_key),
+            json={
+                "filename": "seed.tar.zst",
+                "env_version": env_version,
+            },
+        )
+        if not resp.ok:
+            print(f"   ERROR {resp.status_code}: {resp.text[:500]}")
+            resp.raise_for_status()
+
+        upload_info = resp.json()
+        presigned_url = upload_info["url"]
+        print(f"   Version:  {upload_info['version']}")
+        print(f"   S3 key:   {upload_info['s3_key']}")
+
+        # Upload tar directly to S3 via presigned URL
+        print(f"   Uploading to S3 ({tar_size:,} bytes)...")
+        with open(tar_path, "rb") as fh:
+            put_resp = requests.put(
+                presigned_url,
+                data=fh,
+                headers={"Content-Type": "application/octet-stream"},
             )
-        upload_resp.raise_for_status()
-        print(f"     -> uploaded ({local_path.stat().st_size} bytes)")
+        if not put_resp.ok:
+            print(f"\n   ERROR: S3 upload failed ({put_resp.status_code})")
+            print(f"   Re-run this script to retry.")
+            sys.exit(1)
+
+        print(f"   Uploaded successfully")
+        return upload_info
+
+    finally:
+        os.unlink(tar_path)
 
 
-def upload_task(api_key: str, task: dict, new_key: str) -> dict:
-    """POST /v1/tasks → create task with new key."""
+def create_task(
+    api_key: str,
+    task: dict,
+    new_key: str,
+    env_version: str,
+    seed_upload: dict | None = None,
+) -> dict:
+    """POST /v1/tasks → create task with new key.
+
+    If seed_upload is provided, sets data_id/data_version and flexible seed
+    env vars so the driver delivers files via seed_map.
+    """
     print(f"\n4. Creating task with key: {new_key}")
+
+    if seed_upload:
+        env_variables = {
+            "FLEET__FLEXIBLE_SEED_SRC": ".",
+            "FLEET__FLEXIBLE_SEED_DST": "files",
+        }
+        data_id = seed_upload["data_key"]
+        data_version = seed_upload["version"]
+    else:
+        env_variables = {}
+        data_id = task.get("data_id")
+        data_version = task.get("data_version")
+
     payload = {
         "key": new_key,
         "prompt": task["prompt"],
         "env_id": task["environment_id"],
-        "version": task.get("version"),
-        "env_variables": {"TASK_KEY": new_key},
+        "version": env_version,
+        "env_variables": env_variables,
         "metadata": task.get("metadata"),
-        "data_id": task.get("data_id"),
-        "data_version": task.get("data_version"),
+        "data_id": data_id,
+        "data_version": data_version,
     }
     # Include verifier code if present
     verifier = task.get("verifier")
@@ -180,6 +236,9 @@ def upload_task(api_key: str, task: dict, new_key: str) -> dict:
         resp.raise_for_status()
     result = resp.json()
     print(f"   Created task: {result['key']}")
+    if seed_upload:
+        print(f"   data_id:      {data_id}")
+        print(f"   data_version: {data_version}")
     return result
 
 
@@ -219,7 +278,7 @@ def main():
     )
     parser.add_argument(
         "--key",
-        help="New task key (default: auto-generated from task.json key + UUID)",
+        help="New task key (default: auto-generated from task.json key + UUID suffix)",
     )
     parser.add_argument(
         "--api-key",
@@ -227,13 +286,9 @@ def main():
         help="API key (default: FLEET_API_KEY env var)",
     )
     parser.add_argument(
-        "--team-id",
-        help="Team ID override (default: auto-resolved from API key)",
-    )
-    parser.add_argument(
-        "--allow-overwrite",
-        action="store_true",
-        help="Allow overwriting existing files in S3",
+        "--env-version",
+        default=None,
+        help="Environment version (default: from task.json 'version' field)",
     )
     parser.add_argument(
         "--no-launch-job",
@@ -258,8 +313,8 @@ def main():
         print("Error: FLEET_API_KEY env var or --api-key required")
         sys.exit(1)
 
-    # Resolve team_id from API key unless overridden
-    team_id = args.team_id or resolve_team_id(args.api_key)
+    # Verify API key is valid
+    resolve_team_id(args.api_key)
 
     bundle_dir = Path(args.dir)
     if not bundle_dir.is_dir():
@@ -274,6 +329,11 @@ def main():
 
     task = json.loads(task_path.read_text())
     original_key = task.get("key", "")
+
+    env_version = args.env_version or task.get("version")
+    if not env_version:
+        print("Error: --env-version is required (or set 'version' in task.json)")
+        sys.exit(1)
 
     # Derive key if not provided
     if args.key:
@@ -300,16 +360,25 @@ def main():
         sys.exit(1)
     print(f"   Key '{new_key}' is available.")
 
+    # Step 3: Package and upload files as seed tar
     files_dir = bundle_dir / "files"
-
-    # Step 3: Upload files first (so a failure here doesn't leave a half-created task)
-    if files_dir.exists():
-        upload_files(args.api_key, new_key, files_dir, allow_overwrite=args.allow_overwrite)
+    seed_upload = None
+    has_files = files_dir.is_dir() and any(files_dir.rglob("*"))
+    if has_files:
+        seed_upload = upload_seed_tar(
+            args.api_key,
+            env_key=task.get("environment_id", "carlisle"),
+            env_version=env_version,
+            files_dir=files_dir,
+            data_key=new_key,
+        )
     else:
-        print("\n3. No files/ directory, skipping file-set creation.")
+        print("\n3. No files/ directory, skipping seed upload.")
 
     # Step 4: Create the task
-    result = upload_task(args.api_key, task, new_key)
+    result = create_task(
+        args.api_key, task, new_key, env_version, seed_upload=seed_upload,
+    )
 
     print(f"\n-- Upload complete --")
     print(f"   Original key: {original_key}")
