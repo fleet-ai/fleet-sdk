@@ -93,8 +93,10 @@ endif
 # -- Upload --
 .PHONY: upload
 upload: .env _check-python
+ifndef DIR
 ifndef TASK
-	$(error No active task. Run: make task TASK=my_task)
+	$(error No active task or DIR. Run: make task TASK=my_task, or pass DIR=)
+endif
 endif
 	$(PYTHON) $(UPLOAD) \
 		--dir $(or $(DIR),$(BUNDLE_DIR)) \
@@ -116,8 +118,10 @@ endif
 # -- Validate --
 .PHONY: validate
 validate: _check-python
+ifndef DIR
 ifndef TASK
-	$(error No active task. Run: make task TASK=my_task)
+	$(error No active task or DIR. Run: make task TASK=my_task, or pass DIR=)
+endif
 endif
 	$(PYTHON) $(VALIDATE) \
 		$(or $(DIR),$(BUNDLE_DIR)) \
