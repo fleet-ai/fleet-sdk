@@ -88,11 +88,11 @@ def to_bundle_json(task: dict) -> dict:
 def download_seed_tar(api_key: str, task: dict, files_dir: Path) -> bool:
     """Download and extract the seed tar for this task.
 
-    Uses the /v1/seeds download-url endpoint if available, otherwise
-    constructs the S3 key from the task's data_id/data_version and
-    downloads via aws cli.
+    Constructs the S3 key from the task's data_id/data_version and
+    downloads via aws cli.  Requires AWS credentials configured.
 
-    Returns True if files were extracted, False if no seed data.
+    Returns True if files were extracted, False on any failure (so the
+    caller can fall back to the legacy file-sets download).
     """
     data_id = task.get("data_id")
     data_version = task.get("data_version")
@@ -113,8 +113,8 @@ def download_seed_tar(api_key: str, task: dict, files_dir: Path) -> bool:
     # Check dependencies
     for cmd in ("aws", "zstd", "tar"):
         if not shutil.which(cmd):
-            print(f"   ERROR: '{cmd}' is not installed. Install it and retry.")
-            sys.exit(1)
+            print(f"   WARNING: '{cmd}' not installed, skipping seed tar download.")
+            return False
 
     with tempfile.NamedTemporaryFile(suffix=".tar.zst", delete=False) as tmp:
         tar_path = tmp.name
@@ -127,8 +127,8 @@ def download_seed_tar(api_key: str, task: dict, files_dir: Path) -> bool:
             text=True,
         )
         if result.returncode != 0:
-            print(f"   ERROR: aws s3 cp failed: {result.stderr[:300]}")
-            sys.exit(1)
+            print(f"   WARNING: S3 download failed, falling back to file-sets.")
+            return False
 
         tar_size = os.path.getsize(tar_path)
         print(f"   Downloaded {tar_size:,} bytes")
@@ -142,9 +142,9 @@ def download_seed_tar(api_key: str, task: dict, files_dir: Path) -> bool:
             text=True,
         )
         if result.returncode != 0:
-            print(f"   ERROR: zstd decompression failed: {result.stderr[:300]}")
+            print(f"   WARNING: zstd decompression failed, falling back to file-sets.")
             os.unlink(plain_tar) if os.path.exists(plain_tar) else None
-            sys.exit(1)
+            return False
         result = subprocess.run(
             ["tar", "xf", plain_tar, "-C", str(files_dir)],
             capture_output=True,
@@ -152,8 +152,8 @@ def download_seed_tar(api_key: str, task: dict, files_dir: Path) -> bool:
         )
         os.unlink(plain_tar)
         if result.returncode != 0:
-            print(f"   ERROR: tar extraction failed: {result.stderr[:300]}")
-            sys.exit(1)
+            print(f"   WARNING: tar extraction failed, falling back to file-sets.")
+            return False
 
         file_count = sum(1 for _ in files_dir.rglob("*") if _.is_file())
         print(f"   Extracted {file_count} files to {files_dir}/")

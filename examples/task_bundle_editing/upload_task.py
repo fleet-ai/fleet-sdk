@@ -369,7 +369,7 @@ def main():
     if has_files:
         seed_upload = upload_seed_tar(
             args.api_key,
-            env_key=task.get("environment_id", "carlisle"),
+            env_key=task["environment_id"],
             env_version=env_version,
             files_dir=files_dir,
             data_key=new_key,
