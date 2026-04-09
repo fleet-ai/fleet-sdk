@@ -135,9 +135,11 @@ def upload_seed_tar(
         )
         tar_proc.stdout.close()
         _, zstd_stderr = zstd_proc.communicate()
+        tar_stderr = tar_proc.stderr.read()
+        tar_proc.stderr.close()
         tar_proc.wait()
         if tar_proc.returncode != 0:
-            print(f"   ERROR: tar failed (exit {tar_proc.returncode})")
+            print(f"   ERROR: tar failed (exit {tar_proc.returncode}): {tar_stderr.decode()[:200]}")
             sys.exit(1)
         if zstd_proc.returncode != 0:
             print(f"   ERROR: zstd failed (exit {zstd_proc.returncode}): {zstd_stderr.decode()[:200]}")
@@ -363,7 +365,7 @@ def main():
     # Step 3: Package and upload files as seed tar
     files_dir = bundle_dir / "files"
     seed_upload = None
-    has_files = files_dir.is_dir() and any(files_dir.rglob("*"))
+    has_files = files_dir.is_dir() and any(p.is_file() for p in files_dir.rglob("*"))
     if has_files:
         seed_upload = upload_seed_tar(
             args.api_key,
