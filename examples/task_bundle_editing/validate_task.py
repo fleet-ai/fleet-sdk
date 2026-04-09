@@ -26,8 +26,8 @@ import re
 import sys
 from pathlib import Path
 
-MAX_FILE_SIZE_MB = 50
-MAX_TOTAL_SIZE_MB = 200
+MAX_FILE_SIZE_MB = 2000
+MAX_TOTAL_SIZE_MB = 5000
 
 
 def validate(bundle_dir: Path, new_key: str | None = None) -> list[str]:
@@ -123,6 +123,120 @@ def validate(bundle_dir: Path, new_key: str | None = None) -> list[str]:
                             errors.append(
                                 f"Verifier function '{node.name}' missing 'env' parameter"
                             )
+            if tree and code:
+                # Check that verifier reads agent output files via File.from_env
+                # rather than env.read_file() or passing files={}
+                uses_file_from_env = "File.from_env" in code
+                uses_read_file = "env.read_file" in code or "read_file(" in code
+                passes_empty_files = "files={}" in code
+
+                if uses_read_file:
+                    warnings.append(
+                        "Verifier uses env.read_file() which is undocumented and "
+                        "unreliable. Use File.from_env(env, filename) instead — "
+                        "see verifier_file_access_guide.md"
+                    )
+
+                # Check if prompt requests output files that the verifier
+                # should be reading
+                output_file_patterns = re.findall(
+                    r"['\"]([a-zA-Z_]+\.(?:txt|json|csv|py|png|jpg))['\"]",
+                    prompt,
+                )
+                # Filter to likely agent outputs (mentioned in output/save context)
+                save_indicators = [
+                    "save", "write", "output", "findings", "investigation",
+                    "results", "report", "/artifacts/",
+                ]
+                prompt_lower = prompt.lower()
+                likely_outputs = [
+                    f for f in set(output_file_patterns)
+                    if any(ind in prompt_lower for ind in save_indicators)
+                    and f not in ("task.json",)
+                ]
+
+                if likely_outputs and not uses_file_from_env:
+                    warnings.append(
+                        f"Prompt asks agent to produce files "
+                        f"({', '.join(sorted(likely_outputs)[:5])}) but verifier "
+                        f"does not use File.from_env() to read them. The judge "
+                        f"may not see the agent's work. Pass files via the "
+                        f"'files' parameter to env.judge.grade()."
+                    )
+
+                if passes_empty_files and likely_outputs:
+                    warnings.append(
+                        "Verifier passes files={} (empty) to env.judge.grade() "
+                        "but the prompt requests agent output files. The judge "
+                        "will only see the final_answer, not the saved files."
+                    )
+
+                # -- 4b. Import module check --
+                # fleet.judge is the correct module; fleet.verifier does not exist
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ImportFrom) and node.module:
+                        if node.module == "fleet.verifier":
+                            errors.append(
+                                "Verifier imports from 'fleet.verifier' which does "
+                                "not exist. Use 'from fleet.judge import Rubric, "
+                                "Criterion' instead."
+                            )
+
+                # -- 4c. Function signature check --
+                # Correct: verify(env, final_answer=None, conversation=None)
+                # Wrong:   verify(env, submission_dir, solutions_dir=None)
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.FunctionDef) and node.name in valid_names:
+                        arg_names = [a.arg for a in node.args.args]
+                        if "submission_dir" in arg_names:
+                            errors.append(
+                                f"Verifier function '{node.name}' uses old signature "
+                                f"with 'submission_dir'. Expected: "
+                                f"verify(env, final_answer=None, conversation=None)"
+                            )
+                        if "solutions_dir" in arg_names:
+                            warnings.append(
+                                f"Verifier function '{node.name}' has 'solutions_dir' "
+                                f"parameter. Solutions are accessed via File.s3(), not "
+                                f"filesystem paths."
+                            )
+
+                # -- 4d. Criterion API check --
+                # Correct: Criterion("name", max=N, levels={...})
+                # Wrong:   Criterion(name=..., weight=..., description=...)
+                if "weight=" in code and "Criterion(" in code:
+                    errors.append(
+                        "Verifier uses Criterion(weight=...) which is not the "
+                        "fleet.judge API. Use Criterion(name, max=N, levels={...}) "
+                        "instead."
+                    )
+
+                # -- 4e. env.judge.grade() call exists --
+                if "env.judge.grade(" not in code:
+                    warnings.append(
+                        "Verifier does not call env.judge.grade(). For LLM-as-judge "
+                        "tasks, the verifier should return env.judge.grade(rubric=..., "
+                        "submission=..., ...)."
+                    )
+
+                # -- 4f. Solutions files vs File.s3 / Image.s3 --
+                # If bundle has files/solutions/, verifier should reference them
+                solutions_dir = bundle_dir / "files" / "solutions"
+                has_solutions = (
+                    solutions_dir.exists()
+                    and any(
+                        f.is_file() and f.name != ".DS_Store"
+                        for f in solutions_dir.rglob("*")
+                    )
+                )
+                uses_s3 = ".s3(" in code
+                if has_solutions and not uses_s3:
+                    warnings.append(
+                        "Bundle has files in solutions/ but verifier does not use "
+                        "File.s3() or Image.s3() to reference them. The judge may "
+                        "not see the gold reference materials."
+                    )
+
     else:
         warnings.append("No verifier in task.json")
 

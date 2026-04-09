@@ -51,8 +51,8 @@ help:
 	@echo "=============================="
 	@echo ""
 	@echo "  make task TASK=<key>       Set active task (saved to .task)"
-	@echo "  make download              Download active task       [TASK= OUT= TEAM=]"
-	@echo "  make upload                Upload bundle, no job      [DIR= KEY= OVERWRITE=1 TEAM=]"
+	@echo "  make download              Download active task       [TASK= OUT=]"
+	@echo "  make upload                Upload bundle, no job      [DIR= KEY= VERSION=]"
 	@echo "  make launch                Launch job for active task [KEY= MODELS= PASS_K=]"
 	@echo "  make validate              Validate bundle            [DIR= KEY=]"
 	@echo ""
@@ -88,8 +88,7 @@ ifndef TASK
 endif
 	$(PYTHON) $(DOWNLOAD) \
 		--task-key $(TASK) \
-		--output-dir $(or $(OUT),$(BUNDLE_DIR)) \
-		$(if $(TEAM),--team-id $(TEAM))
+		--output-dir $(or $(OUT),$(BUNDLE_DIR))
 
 # -- Upload --
 .PHONY: upload
@@ -100,8 +99,7 @@ endif
 	$(PYTHON) $(UPLOAD) \
 		--dir $(or $(DIR),$(BUNDLE_DIR)) \
 		$(if $(KEY),--key $(KEY)) \
-		$(if $(OVERWRITE),--allow-overwrite) \
-		$(if $(TEAM),--team-id $(TEAM)) \
+		$(if $(VERSION),--env-version $(VERSION)) \
 		--no-launch-job
 
 # -- Launch job --
