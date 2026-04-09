@@ -9,8 +9,7 @@ Checks:
   4. Verifier uses expected function signature
   5. files/ directory exists (may be empty)
   6. No files exceed size limit
-  7. Data files are under files/notebooks/ (agent workspace) and match
-     the list_workspace_files() pattern in the prompt
+  7. Data files are under files/notebooks/ (agent workspace)
   8. Key format is valid
 
 Usage:
@@ -20,7 +19,6 @@ Usage:
 
 import argparse
 import ast
-import glob
 import json
 import re
 import sys
@@ -269,9 +267,7 @@ def validate(bundle_dir: Path, new_key: str | None = None) -> list[str]:
 
     # -- 7. Data file location checks --
     # In Carlisle, files under files/notebooks/ are unpacked to /app/workspace/
-    # at startup. The prompt tells agents to use list_workspace_files(pattern=...)
-    # to find data. Warn if the prompt references a path that doesn't match
-    # any files, or if data files are placed outside the notebooks/ tree.
+    # at startup. Warn if data files are placed outside the notebooks/ tree.
     if all_files:
         notebooks_dir = files_dir / "notebooks"
 
@@ -289,31 +285,6 @@ def validate(bundle_dir: Path, new_key: str | None = None) -> list[str]:
                 f"e.g. {files_outside_notebooks[0].relative_to(files_dir)}"
             )
 
-        # Extract list_workspace_files(pattern="...") from the prompt and
-        # verify matching files exist under files/notebooks/
-        workspace_patterns = re.findall(
-            r'list_workspace_files\(pattern=["\']([^"\']+)["\']\)', prompt
-        )
-        for wp in workspace_patterns:
-            # The agent sees /app/workspace/{wp}, which maps to
-            # files/notebooks/{wp} in the bundle
-            expected_glob = str(notebooks_dir / wp)
-            matches = glob.glob(expected_glob, recursive=True)
-            matches = [m for m in matches if Path(m).is_file()]
-            if not matches:
-                errors.append(
-                    f"Prompt references list_workspace_files(pattern=\"{wp}\") "
-                    f"but no files match files/notebooks/{wp}"
-                )
-            else:
-                # Informational — not a warning, just context for the report
-                pass
-
-        if not workspace_patterns and notebooks_dir.exists():
-            warnings.append(
-                "Prompt has no list_workspace_files() call — agent may not "
-                "know how to find the data files"
-            )
 
     # -- 8. Key format --
     key = new_key or task.get("key", "")
