@@ -51,7 +51,9 @@ from validate_task import validate
 DEFAULT_BASE_URL = "https://orchestrator.fleetai.com"
 
 DEFAULT_MODELS = [
-    "anthropic/claude-sonnet-4.6",
+    "google/gemini-3.1-pro-preview",
+    "anthropic/claude-opus-4.6",
+    "openai/gpt-5.2",
 ]
 
 
