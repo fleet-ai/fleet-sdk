@@ -348,6 +348,21 @@ class AsyncEnv(EnvironmentBase):
         self._client = client
         self._apps: Dict[str, AsyncInstanceClient] = {}
         self._instance: Optional[AsyncInstanceClient] = None
+        self._judge: Optional["AsyncJudge"] = None
+
+    @property
+    def judge(self) -> "AsyncJudge":
+        """Lazy-loaded async LLM-as-a-judge grading resource."""
+        if self._judge is None:
+            from .judge import AsyncJudge, _get_judge_config
+
+            endpoint_config = _get_judge_config()
+            self._judge = AsyncJudge(
+                orchestrator_client=self._client,
+                endpoint_config=endpoint_config,
+                instance_id=self.instance_id,
+            )
+        return self._judge
 
     @property
     def instance(self) -> AsyncInstanceClient:

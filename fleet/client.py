@@ -351,6 +351,7 @@ class SyncEnv(EnvironmentBase):
         self._apps: Dict[str, InstanceClient] = {}
         self._instance: Optional[InstanceClient] = None
         self._manager_url_override: Optional[str] = None  # For URL mode
+        self._judge: Optional["Judge"] = None
 
     @property
     def manager_url(self) -> str:
@@ -358,6 +359,20 @@ class SyncEnv(EnvironmentBase):
         if self._manager_url_override is not None:
             return self._manager_url_override
         return super().manager_url
+
+    @property
+    def judge(self) -> "Judge":
+        """Lazy-loaded LLM-as-a-judge grading resource."""
+        if self._judge is None:
+            from .judge import Judge, _get_judge_config
+
+            endpoint_config = _get_judge_config()
+            self._judge = Judge(
+                orchestrator_client=self._client,
+                endpoint_config=endpoint_config,
+                instance_id=self.instance_id,
+            )
+        return self._judge
 
     @property
     def instance(self) -> InstanceClient:

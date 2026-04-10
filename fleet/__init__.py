@@ -28,6 +28,15 @@ from .client import Fleet, SyncEnv, Session
 from ._async.client import AsyncFleet, AsyncEnv, AsyncSession
 from .models import InstanceResponse, Environment, Run
 from .instance.models import Resource, ResetResponse
+from .judge import (
+    Judge,
+    AsyncJudge,
+    JudgeEndpointConfig,
+    Rubric,
+    Criterion,
+    JudgeResult,
+    CriterionScore,
+)
 
 # Import sync verifiers with explicit naming
 from .verifiers import (
@@ -130,6 +139,14 @@ __all__ = [
     # Job helpers
     "job",
     "job_async",
+    # Judge
+    "Judge",
+    "AsyncJudge",
+    "JudgeEndpointConfig",
+    "Rubric",
+    "Criterion",
+    "JudgeResult",
+    "CriterionScore",
     # Version
     "__version__",
 ]
@@ -140,10 +157,24 @@ def configure(
     base_url: Optional[str] = None,
     max_retries: Optional[int] = None,
     timeout: Optional[float] = None,
+    judge_endpoint: Optional[str] = None,
+    judge_api_key: Optional[str] = None,
+    judge_model: Optional[str] = None,
+    judge_api_format: Optional[str] = None,
 ):
     """Configure global clients (sync and async) once per process.
 
     Both sync and async default clients will be (re)created with the provided settings.
+
+    Args:
+        api_key: Fleet API key.
+        base_url: Fleet orchestrator base URL.
+        max_retries: Maximum HTTP retries.
+        timeout: HTTP timeout in seconds.
+        judge_endpoint: LLM endpoint URL for judge grading.
+        judge_api_key: Auth token for the judge LLM endpoint.
+        judge_model: Model name for the judge LLM (default: claude-sonnet-4-20250514).
+        judge_api_format: API format — "anthropic" or "openai" (default: anthropic).
     """
     if max_retries is None:
         from .config import DEFAULT_MAX_RETRIES as _MR
@@ -159,6 +190,18 @@ def configure(
     _async_global_client.configure(
         api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout
     )
+
+    # Configure judge if endpoint provided
+    if judge_endpoint is not None:
+        from .judge import JudgeEndpointConfig, _set_judge_config
+
+        config = JudgeEndpointConfig(
+            url=judge_endpoint,
+            api_key=judge_api_key or "",
+            model=judge_model or "claude-sonnet-4-20250514",
+            api_format=judge_api_format or "anthropic",
+        )
+        _set_judge_config(config)
 
 
 def get_client() -> Fleet:
