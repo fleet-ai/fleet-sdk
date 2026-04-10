@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, conint
 
@@ -473,6 +473,35 @@ class AccountResponse(BaseModel):
 # Jobs and Sessions models
 
 
+class JudgeEndpointConfig(BaseModel):
+    """Configuration for a customer-provided LLM endpoint used for judge grading.
+
+    Allows customers to route LLM-as-a-judge calls to their own endpoint,
+    enabling judge grading in airgapped or Docker Worlds environments.
+    """
+
+    url: str = Field(
+        ...,
+        title="URL",
+        description="Base URL of the LLM endpoint (e.g., 'https://my-llm-proxy.internal/v1')",
+    )
+    api_key: Optional[str] = Field(
+        None,
+        title="API Key",
+        description="Authentication token for the endpoint",
+    )
+    model: Optional[str] = Field(
+        None,
+        title="Model",
+        description="Model identifier to use (e.g., 'claude-sonnet-4-20250514', 'gpt-4o')",
+    )
+    api_format: Optional[Literal["openai", "anthropic"]] = Field(
+        "openai",
+        title="API Format",
+        description="API format: 'openai' (OpenAI Chat Completions) or 'anthropic' (Anthropic Messages API)",
+    )
+
+
 class JobCreateRequest(BaseModel):
     """Request payload for creating a new job.
 
@@ -498,6 +527,11 @@ class JobCreateRequest(BaseModel):
     byok_keys: Optional[Dict[str, str]] = Field(None, title="BYOK Keys")
     byok_ttl_minutes: Optional[int] = Field(None, title="BYOK TTL Minutes", ge=1)
     harness: Optional[str] = Field(None, title="Harness")
+    judge_endpoint: Optional[JudgeEndpointConfig] = Field(
+        None,
+        title="Judge Endpoint",
+        description="Customer-provided LLM endpoint for judge grading (enables airgapped/offline LLM-as-judge)",
+    )
 
 
 class JobResponse(BaseModel):
