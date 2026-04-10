@@ -498,6 +498,10 @@ class JobCreateRequest(BaseModel):
     byok_keys: Optional[Dict[str, str]] = Field(None, title="BYOK Keys")
     byok_ttl_minutes: Optional[int] = Field(None, title="BYOK TTL Minutes", ge=1)
     harness: Optional[str] = Field(None, title="Harness")
+    judge_endpoint: Optional[str] = Field(None, title="Judge Endpoint")
+    judge_api_key: Optional[str] = Field(None, title="Judge API Key")
+    judge_model: Optional[str] = Field(None, title="Judge Model")
+    judge_api_format: Optional[str] = Field(None, title="Judge API Format")
 
 
 class JobResponse(BaseModel):

@@ -345,12 +345,14 @@ class Session:
 
 
 class SyncEnv(EnvironmentBase):
-    def __init__(self, client: Optional[SyncWrapper], **kwargs):
+    def __init__(self, client: Optional[SyncWrapper], judge_config=None, **kwargs):
         super().__init__(**kwargs)
         self._client = client
         self._apps: Dict[str, InstanceClient] = {}
         self._instance: Optional[InstanceClient] = None
         self._manager_url_override: Optional[str] = None  # For URL mode
+        self._judge_config = judge_config
+        self._judge: Optional["JudgeService"] = None
 
     @property
     def manager_url(self) -> str:
@@ -493,10 +495,31 @@ class SyncEnv(EnvironmentBase):
             verifier_runtime_version,
         )
 
+    @property
+    def judge(self) -> "JudgeService":
+        """Lazily create and return a JudgeService instance."""
+        if self._judge is None:
+            from .judge import JudgeService, JudgeEndpointConfig, get_judge_config
+
+            config = self._judge_config
+            if config is None:
+                import fleet as _fleet_mod
+                config = getattr(_fleet_mod, "_judge_config", None)
+            if config is None:
+                config = get_judge_config()
+            if config is None:
+                raise ValueError(
+                    "No judge configuration found. Set FLEET_JUDGE_ENDPOINT env var "
+                    "or pass judge_config to the environment."
+                )
+            self._judge = JudgeService(config)
+        return self._judge
+
     def __getstate__(self):
         state = self.__dict__.copy()
         state.pop("_client", None)
         state.pop("_instance", None)
+        state.pop("_judge", None)
         return state
 
     def __setstate__(self, state):
@@ -1462,6 +1485,10 @@ class Fleet:
         byok_keys: Optional[Dict[str, str]] = None,
         byok_ttl_minutes: Optional[int] = None,
         harness: Optional[str] = None,
+        judge_endpoint: Optional[str] = None,
+        judge_api_key: Optional[str] = None,
+        judge_model: Optional[str] = None,
+        judge_api_format: Optional[str] = None,
     ) -> JobCreateResponse:
         """Create a new job.
 
@@ -1482,6 +1509,10 @@ class Fleet:
             byok_keys: Bring Your Own Keys (provider -> API key)
             byok_ttl_minutes: TTL for BYOK keys in minutes
             harness: Harness identifier
+            judge_endpoint: LLM endpoint URL for judge grading
+            judge_api_key: API key for judge endpoint
+            judge_model: Model to use for judge grading
+            judge_api_format: API format ("anthropic" or "openai")
 
         Returns:
             JobCreateResponse containing job_id, workflow_job_id, status, and name
@@ -1503,6 +1534,10 @@ class Fleet:
             byok_keys=byok_keys,
             byok_ttl_minutes=byok_ttl_minutes,
             harness=harness,
+            judge_endpoint=judge_endpoint,
+            judge_api_key=judge_api_key,
+            judge_model=judge_model,
+            judge_api_format=judge_api_format,
         )
 
         response = self.client.request(

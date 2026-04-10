@@ -49,6 +49,8 @@ from ..models import (
     SessionStatus,
     JobSessionsResponse,
     SessionTranscriptResponse,
+    JobCreateRequest,
+    JobCreateResponse,
 )
 from .models import (
     ScenarioResponse,
@@ -343,11 +345,13 @@ class AsyncSession:
 
 
 class AsyncEnv(EnvironmentBase):
-    def __init__(self, client: Optional[AsyncWrapper], **kwargs):
+    def __init__(self, client: Optional[AsyncWrapper], judge_config=None, **kwargs):
         super().__init__(**kwargs)
         self._client = client
         self._apps: Dict[str, AsyncInstanceClient] = {}
         self._instance: Optional[AsyncInstanceClient] = None
+        self._judge_config = judge_config
+        self._judge: Optional["AsyncJudgeService"] = None
 
     @property
     def instance(self) -> AsyncInstanceClient:
@@ -483,10 +487,32 @@ class AsyncEnv(EnvironmentBase):
             verifier_runtime_version,
         )
 
+    @property
+    def judge(self) -> "AsyncJudgeService":
+        """Lazily create and return an AsyncJudgeService instance."""
+        if self._judge is None:
+            from .judge import AsyncJudgeService
+            from ..judge import JudgeEndpointConfig, get_judge_config
+
+            config = self._judge_config
+            if config is None:
+                import fleet as _fleet_mod
+                config = getattr(_fleet_mod, "_judge_config", None)
+            if config is None:
+                config = get_judge_config()
+            if config is None:
+                raise ValueError(
+                    "No judge configuration found. Set FLEET_JUDGE_ENDPOINT env var "
+                    "or pass judge_config to the environment."
+                )
+            self._judge = AsyncJudgeService(config)
+        return self._judge
+
     def __getstate__(self):
         state = self.__dict__.copy()
         state.pop("_client", None)
         state.pop("_instance", None)
+        state.pop("_judge", None)
         return state
 
     def __setstate__(self, state):
@@ -1543,6 +1569,70 @@ class AsyncFleet:
             task_key=task_key,
             instance_id=instance_id,
         )
+
+    async def create_job(
+        self,
+        models: List[str],
+        name: Optional[str] = None,
+        pass_k: int = 1,
+        env_key: Optional[str] = None,
+        project_key: Optional[str] = None,
+        task_keys: Optional[List[str]] = None,
+        excluded_task_keys: Optional[List[str]] = None,
+        max_steps: Optional[int] = None,
+        max_duration_minutes: int = 60,
+        max_concurrent_per_model: int = 30,
+        mode: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        model_prompts: Optional[Dict[str, str]] = None,
+        byok_keys: Optional[Dict[str, str]] = None,
+        byok_ttl_minutes: Optional[int] = None,
+        harness: Optional[str] = None,
+        judge_endpoint: Optional[str] = None,
+        judge_api_key: Optional[str] = None,
+        judge_model: Optional[str] = None,
+        judge_api_format: Optional[str] = None,
+    ) -> JobCreateResponse:
+        """Create a new job.
+
+        Args:
+            models: List of model identifiers in "provider/model" format
+            name: Optional job name
+            judge_endpoint: LLM endpoint URL for judge grading
+            judge_api_key: API key for judge endpoint
+            judge_model: Model to use for judge grading
+            judge_api_format: API format ("anthropic" or "openai")
+
+        Returns:
+            JobCreateResponse containing job_id, workflow_job_id, status, and name
+        """
+        request = JobCreateRequest(
+            name=name,
+            models=models,
+            pass_k=pass_k,
+            env_key=env_key,
+            project_key=project_key,
+            task_keys=task_keys,
+            excluded_task_keys=excluded_task_keys,
+            max_steps=max_steps,
+            max_duration_minutes=max_duration_minutes,
+            max_concurrent_per_model=max_concurrent_per_model,
+            mode=mode,
+            system_prompt=system_prompt,
+            model_prompts=model_prompts,
+            byok_keys=byok_keys,
+            byok_ttl_minutes=byok_ttl_minutes,
+            harness=harness,
+            judge_endpoint=judge_endpoint,
+            judge_api_key=judge_api_key,
+            judge_model=judge_model,
+            judge_api_format=judge_api_format,
+        )
+
+        response = await self.client.request(
+            "POST", "/v1/jobs", json=request.model_dump(exclude_none=True)
+        )
+        return JobCreateResponse(**response.json())
 
     async def trace_job(self, name: Optional[str] = None) -> str:
         """Create a new trace job.

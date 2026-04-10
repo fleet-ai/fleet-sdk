@@ -28,6 +28,14 @@ from .client import Fleet, SyncEnv, Session
 from ._async.client import AsyncFleet, AsyncEnv, AsyncSession
 from .models import InstanceResponse, Environment, Run
 from .instance.models import Resource, ResetResponse
+from .judge import (
+    JudgeEndpointConfig,
+    JudgeService,
+    Rubric,
+    Criterion,
+    JudgeResult,
+    get_judge_config,
+)
 
 # Import sync verifiers with explicit naming
 from .verifiers import (
@@ -130,9 +138,20 @@ __all__ = [
     # Job helpers
     "job",
     "job_async",
+    # Judge
+    "JudgeEndpointConfig",
+    "JudgeService",
+    "Rubric",
+    "Criterion",
+    "JudgeResult",
+    "get_judge_config",
     # Version
     "__version__",
 ]
+
+
+# Module-level judge configuration (set via configure())
+_judge_config: Optional[JudgeEndpointConfig] = None
 
 
 def configure(
@@ -140,11 +159,17 @@ def configure(
     base_url: Optional[str] = None,
     max_retries: Optional[int] = None,
     timeout: Optional[float] = None,
+    judge_endpoint: Optional[str] = None,
+    judge_api_key: Optional[str] = None,
+    judge_model: Optional[str] = None,
+    judge_api_format: Optional[str] = None,
 ):
     """Configure global clients (sync and async) once per process.
 
     Both sync and async default clients will be (re)created with the provided settings.
     """
+    global _judge_config
+
     if max_retries is None:
         from .config import DEFAULT_MAX_RETRIES as _MR
 
@@ -159,6 +184,14 @@ def configure(
     _async_global_client.configure(
         api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout
     )
+
+    if judge_endpoint is not None:
+        _judge_config = JudgeEndpointConfig(
+            url=judge_endpoint,
+            api_key=judge_api_key or "",
+            model=judge_model or "claude-sonnet-4-20250514",
+            api_format=judge_api_format or "anthropic",  # type: ignore[arg-type]
+        )
 
 
 def get_client() -> Fleet:
