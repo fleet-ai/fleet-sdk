@@ -498,6 +498,11 @@ class JobCreateRequest(BaseModel):
     byok_keys: Optional[Dict[str, str]] = Field(None, title="BYOK Keys")
     byok_ttl_minutes: Optional[int] = Field(None, title="BYOK TTL Minutes", ge=1)
     harness: Optional[str] = Field(None, title="Harness")
+    judge_config: Optional[Dict[str, Any]] = Field(
+        None,
+        title="Judge Config",
+        description="Judge endpoint configuration for LLM-as-a-judge grading",
+    )
 
 
 class JobResponse(BaseModel):
