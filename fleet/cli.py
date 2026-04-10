@@ -31,7 +31,7 @@ except ImportError:
     sys.exit(1)
 
 from .client import Fleet
-from .models import JobCreateRequest
+from .models import JobCreateRequest, JudgeEndpointConfig
 
 
 app = typer.Typer(
@@ -214,6 +214,10 @@ def create_job(
     byok: Optional[List[str]] = typer.Option(None, "--byok", help="Bring Your Own Key in 'provider=key' format (repeatable)"),
     byok_ttl: Optional[int] = typer.Option(None, "--byok-ttl", help="TTL for BYOK keys in minutes"),
     harness: Optional[str] = typer.Option(None, "--harness", help="Harness identifier"),
+    judge_endpoint: Optional[str] = typer.Option(None, "--judge-endpoint", help="Customer-provided LLM endpoint URL for judge grading"),
+    judge_api_key: Optional[str] = typer.Option(None, "--judge-api-key", help="API key for judge endpoint"),
+    judge_model: Optional[str] = typer.Option(None, "--judge-model", help="Model identifier for judge endpoint"),
+    judge_api_format: Optional[str] = typer.Option(None, "--judge-api-format", help="API format for judge endpoint: 'openai' or 'anthropic'"),
     output_json: bool = typer.Option(False, "--json", help="Output as JSON"),
 ):
     """Create a new job.
@@ -258,8 +262,24 @@ def create_job(
             provider, key = b.split("=", 1)
             byok_keys[provider] = key
 
+    # Build judge endpoint config if any judge options are provided
+    judge_config = None
+    if judge_endpoint or judge_api_key or judge_model or judge_api_format:
+        if not judge_endpoint:
+            console.print(
+                "[red]Error:[/red] --judge-endpoint URL is required when using judge options",
+                style="bold",
+            )
+            raise typer.Exit(1)
+        judge_config = JudgeEndpointConfig(
+            url=judge_endpoint,
+            api_key=judge_api_key,
+            model=judge_model,
+            api_format=judge_api_format or "openai",
+        )
+
     client = get_client()
-    
+
     try:
         result = client.create_job(
             models=model,
@@ -277,6 +297,7 @@ def create_job(
             byok_keys=byok_keys,
             byok_ttl_minutes=byok_ttl,
             harness=harness,
+            judge_endpoint=judge_config,
         )
     except Exception as e:
         console.print(f"[red]Error creating job:[/red] {e}")
@@ -786,6 +807,11 @@ def eval_run(
     local: Optional[str] = typer.Option(None, "--local", "-l", help="Run locally. Use 'gemini_cua' for built-in or path for custom agent"),
     headful: bool = typer.Option(False, "--headful", help="Show browser via noVNC (local mode)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show debug output"),
+    # Judge endpoint
+    judge_endpoint: Optional[str] = typer.Option(None, "--judge-endpoint", help="Customer-provided LLM endpoint URL for judge grading"),
+    judge_api_key: Optional[str] = typer.Option(None, "--judge-api-key", help="API key for judge endpoint"),
+    judge_model: Optional[str] = typer.Option(None, "--judge-model", help="Model identifier for judge endpoint"),
+    judge_api_format: Optional[str] = typer.Option(None, "--judge-api-format", help="API format for judge endpoint: 'openai' or 'anthropic'"),
     # Oversight
     oversight: bool = typer.Option(False, "--oversight", help="Run AI oversight analysis on job completion"),
     oversight_model: str = typer.Option("anthropic/claude-sonnet-4", "--oversight-model", help="Model for oversight analysis"),
@@ -834,8 +860,24 @@ def eval_run(
         )
         return
     
+    # Build judge endpoint config if any judge options are provided
+    judge_config = None
+    if judge_endpoint or judge_api_key or judge_model or judge_api_format:
+        if not judge_endpoint:
+            console.print(
+                "[red]Error:[/red] --judge-endpoint URL is required when using judge options",
+                style="bold",
+            )
+            raise typer.Exit(1)
+        judge_config = JudgeEndpointConfig(
+            url=judge_endpoint,
+            api_key=judge_api_key,
+            model=judge_model,
+            api_format=judge_api_format or "openai",
+        )
+
     client = get_client()
-    
+
     # Parse BYOK keys
     byok_keys = None
     if byok:
@@ -849,7 +891,7 @@ def eval_run(
                 raise typer.Exit(1)
             provider, key = b.split("=", 1)
             byok_keys[provider] = key
-    
+
     try:
         result = client.create_job(
             models=model,
@@ -861,6 +903,7 @@ def eval_run(
             max_duration_minutes=max_duration,
             max_concurrent_per_model=max_concurrent,
             byok_keys=byok_keys,
+            judge_endpoint=judge_config,
         )
     except Exception as e:
         error_str = str(e)

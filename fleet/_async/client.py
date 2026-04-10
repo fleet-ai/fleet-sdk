@@ -503,11 +503,24 @@ class AsyncFleet:
         timeout: float = DEFAULT_TIMEOUT,
         jwt: Optional[str] = None,
         team_id: Optional[str] = None,
+        judge_endpoint: Optional["JudgeEndpointConfig"] = None,
     ):
         if api_key is None:
             api_key = os.getenv("FLEET_API_KEY")
         if base_url is None:
             base_url = os.getenv("FLEET_BASE_URL")
+        if judge_endpoint is None:
+            judge_endpoint_url = os.getenv("FLEET_JUDGE_ENDPOINT")
+            if judge_endpoint_url:
+                from ..models import JudgeEndpointConfig
+
+                judge_endpoint = JudgeEndpointConfig(
+                    url=judge_endpoint_url,
+                    api_key=os.getenv("FLEET_JUDGE_API_KEY"),
+                    model=os.getenv("FLEET_JUDGE_MODEL"),
+                    api_format=os.getenv("FLEET_JUDGE_API_FORMAT", "openai"),
+                )
+        self.judge_endpoint = judge_endpoint
         self._httpx_client = httpx_client or default_httpx_client(max_retries, timeout)
         self.client = AsyncWrapper(
             api_key=api_key,

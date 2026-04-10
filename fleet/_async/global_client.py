@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from .client import AsyncFleet
 from ..config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
+
+if TYPE_CHECKING:
+    from ..models import JudgeEndpointConfig
 
 
 _default_client: Optional[AsyncFleet] = None
@@ -22,6 +25,7 @@ def configure(
     base_url: Optional[str] = None,
     max_retries: int = DEFAULT_MAX_RETRIES,
     timeout: float = DEFAULT_TIMEOUT,
+    judge_endpoint: Optional[JudgeEndpointConfig] = None,
 ) -> AsyncFleet:
     """Configure the global default AsyncFleet client.
 
@@ -33,6 +37,7 @@ def configure(
         base_url=base_url,
         max_retries=max_retries,
         timeout=timeout,
+        judge_endpoint=judge_endpoint,
     )
     return _default_client
 

@@ -26,7 +26,7 @@ from .exceptions import (
 )
 from .client import Fleet, SyncEnv, Session
 from ._async.client import AsyncFleet, AsyncEnv, AsyncSession
-from .models import InstanceResponse, Environment, Run
+from .models import InstanceResponse, Environment, Run, JudgeEndpointConfig
 from .instance.models import Resource, ResetResponse
 
 # Import sync verifiers with explicit naming
@@ -82,6 +82,7 @@ __all__ = [
     "AsyncFleet",
     "AsyncEnv",
     # Models
+    "JudgeEndpointConfig",
     "InstanceResponse",
     "SyncEnv",
     "Resource",
@@ -140,6 +141,7 @@ def configure(
     base_url: Optional[str] = None,
     max_retries: Optional[int] = None,
     timeout: Optional[float] = None,
+    judge_endpoint: Optional[JudgeEndpointConfig] = None,
 ):
     """Configure global clients (sync and async) once per process.
 
@@ -154,10 +156,12 @@ def configure(
 
         timeout = _TO
     _global_client.configure(
-        api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout
+        api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout,
+        judge_endpoint=judge_endpoint,
     )
     _async_global_client.configure(
-        api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout
+        api_key=api_key, base_url=base_url, max_retries=max_retries, timeout=timeout,
+        judge_endpoint=judge_endpoint,
     )
 
 

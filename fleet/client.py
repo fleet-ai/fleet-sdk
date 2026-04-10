@@ -44,6 +44,7 @@ from .models import (
     TaskUpdateRequest,
     Run,
     HeartbeatResponse,
+    JudgeEndpointConfig,
     JobCreateRequest,
     JobResponse,
     JobListResponse,
@@ -513,11 +514,24 @@ class Fleet:
         timeout: float = DEFAULT_TIMEOUT,
         jwt: Optional[str] = None,
         team_id: Optional[str] = None,
+        judge_endpoint: Optional["JudgeEndpointConfig"] = None,
     ):
         if api_key is None:
             api_key = os.getenv("FLEET_API_KEY")
         if base_url is None:
             base_url = os.getenv("FLEET_BASE_URL")
+        if judge_endpoint is None:
+            judge_endpoint_url = os.getenv("FLEET_JUDGE_ENDPOINT")
+            if judge_endpoint_url:
+                from .models import JudgeEndpointConfig
+
+                judge_endpoint = JudgeEndpointConfig(
+                    url=judge_endpoint_url,
+                    api_key=os.getenv("FLEET_JUDGE_API_KEY"),
+                    model=os.getenv("FLEET_JUDGE_MODEL"),
+                    api_format=os.getenv("FLEET_JUDGE_API_FORMAT", "openai"),
+                )
+        self.judge_endpoint = judge_endpoint
         self._httpx_client = httpx_client or default_httpx_client(max_retries, timeout)
         self.client = SyncWrapper(
             api_key=api_key,
@@ -1462,6 +1476,7 @@ class Fleet:
         byok_keys: Optional[Dict[str, str]] = None,
         byok_ttl_minutes: Optional[int] = None,
         harness: Optional[str] = None,
+        judge_endpoint: Optional["JudgeEndpointConfig"] = None,
     ) -> JobCreateResponse:
         """Create a new job.
 
@@ -1482,10 +1497,13 @@ class Fleet:
             byok_keys: Bring Your Own Keys (provider -> API key)
             byok_ttl_minutes: TTL for BYOK keys in minutes
             harness: Harness identifier
+            judge_endpoint: Customer-provided LLM endpoint for judge grading
 
         Returns:
             JobCreateResponse containing job_id, workflow_job_id, status, and name
         """
+        if judge_endpoint is None:
+            judge_endpoint = self.judge_endpoint
         request = JobCreateRequest(
             name=name,
             models=models,
@@ -1503,6 +1521,7 @@ class Fleet:
             byok_keys=byok_keys,
             byok_ttl_minutes=byok_ttl_minutes,
             harness=harness,
+            judge_endpoint=judge_endpoint,
         )
 
         response = self.client.request(
