@@ -86,51 +86,59 @@ def to_bundle_json(task: dict) -> dict:
 
 
 def download_seed_tar(api_key: str, task: dict, files_dir: Path) -> bool:
-    """Download and extract the seed tar for this task.
+    """Download and extract the seed tar via presigned URL from the API.
 
-    Constructs the S3 key from the task's data_id/data_version and
-    downloads via aws cli.  Requires AWS credentials configured.
+    Uses POST /v1/seeds/{data_key}/{env_key}/download-url to get a
+    presigned S3 URL, then downloads and extracts the tar.  No AWS
+    credentials required — only the Fleet API key.
 
     Returns True if files were extracted, False on any failure (so the
     caller can fall back to the legacy file-sets download).
     """
     data_id = task.get("data_id")
-    data_version = task.get("data_version")
     env_key = task.get("environment_id")
 
-    if not data_id or not data_version:
+    if not data_id:
         return False
 
     print(f"\n2. Downloading seed tar...")
     print(f"   data_id:      {data_id}")
-    print(f"   data_version: {data_version}")
 
-    # Construct S3 key — matches the layout used by upload_task.py and seed-sync
-    s3_key = f"{data_id}/{env_key}/{data_version}/seed.tar.zst"
-    s3_uri = f"s3://theseus-envdata/{s3_key}"
-    print(f"   S3 key:       {s3_key}")
-
-    # Check dependencies
-    for cmd in ("aws", "zstd", "tar"):
+    # Check extraction dependencies
+    for cmd in ("zstd", "tar"):
         if not shutil.which(cmd):
             print(f"   WARNING: '{cmd}' not installed, skipping seed tar download.")
             return False
+
+    # Get presigned download URL from the API
+    resp = requests.post(
+        f"{get_api_base()}/seeds/{data_id}/{env_key}/download-url",
+        headers=headers(api_key),
+    )
+    if resp.status_code == 404:
+        print(f"   No seed tar found via API, falling back to file-sets.")
+        return False
+    if not resp.ok:
+        print(f"   WARNING: download-url failed ({resp.status_code}): {resp.text[:200]}")
+        return False
+
+    download_info = resp.json()
+    presigned_url = download_info["url"]
+    print(f"   version:      {download_info['version']}")
+    print(f"   s3_key:       {download_info['s3_key']}")
 
     with tempfile.NamedTemporaryFile(suffix=".tar.zst", delete=False) as tmp:
         tar_path = tmp.name
 
     try:
-        # Download from S3
-        result = subprocess.run(
-            ["aws", "s3", "cp", s3_uri, tar_path],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            print(f"   WARNING: S3 download failed, falling back to file-sets.")
+        # Download via presigned URL
+        dl_resp = requests.get(presigned_url)
+        if not dl_resp.ok:
+            print(f"   WARNING: S3 download failed ({dl_resp.status_code}), falling back to file-sets.")
             return False
 
-        tar_size = os.path.getsize(tar_path)
+        Path(tar_path).write_bytes(dl_resp.content)
+        tar_size = len(dl_resp.content)
         print(f"   Downloaded {tar_size:,} bytes")
 
         # Extract (two-step to avoid pipe issues on macOS)
@@ -243,7 +251,7 @@ def main():
 
     # Step 2: Download files — try seed tar first, fall back to file-sets
     has_files = False
-    if task.get("data_id") and task.get("data_version"):
+    if task.get("data_id"):
         has_files = download_seed_tar(args.api_key, task, files_dir)
     if not has_files:
         has_files = download_file_set(args.api_key, task, files_dir)
