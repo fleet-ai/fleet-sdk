@@ -27,7 +27,7 @@ from .exceptions import (
 try:
     from . import __version__
 except ImportError:
-    __version__ = "0.2.115"
+    __version__ = "0.2.125"
 
 logger = logging.getLogger(__name__)
 
@@ -76,17 +76,22 @@ class SyncWrapper(BaseWrapper):
         params: Optional[Dict[str, Any]] = None,
         json: Optional[Any] = None,
         base_url: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None,
         **kwargs,
     ) -> httpx.Response:
         base_url = base_url or self.base_url
         # Generate unique request ID that persists across retries
         request_id = str(uuid.uuid4())
-        
+
+        headers = self.get_headers(request_id=request_id)
+        if extra_headers:
+            headers.update(extra_headers)
+
         try:
             response = self.httpx_client.request(
                 method,
                 f"{base_url}{url}",
-                headers=self.get_headers(request_id=request_id),
+                headers=headers,
                 params=params,
                 json=json,
                 **kwargs,

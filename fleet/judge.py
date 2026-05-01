@@ -956,5 +956,11 @@ class SyncJudge:
         )
 
         _print_judge_call_start(rubric, images, agentic, model, files=files)
-        response = self._client.request("POST", "/v1/judge/grade", json=body)
+        extra_headers = None
+        token = os.environ.get("FLEET_JUDGE_TOKEN")
+        if token:
+            extra_headers = {"X-Fleet-Judge-Token": token}
+        response = self._client.request(
+            "POST", "/v1/judge/grade", json=body, extra_headers=extra_headers
+        )
         return _parse_grade_response(response.json())

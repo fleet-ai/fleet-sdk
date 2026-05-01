@@ -3,6 +3,7 @@
 Provides env.judge.grade() for async verifier scripts.
 """
 
+import os
 from typing import Dict, List, Optional, Union, TYPE_CHECKING
 
 # Import shared classes and helpers from the sync module
@@ -148,5 +149,11 @@ class AsyncJudge:
         )
 
         _print_judge_call_start(rubric, resolved_images, agentic, model, files=resolved_files)
-        response = await self._client.request("POST", "/v1/judge/grade", json=body)
+        extra_headers = None
+        token = os.environ.get("FLEET_JUDGE_TOKEN")
+        if token:
+            extra_headers = {"X-Fleet-Judge-Token": token}
+        response = await self._client.request(
+            "POST", "/v1/judge/grade", json=body, extra_headers=extra_headers
+        )
         return _parse_grade_response(response.json())
