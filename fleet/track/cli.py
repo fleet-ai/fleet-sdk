@@ -1,0 +1,414 @@
+"""flt track — CLI subcommands."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from ..auth import load_credentials
+from .api import TrackAPIClient, TrackAPIError
+from .daemon import main as daemon_main
+from .install import install, is_installed, uninstall
+from .paths import TrackPaths
+from .queue import UploadQueue
+from .sources import detect_sources
+from .status import is_running, read_status
+
+import uuid
+
+app = typer.Typer(help="Track local AI coding sessions", no_args_is_help=True)
+console = Console()
+
+
+@app.command()
+def enable() -> None:
+    """Scan this machine for AI sessions and start syncing."""
+    from ..auth import get_valid_token
+
+    paths = TrackPaths.default()
+
+    token = get_valid_token()
+    if not token:
+        console.print("[red]Not authenticated.[/red] Run [bold]flt login[/bold] first.")
+        raise typer.Exit(1)
+
+    # Load or create machine ID
+    paths.ensure_track_dir()
+    if paths.config_file.exists():
+        config = json.loads(paths.config_file.read_text())
+    else:
+        config = {}
+        paths.config_file.write_text(json.dumps(config, indent=2))
+
+    if "device_id" not in config:
+        import re, socket
+        hostname = re.sub(r"[^a-z0-9-]", "-", socket.gethostname().lower())[:20].strip("-")
+        config["device_id"] = f"{hostname}-{str(uuid.uuid4()).replace('-','')[:8]}"
+
+    device_id = config["device_id"]
+
+    # Provision with backend
+    console.print("Provisioning with Fleet...")
+    try:
+        api = TrackAPIClient()
+        result = api.provision(device_id)
+        config["team_id"] = result.get("team_id", "")
+        config["user_id"] = result.get("user_id", "")
+        # Pull email + team_name from stored credentials so the daemon can
+        # embed them in manifest.json for device → user association.
+        creds = load_credentials() or {}
+        config["email"] = creds.get("email", "")
+        config["team_name"] = creds.get("team_name", "")
+        import platform, socket
+        config["hostname"] = socket.gethostname()
+        config["platform"] = platform.system().lower()
+        paths.config_file.write_text(json.dumps(config, indent=2))
+    except TrackAPIError as e:
+        console.print(f"[red]Provision failed:[/red] {e}")
+        raise typer.Exit(1)
+
+    # Detect sources
+    sources = detect_sources()
+    found = [s for s in sources if s.is_present()]
+    if not found:
+        console.print("[yellow]No AI tool sessions found[/yellow] (~/.claude, ~/.cursor, ~/.codex)")
+    else:
+        for s in found:
+            console.print(f"  [green]✓[/green] Found {s.name} at {s.root}")
+
+    # Install and start daemon
+    if is_installed() and is_running(paths):
+        console.print("[yellow]Daemon already running.[/yellow] Restarting...")
+        uninstall()
+
+    console.print("Installing daemon service...")
+    try:
+        install(paths)
+    except Exception as e:
+        console.print(f"[red]Service install failed:[/red] {e}")
+        raise typer.Exit(1)
+
+    console.print("\n[bold green]✓ Tracking enabled.[/bold green] Syncing in background.")
+    console.print("  Run [bold]flt track status[/bold] to check progress.")
+
+
+@app.command()
+def disable() -> None:
+    """Stop tracking and remove the daemon service."""
+    if not is_installed():
+        console.print("Track daemon is not installed.")
+        return
+    uninstall()
+    console.print("[green]✓[/green] Track daemon removed.")
+
+
+@app.command()
+def status() -> None:
+    """Show sync status."""
+    paths = TrackPaths.default()
+    running = is_running(paths)
+    s = read_status(paths)
+
+    if not running:
+        console.print("[yellow]Daemon not running.[/yellow]", end=" ")
+        if not is_installed():
+            console.print("Run [bold]flt track enable[/bold] to start.")
+        else:
+            console.print("Service installed but not alive — check logs.")
+        if s:
+            console.print(f"  Last sync: {s.last_sync or 'never'}")
+        return
+
+    if not s:
+        console.print("[yellow]Daemon running but no status yet.[/yellow]")
+        return
+
+    state_color = {"idle": "green", "syncing": "yellow", "error": "red"}.get(s.state, "white")
+    console.print(f"[{state_color}]● {s.state.upper()}[/{state_color}]  pid={s.pid}  last sync={s.last_sync or 'never'}")
+
+    # Queue stats
+    q = UploadQueue(paths)
+    stats = q.stats()
+    q.close()
+    pending = stats.get("pending", 0)
+    in_flight = stats.get("in_flight", 0)
+    done = stats.get("done", 0)
+    failed = stats.get("failed", 0)
+
+    console.print(f"  Queue: [yellow]{pending}[/yellow] pending  [cyan]{in_flight}[/cyan] uploading  [green]{done}[/green] done  [red]{failed}[/red] failed")
+
+    # Sources table
+    if s.sources:
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Agent")
+        table.add_column("Found", justify="center")
+        table.add_column("Files", justify="right")
+        for agent, info in s.sources.items():
+            found_str = "[green]✓[/green]" if info.get("found") else "[dim]✗[/dim]"
+            table.add_row(agent, found_str, str(info.get("files", 0)))
+        console.print(table)
+
+    if s.errors:
+        console.print(f"\n[red]Errors:[/red]")
+        for err in s.errors[-3:]:
+            console.print(f"  {err}")
+
+    console.print(f"\n  Logs: {paths.log_file}")
+
+
+@app.command()
+def daemon() -> None:
+    """Run the sync daemon (called by launchd/systemd — not for direct use)."""
+    daemon_main()
+
+
+@app.command()
+def gc(
+    max_age_hours: int = typer.Option(
+        24, "--max-age-hours",
+        help="Remove fleet-track checkout files older than this. 0 removes all.",
+    ),
+) -> None:
+    """Remove fleet-track-managed checkout files.
+
+    Identifies checkouts by the `_fleet_meta` marker on the first row
+    (never deletes native sessions). Useful after running cross-tool
+    resume tests to clean up the on-disk views.
+    """
+    from .resumer import gc_checkouts
+
+    n = gc_checkouts(max_age_hours=max_age_hours)
+    if n == 0:
+        console.print("[dim]Nothing to clean up.[/dim]")
+    else:
+        unit = "files" if n != 1 else "file"
+        console.print(f"[green]✓[/green] Removed {n} fleet-track checkout {unit}.")
+
+
+@app.command()
+def logs() -> None:
+    """Tail the daemon log."""
+    log_path = TrackPaths.default().log_file
+    if not log_path.exists():
+        console.print("No log file found.")
+        raise typer.Exit(1)
+    import subprocess
+    subprocess.run(["tail", "-f", str(log_path)])
+
+
+# ------------------------------------------------------------------ #
+# Session listing + resume                                              #
+# ------------------------------------------------------------------ #
+
+
+def _resolve_session_store(source: str):
+    """Build the SessionStore the CLI reads from based on `--source`.
+
+    Modes:
+      - `auto` (default): chained Native + Stub. What you actually want
+        for testing the picker — shows native session files on disk
+        AND anything explicitly ingested into the stub.
+      - `native`: only the read-only view of `~/.claude` / `~/.codex`.
+      - `stub`: only the LocalSessionStore (the dev stub).
+      - `remote`: future RemoteSessionStore (not yet wired).
+    """
+    from .store import (
+        ChainedSessionStore,
+        LocalSessionStore,
+        NativeFilesSessionStore,
+    )
+
+    paths = TrackPaths.default()
+    if source == "stub":
+        return LocalSessionStore(paths)
+    if source == "native":
+        return NativeFilesSessionStore()
+    if source == "remote":
+        raise typer.BadParameter(
+            "--source remote isn't wired yet. The contract is reserved for "
+            "the future RemoteSessionStore (theseus). Use --source auto, "
+            "native, or stub."
+        )
+    if source == "auto":
+        # LocalSessionStore first so explicitly-ingested rows shadow native
+        # ones with the same id (e.g. forks re-stored after resume).
+        return ChainedSessionStore(
+            LocalSessionStore(paths),
+            NativeFilesSessionStore(),
+        )
+    raise typer.BadParameter(f"Unknown --source value: {source!r}")
+
+
+@app.command(name="ls")
+def list_sessions(
+    tool: str = typer.Option(None, "--tool", "-t", help="Filter by tool (claude/codex/cursor/opencode)"),
+    cwd: str = typer.Option(None, "--cwd", help="Filter by working directory"),
+    since: str = typer.Option(None, "--since", help="Only sessions active since (ISO-8601 or natural)"),
+    limit: int = typer.Option(None, "--limit", "-n", help="Max number of rows"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON for scripting"),
+    source: str = typer.Option(
+        "auto", "--source",
+        help="Where to read sessions from: auto (native+stub), native (~/.claude, ~/.codex), stub (LocalSessionStore), remote (theseus, not yet wired).",
+    ),
+) -> None:
+    """List sessions across all tracked AI tools."""
+    store = _resolve_session_store(source)
+    sessions = store.list(tool=tool, cwd=cwd, since=since, limit=limit)
+
+    if json_out:
+        from dataclasses import asdict
+        console.print_json(json.dumps([asdict(s) for s in sessions]))
+        return
+
+    if not sessions:
+        console.print("[dim]No sessions found.[/dim]")
+        console.print("  Run [bold]flt track enable[/bold] to start syncing.")
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("ID")
+    table.add_column("Tool")
+    table.add_column("When")
+    table.add_column("Project")
+    table.add_column("Events", justify="right")
+    table.add_column("From")
+
+    from .picker import _human_when, _short_cwd
+    for s in sessions:
+        fork = (s.forked_from or "")[:8] if s.forked_from else ""
+        table.add_row(
+            s.id[:8],
+            s.tool,
+            _human_when(s.last_active or s.started_at),
+            _short_cwd(s.cwd),
+            str(s.event_count),
+            fork,
+        )
+    console.print(table)
+
+
+@app.command()
+def resume(
+    session_id: str = typer.Argument(None, help="Session id (full or unique prefix). Omit to pick interactively."),
+    in_tool: str = typer.Option(None, "--in", help="Resume in this tool (default: same as source)"),
+    last: bool = typer.Option(False, "--last", help="Resume the most recent session"),
+    prompt: str = typer.Option(None, "--prompt", "-p", help="Initial prompt to send to the resumed CLI"),
+    source: str = typer.Option(
+        "auto", "--source",
+        help="Where to read sessions from: auto (native+stub), native, stub, remote (not wired).",
+    ),
+    compact: bool = typer.Option(
+        True, "--compact/--no-compact",
+        help="Project the source session into a context-fitting view. "
+             "Default on. --no-compact ships the full history; large sessions "
+             "will overflow the target model's context window.",
+    ),
+    target_tokens: int = typer.Option(
+        0, "--target-tokens",
+        help="Target token budget for the cross-tool checkout. 0 picks a "
+             "sensible default for the target tool/model.",
+    ),
+    target_model: str = typer.Option(
+        None, "--target-model",
+        help="Hint the target model (e.g. claude-opus-4-7, gpt-5) so the "
+             "compactor budgets correctly. Auto-detected when possible.",
+    ),
+    max_tool_output: int = typer.Option(
+        4_000, "--max-tool-output",
+        help="Per-tool-result output character cap. 0 disables truncation.",
+    ),
+    summarize: bool = typer.Option(
+        True, "--summarize/--no-summarize",
+        help="When events are dropped to fit budget, prepend a structured "
+             "summary of what was dropped. Default on.",
+    ),
+) -> None:
+    """Resume a tracked session in a (possibly different) AI tool.
+
+    Without an id, opens an interactive fzf picker. With `--in`, the
+    session is converted to the target tool's format and dropped into a
+    quarantined `.fleet-checkouts/` namespace before invoking the
+    target's native resume command.
+    """
+    store = _resolve_session_store(source)
+
+    # Resolve which session.
+    if last:
+        sessions = store.list(limit=1)
+        if not sessions:
+            console.print("[red]No sessions found.[/red]")
+            raise typer.Exit(1)
+        target_session = sessions[0]
+    elif session_id:
+        try:
+            target_session = store.get(session_id)
+        except KeyError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+        if target_session is None:
+            console.print(f"[red]No session matches[/red] {session_id!r}")
+            raise typer.Exit(1)
+    else:
+        # Interactive picker.
+        from .picker import FzfNotInstalled, pick_session
+        try:
+            target_session = pick_session(store.list(), header="Resume which session?")
+        except FzfNotInstalled as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
+        if target_session is None:
+            console.print("[dim]Cancelled.[/dim]")
+            raise typer.Exit(0)
+
+    target_tool = in_tool or target_session.tool
+    console.print(
+        f"[dim]Resuming[/dim] {target_session.id[:8]} "
+        f"[dim]({target_session.tool} → {target_tool})[/dim]"
+    )
+
+    # The actual resume + checkout creation is implemented in resumer.py
+    # (kept out of cli.py so the dispatch logic is testable).
+    from .compactor import (
+        TokenBudget,
+        TruncationCompactor,
+        TruncationConfig,
+        budget_for,
+    )
+    from .resumer import resume_session
+
+    if compact:
+        budget = (
+            TokenBudget(target=target_tokens) if target_tokens > 0
+            else budget_for(target_tool, target_model)
+        )
+        compactor = TruncationCompactor(
+            budget=budget,
+            cfg=TruncationConfig(
+                max_tool_output_chars=max_tool_output if max_tool_output > 0 else None,
+                summarize_dropped=summarize,
+            ),
+        )
+    else:
+        compactor = None  # ship full history; will likely overflow large sessions
+
+    try:
+        resume_session(
+            store=store,
+            session=target_session,
+            target_tool=target_tool,
+            prompt=prompt,
+            paths=TrackPaths.default(),
+            compactor=compactor,
+            target_model=target_model,
+        )
+    except NotImplementedError as e:
+        console.print(f"[red]Not yet supported:[/red] {e}")
+        raise typer.Exit(2)
+    except Exception as e:
+        console.print(f"[red]Resume failed:[/red] {e}")
+        raise typer.Exit(1)

@@ -51,6 +51,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install build twine
           pip install -e .
+      - name: Inject Supabase credentials
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          sed -i "s|%%SUPABASE_URL%%|$SUPABASE_URL|g" fleet/_supabase.py
+          sed -i "s|%%SUPABASE_ANON_KEY%%|$SUPABASE_ANON_KEY|g" fleet/_supabase.py
       - name: Build package
         run: |
           python -m build

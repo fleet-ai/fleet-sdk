@@ -44,10 +44,13 @@ sessions_app = typer.Typer(help="Manage sessions", no_args_is_help=True)
 eval_app = typer.Typer(help="Run evaluations", no_args_is_help=True)
 projects_app = typer.Typer(help="Manage projects", no_args_is_help=True)
 
+from .track.cli import app as track_app  # noqa: E402
+
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(eval_app, name="eval")
 app.add_typer(projects_app, name="projects")
+app.add_typer(track_app, name="track")
 
 console = Console()
 
@@ -82,16 +85,25 @@ def format_status(status: Optional[str]) -> str:
 
 
 def get_client() -> Fleet:
-    """Get a Fleet client using environment variables."""
+    """Get a Fleet client, preferring FLEET_API_KEY then stored login credentials."""
     api_key = os.getenv("FLEET_API_KEY")
-    if not api_key:
-        console.print(
-            "[red]Error:[/red] FLEET_API_KEY environment variable not set",
-            style="bold",
-        )
-        raise typer.Exit(1)
     base_url = os.getenv("FLEET_BASE_URL", CLI_DEFAULT_BASE_URL)
-    return Fleet(api_key=api_key, base_url=base_url)
+
+    if api_key:
+        return Fleet(api_key=api_key, base_url=base_url)
+
+    from .auth import get_valid_token
+
+    result = get_valid_token()
+    if result:
+        jwt, team_id = result
+        return Fleet(jwt=jwt, team_id=team_id, base_url=base_url)
+
+    console.print(
+        "[red]Not authenticated.[/red] Run [bold]flt login[/bold] or set FLEET_API_KEY.",
+        style="bold",
+    )
+    raise typer.Exit(1)
 
 
 def _run_oversight(job_id: str, model: str = "anthropic/claude-sonnet-4"):
@@ -1050,6 +1062,147 @@ def eval_run(
             console.print(f"[dim]Check status: flt jobs get {job_id}[/dim]")
             if oversight:
                 console.print(f"[dim]Run oversight manually: flt jobs oversight {job_id}[/dim]")
+
+
+@app.command()
+def login():
+    """Authenticate the CLI by logging in through the Fleet web app."""
+    import secrets
+    import socket
+    import threading
+    import webbrowser
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from urllib.parse import parse_qs, urlparse
+
+    from .auth import save_credentials
+
+    state = secrets.token_urlsafe(16)
+    result: dict = {}
+    server_ready = threading.Event()
+    done = threading.Event()
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+
+    class CallbackHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            if parsed.path != "/callback":
+                self.send_response(404)
+                self.end_headers()
+                return
+
+            params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+            if params.get("state") != state:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b"Invalid state")
+                return
+
+            result.update(params)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(
+                b"<html><body><h1>Fleet CLI login complete.</h1>"
+                b"<p>You can close this window.</p></body></html>"
+            )
+            done.set()
+
+        def log_message(self, format, *args):
+            return
+
+    def serve():
+        server = HTTPServer(("127.0.0.1", port), CallbackHandler)
+        server_ready.set()
+        while not done.is_set():
+            server.handle_request()
+        server.server_close()
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    server_ready.wait()
+
+    login_url = f"https://fleetai.com/cli-login?port={port}&state={state}"
+    console.print("[bold]Opening Fleet login in your browser...[/bold]")
+    console.print(f"[dim]If the browser didn't open, visit:[/dim] {login_url}")
+    webbrowser.open(login_url)
+
+    console.print("[dim]Waiting for authentication (Ctrl+C to cancel)...[/dim]")
+    try:
+        done.wait(timeout=300)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Login cancelled.[/yellow]")
+        raise typer.Exit(1)
+
+    if not result.get("access_token"):
+        console.print("[red]Login failed - no token received.[/red]")
+        raise typer.Exit(1)
+
+    save_credentials(
+        {
+            "email": result.get("email", ""),
+            "access_token": result["access_token"],
+            "refresh_token": result.get("refresh_token", ""),
+            "team_id": result["team_id"],
+            "team_name": result.get("team_name", ""),
+            "expires_at": result.get("expires_at", ""),
+        }
+    )
+
+    email = result.get("email", "unknown")
+    team_name = result.get("team_name", result["team_id"])
+    console.print(f"\n[green]✓[/green] Logged in as [bold]{email}[/bold] (Team: {team_name})")
+
+
+@app.command()
+def logout():
+    """Clear stored Fleet credentials."""
+    from .auth import clear_credentials, load_credentials
+
+    creds = load_credentials()
+    if not creds:
+        console.print("[dim]Not logged in.[/dim]")
+        return
+
+    clear_credentials()
+    email = creds.get("email", "")
+    console.print(f"[green]✓[/green] Logged out{f' ({email})' if email else ''}.")
+
+
+@app.command()
+def whoami():
+    """Show current authentication status."""
+    from .auth import CREDENTIALS_FILE, get_valid_token, load_credentials
+
+    api_key = os.getenv("FLEET_API_KEY")
+    if api_key:
+        console.print("[bold]Auth:[/bold] API key (FLEET_API_KEY)")
+        console.print(f"[bold]Key:[/bold] {api_key[:8]}...{api_key[-4:]}")
+        return
+
+    creds = load_credentials()
+    if not creds:
+        console.print("[dim]Not logged in.[/dim] Run [bold]flt login[/bold].")
+        return
+
+    token_result = get_valid_token()
+    if not token_result:
+        console.print(
+            "[yellow]Stored credentials are expired.[/yellow] "
+            "Run [bold]flt login[/bold] again."
+        )
+        return
+
+    console.print(f"[bold]Auth:[/bold] Browser login ({CREDENTIALS_FILE})")
+    if creds.get("email"):
+        console.print(f"[bold]Email:[/bold] {creds['email']}")
+    if creds.get("team_name"):
+        console.print(f"[bold]Team:[/bold] {creds['team_name']}")
+    if creds.get("team_id"):
+        console.print(f"[bold]Team ID:[/bold] {creds['team_id']}")
 
 
 def main():
