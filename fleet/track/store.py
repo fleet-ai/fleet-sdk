@@ -139,6 +139,16 @@ class SessionStore(Protocol):
         """
         ...
 
+    def own_events(self, id: str) -> Iterator[Event]:
+        """Yield only this session's own events — no fork-chain walking.
+
+        Composing wrappers (e.g. ChainedSessionStore) walk fork chains
+        themselves to span multiple stores; they need a way to ask each
+        backend for one node's events without the backend also walking
+        the chain (which would double-emit parents).
+        """
+        ...
+
     def create(self, session: Session, events: Iterable[Event]) -> Session:
         """Insert a new session. `session.id` must be set by the caller.
         Returns the stored session record (potentially with normalized
@@ -260,6 +270,17 @@ class LocalSessionStore:
                     break
                 yield ev
                 yielded += 1
+
+    def own_events(self, id: str) -> Iterator[Event]:
+        """Yield only this session's own events — no fork-chain walk.
+
+        Used by ChainedSessionStore, which performs the cross-store chain
+        walk itself and would otherwise double-emit parent events when both
+        parent and child live in the same LocalSessionStore.
+        """
+        if self.get(id) is None:
+            raise KeyError(id)
+        yield from self._read_events(id)
 
     def create(self, session: Session, events: Iterable[Event]) -> Session:
         if not session.id:
@@ -529,6 +550,10 @@ class NativeFilesSessionStore:
         elif s.tool == "codex":
             yield from CodexSource(home=self._home).parse(path)
 
+    # Native session files don't carry forked_from links, so events()
+    # here never walks a fork chain — own_events is the same stream.
+    own_events = events
+
     def create(self, session: Session, events: Iterable[Event]) -> Session:
         raise NotImplementedError(
             "NativeFilesSessionStore is read-only. Use LocalSessionStore for writes."
@@ -657,13 +682,17 @@ class ChainedSessionStore:
             raise KeyError(id)
 
         # Build the chain across stores using our own get() as the lookup.
+        # Then for each node we ask its home store for that node's *own*
+        # events only — never `events()`, which would re-walk the chain
+        # internally and double-emit parents that live in the same store.
         chain = self._build_chain_across(leaf)
         for node, max_events in chain:
             home_store = self._store_for(node)
             if home_store is None:
                 continue
+            read_own = getattr(home_store, "own_events", home_store.events)
             yielded = 0
-            for ev in home_store.events(node.id):
+            for ev in read_own(node.id):
                 if max_events is not None and yielded >= max_events:
                     break
                 yield ev

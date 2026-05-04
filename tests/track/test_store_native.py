@@ -287,6 +287,33 @@ def test_chained_fork_chain_resolves_across_stores(tmp_path: Path):
     assert len(events) == 3
 
 
+def test_chained_fork_chain_in_same_local_store_does_not_duplicate(tmp_path: Path):
+    """Regression: when parent and child both live in the same
+    LocalSessionStore, ChainedSessionStore.events() must not double-emit
+    parent events. (Bugbot #5871e98c.)
+
+    The chained store walks the fork chain itself; if it then asked the
+    underlying store for the leaf via `events()` (which also walks the
+    chain), parent events would be yielded twice.
+    """
+    paths = TrackPaths.under(tmp_path)
+    local = LocalSessionStore(paths)
+    local.create(
+        Session(id="root", tool="claude"),
+        [UserMessage(source="claude", text=f"r{i}") for i in range(4)],
+    )
+    local.create(
+        Session(id="child", tool="claude", forked_from="root", fork_point=2),
+        [UserMessage(source="claude", text="c0"),
+         UserMessage(source="claude", text="c1")],
+    )
+    chained = ChainedSessionStore(local)
+
+    events = list(chained.events("child"))
+    # Expected: r0, r1 (parent up to fork_point=2), then c0, c1.
+    assert [e.text for e in events] == ["r0", "r1", "c0", "c1"]
+
+
 def test_chained_requires_at_least_one_store():
     with pytest.raises(ValueError):
         ChainedSessionStore()

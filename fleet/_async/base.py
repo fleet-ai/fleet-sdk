@@ -46,7 +46,15 @@ class BaseWrapper:
         jwt: Optional[str] = None,
         team_id: Optional[str] = None,
     ):
-        if api_key is None and not (jwt and team_id):
+        # Pin the auth mode at construction time. Falling back from
+        # "intended JWT" to api_key at request time produces
+        # `Authorization: Bearer None` when api_key is unset, which
+        # masks the real config error.
+        if jwt and team_id:
+            self._auth_mode = "jwt"
+        elif api_key:
+            self._auth_mode = "api_key"
+        else:
             raise ValueError("Provide api_key or both jwt and team_id")
         self.api_key = api_key
         self.jwt = jwt
@@ -60,10 +68,18 @@ class BaseWrapper:
             "X-Fleet-SDK-Language": "Python",
             "X-Fleet-SDK-Version": __version__,
         }
-        if self.jwt and self.team_id:
+        if self._auth_mode == "jwt":
+            if not self.jwt or not self.team_id:
+                raise FleetAuthenticationError(
+                    "JWT auth was selected at init but jwt/team_id are no longer set"
+                )
             headers["X-JWT-Token"] = self.jwt
             headers["X-Team-ID"] = self.team_id
-        else:
+        else:  # "api_key"
+            if not self.api_key:
+                raise FleetAuthenticationError(
+                    "API-key auth was selected at init but api_key is no longer set"
+                )
             headers["Authorization"] = f"Bearer {self.api_key}"
 
         # Add request ID for idempotency (persists across retries)

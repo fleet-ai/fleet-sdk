@@ -182,3 +182,23 @@ def _walk_glob(root: Path, glob: str, exclude: frozenset[str]) -> Iterator[Path]
         if any(excl in path.parts for excl in exclude):
             continue
         yield path
+
+
+# Keys that the resumer pre-injects into `raw` for cross-source synthesis.
+# An event whose `raw` carries only these annotations isn't a real source row.
+_RAW_SYNTHETIC_KEYS: frozenset[str] = frozenset({"_synth"})
+
+
+def has_substantive_raw(raw: Any) -> bool:
+    """True when `raw` carries an actual source row, not just synthesis
+    annotations. The resumer pre-injects `_synth` metadata into every
+    event's raw so cross-source synthesis can read session-wide context
+    out of any row; that annotation alone shouldn't cause the serializer
+    to think there's a real row to emit.
+
+    Centralized here so future synthetic keys (beyond `_synth`) only need
+    to be added in one place.
+    """
+    if not raw:
+        return False
+    return any(k not in _RAW_SYNTHETIC_KEYS for k in raw.keys())

@@ -9,7 +9,7 @@ from typing import Optional, Tuple
 
 import httpx
 
-from ._supabase import SUPABASE_ANON_KEY, SUPABASE_URL
+from ._supabase import SUPABASE_ANON_KEY, SUPABASE_URL, is_configured as _supabase_configured
 
 CREDENTIALS_FILE = Path.home() / ".fleet" / "credentials.json"
 
@@ -56,6 +56,12 @@ def is_token_expired(access_token: str) -> bool:
 
 def refresh_access_token(refresh_token: str) -> dict:
     """Exchange a Supabase refresh token for a new session."""
+    if not _supabase_configured():
+        raise RuntimeError(
+            "Supabase credentials are not configured. Set SUPABASE_URL and "
+            "SUPABASE_ANON_KEY env vars, or use a published wheel where the "
+            "publish workflow injects them."
+        )
     response = httpx.post(
         f"{SUPABASE_URL}/auth/v1/token?grant_type=refresh_token",
         headers={

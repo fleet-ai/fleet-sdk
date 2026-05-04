@@ -65,7 +65,7 @@ from ..unified import (
     ToolResult,
     UserMessage,
 )
-from .base import Source, _walk_glob
+from .base import Source, _walk_glob, has_substantive_raw
 
 log = logging.getLogger("fleet.track.sources.claude")
 
@@ -359,17 +359,6 @@ def _parse_assistant(doc: dict, common: dict) -> Iterator[Event]:
 # ------------------------------------------------------------------ #
 
 
-def _has_substantive_raw(raw) -> bool:
-    """True when `raw` carries an actual source row, not just our
-    `_synth` annotation. The resumer pre-injects `_synth` metadata into
-    every event's raw so cross-source synthesis can read session-wide
-    context out of any row; that annotation alone shouldn't cause the
-    serializer to think there's a real row to emit."""
-    if not raw:
-        return False
-    return any(k != "_synth" for k in raw.keys())
-
-
 def _serialize_event_for_claude(ev: Event, seen_row_ids: set[str]) -> Optional[str]:
     """Return one JSONL line for `ev`, or None to skip.
 
@@ -383,7 +372,7 @@ def _serialize_event_for_claude(ev: Event, seen_row_ids: set[str]) -> Optional[s
     if ev.source == "claude":
         if ev.synthesized:
             return None  # parser-synthesized view; no original row to emit
-        if not _has_substantive_raw(ev.raw):
+        if not has_substantive_raw(ev.raw):
             # Same-source bare event (e.g. seeded into a SessionStore
             # without raw context — raw is empty or only carries
             # `_synth` metadata). Synthesize a native row from kernel

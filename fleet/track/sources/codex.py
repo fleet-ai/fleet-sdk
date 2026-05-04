@@ -57,7 +57,7 @@ from ..unified import (
     TurnStart,
     UserMessage,
 )
-from .base import Source, _walk_glob
+from .base import Source, _walk_glob, has_substantive_raw
 
 log = logging.getLogger("fleet.track.sources.codex")
 
@@ -660,14 +660,6 @@ def _mcp_content_to_text(content: Any) -> str:
     return "\n".join(parts)
 
 
-def _has_substantive_raw(raw) -> bool:
-    """Same logic as claude's: raw carrying only `_synth` metadata is
-    treated as if empty (the resumer pre-injects `_synth` on every event)."""
-    if not raw:
-        return False
-    return any(k != "_synth" for k in raw.keys())
-
-
 def _serialize_event_for_codex(ev: Event, seen: set[str]) -> Optional[str]:
     """Return one codex JSONL line for `ev`, or None to skip.
 
@@ -677,7 +669,7 @@ def _serialize_event_for_codex(ev: Event, seen: set[str]) -> Optional[str]:
     if ev.source == "codex":
         if ev.synthesized:
             return None
-        if not _has_substantive_raw(ev.raw):
+        if not has_substantive_raw(ev.raw):
             # Same-source bare event (e.g. seeded into a SessionStore
             # without raw context, or raw carrying only `_synth`).
             return _synthesize_codex_cross_source(ev)
