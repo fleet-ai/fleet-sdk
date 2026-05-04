@@ -354,8 +354,13 @@ def resume(
             console.print(f"[red]No session matches[/red] {session_id!r}")
             raise typer.Exit(1)
     else:
-        # Interactive picker.
-        from .picker import FzfNotInstalled, pick_session
+        # Interactive picker — two stages: session, then target tool.
+        from .picker import (
+            FzfNotInstalled,
+            installed_tools,
+            pick_session,
+            pick_tool,
+        )
         try:
             target_session = pick_session(store.list(), header="Resume which session?")
         except FzfNotInstalled as e:
@@ -364,6 +369,33 @@ def resume(
         if target_session is None:
             console.print("[dim]Cancelled.[/dim]")
             raise typer.Exit(0)
+
+        # Stage 2: target tool. Skip the picker if the user already passed
+        # `--in`, or if there's exactly one CLI installed (no choice to make).
+        if in_tool is None:
+            available = installed_tools()
+            if not available:
+                console.print(
+                    "[red]No supported AI CLIs found on PATH.[/red] "
+                    "Install one of: claude, codex, cursor, opencode."
+                )
+                raise typer.Exit(1)
+            if len(available) == 1:
+                in_tool = available[0]
+            else:
+                try:
+                    chosen_tool = pick_tool(
+                        target_session.tool,
+                        available=available,
+                        header=f"Resume {target_session.id[:8]} in which tool?",
+                    )
+                except FzfNotInstalled as e:
+                    console.print(f"[red]{e}[/red]")
+                    raise typer.Exit(1)
+                if chosen_tool is None:
+                    console.print("[dim]Cancelled.[/dim]")
+                    raise typer.Exit(0)
+                in_tool = chosen_tool
 
     target_tool = in_tool or target_session.tool
     console.print(

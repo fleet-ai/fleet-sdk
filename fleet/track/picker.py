@@ -45,6 +45,81 @@ def fzf_available() -> bool:
     return shutil.which("fzf") is not None
 
 
+# Tool-name → binary-name map for `installed_tools()` PATH detection.
+# Order is the canonical sort order in the picker when no source is set.
+_TOOL_BINARIES: list[tuple[str, str]] = [
+    ("claude", "claude"),
+    ("codex", "codex"),
+    ("cursor", "cursor"),
+    ("opencode", "opencode"),
+]
+
+
+def installed_tools() -> list[str]:
+    """Return the names of supported AI CLIs whose binary is on `PATH`.
+
+    Used by the second-stage picker to hide tools the user couldn't actually
+    launch into. Order matches `_TOOL_BINARIES` (claude, codex, cursor,
+    opencode) so the picker is deterministic regardless of $PATH ordering.
+    """
+    return [name for name, binary in _TOOL_BINARIES if shutil.which(binary)]
+
+
+def pick_tool(
+    source_tool: str,
+    *,
+    available: Optional[list[str]] = None,
+    header: Optional[str] = None,
+    runner=None,
+) -> Optional[str]:
+    """Show a second-stage fzf picker for the target tool.
+
+    `source_tool` highlights as the default (`(same as source)`); the rest
+    are labelled `cross-tool: lossy` so the user knows the conversion is
+    best-effort. Returns the chosen tool name, or None on cancel.
+
+    `available` defaults to `installed_tools()`. `runner` is the
+    subprocess-style callable injected by tests (defaults to
+    `subprocess.run`); kept narrow because we only need stdin/stdout/return.
+    """
+    if not fzf_available():
+        raise FzfNotInstalled()
+
+    tools = available if available is not None else installed_tools()
+    if not tools:
+        return None
+
+    # Source-tool first if installed; rest in canonical order.
+    if source_tool in tools:
+        ordered = [source_tool] + [t for t in tools if t != source_tool]
+    else:
+        ordered = list(tools)
+
+    lines = [_format_tool_line(t, source_tool) for t in ordered]
+
+    args = ["fzf", "--prompt", "tool> ", "--ansi", "--no-multi"]
+    if header:
+        args.extend(["--header", header])
+
+    run = runner or subprocess.run
+    result = run(args, input="\n".join(lines), capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+
+    chosen = result.stdout.strip()
+    if not chosen:
+        return None
+    # First whitespace-delimited token is the tool name.
+    return chosen.split(None, 1)[0]
+
+
+def _format_tool_line(tool: str, source_tool: str) -> str:
+    """One row in the tool picker. First token is the tool name (used to
+    map back to a string after fzf returns)."""
+    label = "(same as source)" if tool == source_tool else "cross-tool: lossy"
+    return f"{tool:<10}  {label}"
+
+
 def pick_session(
     sessions: Iterable[Session],
     *,
