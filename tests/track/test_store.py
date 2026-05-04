@@ -320,3 +320,218 @@ def test_index_ignores_unknown_fields(tmp_path: Path):
     # Should still read both sessions.
     ids = {s.id for s in store.list()}
     assert ids == {"s1", "s2"}
+
+
+# ------------------------------------------------------------------ #
+# Cursor format — must stay byte-compatible with the orchestrator      #
+# ------------------------------------------------------------------ #
+
+
+def test_cursor_format_pinned():
+    """Golden test: a cursor for a known (last_active, id) pair must
+    encode to a fixed string. If this test ever has to change, you've
+    broken wire compat with the server's `_encode_cursor` (see
+    theseus:orchestrator/public_api/track.py). Update both sides
+    together or paged scripts will paginate against the wrong rows."""
+    from fleet.track.store import _encode_cursor, _decode_cursor
+
+    cursor = _encode_cursor("2026-04-30T00:00:00Z", "abc12345")
+    # base64url(json({"la":"2026-04-30T00:00:00Z","id":"abc12345"})), no padding.
+    assert cursor == "eyJsYSI6IjIwMjYtMDQtMzBUMDA6MDA6MDBaIiwiaWQiOiJhYmMxMjM0NSJ9"
+    decoded = _decode_cursor(cursor)
+    assert decoded == {"la": "2026-04-30T00:00:00Z", "id": "abc12345"}
+
+
+def test_cursor_with_null_last_active_round_trips():
+    from fleet.track.store import _encode_cursor, _decode_cursor
+
+    cursor = _encode_cursor(None, "deadbeef")
+    decoded = _decode_cursor(cursor)
+    assert decoded == {"la": None, "id": "deadbeef"}
+
+
+def test_cursor_decode_rejects_garbage():
+    from fleet.track.store import _decode_cursor
+
+    with pytest.raises(ValueError):
+        _decode_cursor("not-base64!!")
+
+
+def test_cursor_decode_rejects_missing_keys():
+    """A cursor that decodes to JSON but lacks `la`/`id` is wire garbage."""
+    import base64
+    import json as j
+    from fleet.track.store import _decode_cursor
+
+    raw = j.dumps({"foo": "bar"}, separators=(",", ":"))
+    cursor = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+    with pytest.raises(ValueError, match="missing keys"):
+        _decode_cursor(cursor)
+
+
+def test_cursor_decode_empty_returns_none():
+    from fleet.track.store import _decode_cursor
+    assert _decode_cursor(None) is None
+    assert _decode_cursor("") is None
+
+
+# ------------------------------------------------------------------ #
+# page() — must mirror the orchestrator's predicate exactly            #
+# ------------------------------------------------------------------ #
+
+
+def test_page_returns_recency_first(tmp_path: Path):
+    store = _store(tmp_path)
+    store.create(_session(id="old", last_active="2025-01-01T00:00:00Z"), [_msg("a")])
+    store.create(_session(id="new", last_active="2026-04-30T00:00:00Z"), [_msg("b")])
+    items, _cursor = store.page(limit=10)
+    assert [s.id for s in items] == ["new", "old"]
+
+
+def test_page_returns_no_cursor_when_under_limit(tmp_path: Path):
+    store = _store(tmp_path)
+    store.create(_session(id="a"), [_msg("x")])
+    items, cursor = store.page(limit=10)
+    assert len(items) == 1
+    assert cursor is None
+
+
+def test_page_returns_cursor_when_more_pages_exist(tmp_path: Path):
+    store = _store(tmp_path)
+    for i in range(5):
+        store.create(
+            _session(id=f"s{i}", last_active=f"2026-04-3{i}T00:00:00Z"),
+            [_msg("x")],
+        )
+    items, cursor = store.page(limit=2)
+    assert len(items) == 2
+    assert cursor is not None
+
+
+def test_page_walks_full_set_via_cursor(tmp_path: Path):
+    """Walking pages with `--cursor` must visit every session exactly once
+    in recency-DESC order."""
+    store = _store(tmp_path)
+    for i in range(7):
+        store.create(
+            _session(id=f"s{i}", last_active=f"2026-04-3{i}T00:00:00Z"),
+            [_msg("x")],
+        )
+
+    seen: list[str] = []
+    cursor = None
+    while True:
+        items, cursor = store.page(limit=2, cursor=cursor)
+        seen.extend(s.id for s in items)
+        if cursor is None:
+            break
+
+    assert seen == ["s6", "s5", "s4", "s3", "s2", "s1", "s0"]
+    # No duplicates.
+    assert len(set(seen)) == len(seen)
+
+
+def test_page_tiebreak_by_id_desc_when_last_active_equal(tmp_path: Path):
+    """Two sessions with identical last_active must sort by id DESC,
+    matching the server's ORDER BY clause."""
+    store = _store(tmp_path)
+    same = "2026-04-30T00:00:00Z"
+    store.create(_session(id="aaa", last_active=same), [_msg("x")])
+    store.create(_session(id="bbb", last_active=same), [_msg("x")])
+    store.create(_session(id="ccc", last_active=same), [_msg("x")])
+    items, _ = store.page(limit=10)
+    assert [s.id for s in items] == ["ccc", "bbb", "aaa"]
+
+
+def test_page_null_last_active_sweeps_to_tail(tmp_path: Path):
+    """Sessions with NULL last_active sort AFTER any with a value.
+    Must hold across the cursor walk too."""
+    store = _store(tmp_path)
+    store.create(_session(id="dated", last_active="2026-04-30T00:00:00Z"), [_msg("x")])
+    store.create(_session(id="nullA", last_active=None), [_msg("x")])
+    store.create(_session(id="nullB", last_active=None), [_msg("x")])
+
+    page1, cursor = store.page(limit=2)
+    assert [s.id for s in page1] == ["dated", "nullB"]
+    assert cursor is not None
+
+    page2, cursor = store.page(limit=2, cursor=cursor)
+    assert [s.id for s in page2] == ["nullA"]
+    assert cursor is None
+
+
+def test_page_filters_apply_before_cursor(tmp_path: Path):
+    """Filter (--tool=claude) must restrict the row set BEFORE the
+    cursor predicate. Otherwise a cursor minted with one filter would
+    leak rows when walked under a different filter."""
+    store = _store(tmp_path)
+    for i in range(4):
+        store.create(
+            _session(id=f"c{i}", tool="claude", last_active=f"2026-04-3{i}T00:00:00Z"),
+            [_msg("x")],
+        )
+    for i in range(2):
+        store.create(
+            _session(id=f"x{i}", tool="codex", last_active=f"2026-04-3{i}T00:00:00Z"),
+            [_msg("x")],
+        )
+
+    page1, cursor = store.page(tool="claude", limit=2)
+    assert [s.id for s in page1] == ["c3", "c2"]
+
+    page2, cursor = store.page(tool="claude", limit=2, cursor=cursor)
+    assert [s.id for s in page2] == ["c1", "c0"]
+    assert cursor is None
+
+
+def test_page_clamps_limit_to_max(tmp_path: Path):
+    """`limit` over MAX_PAGE_LIMIT must be clamped, not used as-is —
+    matches the server's `Query(le=200)` constraint."""
+    from fleet.track.store import MAX_PAGE_LIMIT
+
+    store = _store(tmp_path)
+    # Seed MAX+1 sessions; ask for MAX*10 — should still get exactly MAX
+    # in the page.
+    for i in range(MAX_PAGE_LIMIT + 1):
+        store.create(
+            _session(id=f"s{i:04d}", last_active=f"2026-04-30T00:00:{i % 60:02d}Z"),
+            [_msg("x")],
+        )
+    items, cursor = store.page(limit=MAX_PAGE_LIMIT * 10)
+    assert len(items) == MAX_PAGE_LIMIT
+    assert cursor is not None  # one row remains
+
+
+def test_page_invalid_cursor_raises_value_error(tmp_path: Path):
+    store = _store(tmp_path)
+    with pytest.raises(ValueError):
+        store.page(limit=10, cursor="not-a-real-cursor!!!")
+
+
+def test_list_uses_default_page_limit(tmp_path: Path):
+    """`list()` without an explicit limit must return up to DEFAULT_PAGE_LIMIT
+    rows — verifying the delegation to page() didn't regress."""
+    from fleet.track.store import DEFAULT_PAGE_LIMIT
+
+    store = _store(tmp_path)
+    for i in range(DEFAULT_PAGE_LIMIT + 5):
+        store.create(
+            _session(id=f"s{i:03d}", last_active=f"2026-04-30T{i % 24:02d}:00:00Z"),
+            [_msg("x")],
+        )
+    out = store.list()
+    assert len(out) == DEFAULT_PAGE_LIMIT
+
+
+def test_chained_page_raises(tmp_path: Path):
+    """Cursor pagination across stores requires a k-way merge we
+    haven't built; chained must raise loudly so callers fall back to
+    a single backend."""
+    from fleet.track.store import ChainedSessionStore, NativeFilesSessionStore
+
+    paths = TrackPaths.under(tmp_path)
+    chained = ChainedSessionStore(
+        _store(tmp_path), NativeFilesSessionStore(home=tmp_path)
+    )
+    with pytest.raises(NotImplementedError, match="--source"):
+        chained.page(limit=10)

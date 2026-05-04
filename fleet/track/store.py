@@ -38,6 +38,7 @@ revisit if we ever ship multi-process scenarios.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -50,6 +51,98 @@ from .paths import TrackPaths
 from .unified import Event
 
 log = logging.getLogger("fleet.track.store")
+
+
+# ------------------------------------------------------------------ #
+# Pagination cursor — must stay byte-compatible with the orchestrator  #
+# ------------------------------------------------------------------ #
+#
+# A page cursor is `base64url(json({"la": <last_active or null>, "id": <id>}))`
+# with `=` padding stripped. Sort key everywhere is
+# `(last_active DESC NULLS LAST, id DESC)`; the cursor walks that ordering.
+#
+# Both ends MUST emit and consume the same bytes — see the matching helpers
+# in `theseus:orchestrator/public_api/track.py:_encode_cursor`. Any drift
+# is a wire-protocol break; the round-trip golden test in
+# `tests/track/test_store.py::test_cursor_format_pinned` exists to catch
+# accidental edits.
+
+# Page-size limit mirrors the orchestrator's `Query(ge=1, le=200)`.
+MAX_PAGE_LIMIT: int = 200
+DEFAULT_PAGE_LIMIT: int = 50
+
+
+def _encode_cursor(last_active: Optional[str], id: str) -> str:
+    raw = json.dumps({"la": last_active, "id": id}, separators=(",", ":"))
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def _decode_cursor(cursor: Optional[str]) -> Optional[dict]:
+    """Inverse of `_encode_cursor`. Returns None for empty input;
+    raises `ValueError` on malformed cursors so callers can map it to
+    HTTP 400 / typer.BadParameter as appropriate."""
+    if not cursor:
+        return None
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        raw = base64.urlsafe_b64decode(padded.encode()).decode()
+        decoded = json.loads(raw)
+    except (ValueError, json.JSONDecodeError) as e:
+        raise ValueError(f"invalid cursor: {e}") from e
+    if not isinstance(decoded, dict) or "id" not in decoded or "la" not in decoded:
+        raise ValueError(f"invalid cursor: missing keys {decoded!r}")
+    return decoded
+
+
+def _clamp_limit(limit: int) -> int:
+    if limit < 1:
+        return 1
+    if limit > MAX_PAGE_LIMIT:
+        return MAX_PAGE_LIMIT
+    return limit
+
+
+def _sort_key(s: "Session") -> tuple[int, str, str]:
+    """Sort key matching the server's ORDER BY (last_active DESC NULLS LAST,
+    id DESC). Returned as a positive tuple suitable for `sorted(..., reverse=True)`:
+
+      (la_present, la_or_empty, id)
+
+    With reverse=True:
+      - Rows with last_active sort first (la_present=1 > 0).
+      - Within those, larger last_active first.
+      - Tiebreak by larger id.
+      - NULL last_active rows sweep to the tail (la_present=0), still
+        ordered by id DESC.
+    """
+    la = s.last_active
+    return (1 if la else 0, la or "", s.id)
+
+
+def _passes_cursor(s: "Session", cursor: Optional[dict]) -> bool:
+    """True if `s` comes strictly AFTER the cursor's row in the global
+    ordering. Mirrors the server's WHERE predicate exactly so a cursor
+    minted on one side walks the same logical rows on the other."""
+    if cursor is None:
+        return True
+    cur_la = cursor.get("la")
+    cur_id = cursor["id"]
+    s_la = s.last_active
+
+    if cur_la is None:
+        # Cursor sits in the NULL tail. Only NULL-la rows with smaller
+        # id are still to be emitted.
+        return s_la is None and s.id < cur_id
+
+    # Cursor is in the non-null prefix. Three cases:
+    if s_la is None:
+        # NULL-la rows always sort AFTER any non-null cursor — emit.
+        return True
+    if s_la < cur_la:
+        return True
+    if s_la == cur_la and s.id < cur_id:
+        return True
+    return False
 
 
 # ------------------------------------------------------------------ #
@@ -121,6 +214,33 @@ class SessionStore(Protocol):
         `since` is ISO-8601; matched against `last_active`. Implementations
         may be lazy (returning an iterator) or eager (a list); callers
         should treat it as one-shot iterable.
+
+        For paged consumption (e.g. scripting or chaining cursors with
+        the remote backend), prefer `page()` — `list()` always materialises
+        the first page only, with no cursor surface.
+        """
+        ...
+
+    def page(
+        self,
+        *,
+        tool: Optional[str] = None,
+        cwd: Optional[str] = None,
+        since: Optional[str] = None,
+        limit: int = DEFAULT_PAGE_LIMIT,
+        cursor: Optional[str] = None,
+    ) -> tuple[list[Session], Optional[str]]:
+        """Return one page of sessions, plus the cursor for the next page.
+
+        Sort: `(last_active DESC NULLS LAST, id DESC)` — same on every
+        backend so cursors are interchangeable. `limit` is clamped to
+        [1, MAX_PAGE_LIMIT] (matching the orchestrator). `cursor` is an
+        opaque token from a prior call; pass `None` for the first page.
+
+        Returns `(items, next_cursor)`. `next_cursor is None` when this
+        is the last page. The cursor format is byte-compatible with
+        `theseus:orchestrator/public_api/track.py` so a cursor minted on
+        either side walks the same logical rows on the other.
         """
         ...
 
@@ -225,7 +345,29 @@ class LocalSessionStore:
         since: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> list[Session]:
-        out: list[Session] = []
+        # Backed by `page()` so sort+filter semantics stay identical to
+        # the cursor-paginated path. `limit=None` means "first page using
+        # the default limit"; callers wanting more should use `page()`.
+        page_limit = limit if limit is not None else DEFAULT_PAGE_LIMIT
+        items, _ = self.page(tool=tool, cwd=cwd, since=since, limit=page_limit)
+        return items
+
+    def page(
+        self,
+        *,
+        tool: Optional[str] = None,
+        cwd: Optional[str] = None,
+        since: Optional[str] = None,
+        limit: int = DEFAULT_PAGE_LIMIT,
+        cursor: Optional[str] = None,
+    ) -> tuple[list[Session], Optional[str]]:
+        limit = _clamp_limit(limit)
+        cur = _decode_cursor(cursor)
+
+        # Materialize-then-sort. The local stub holds at most a few
+        # thousand rows in `index.jsonl`; an O(n log n) sort per call is
+        # cheap and lets us mirror the server's predicate exactly.
+        rows: list[Session] = []
         for s in self._read_index():
             if tool is not None and s.tool != tool:
                 continue
@@ -233,12 +375,20 @@ class LocalSessionStore:
                 continue
             if since is not None and (s.last_active or "") < since:
                 continue
-            out.append(s)
-        # Most-recent first.
-        out.sort(key=lambda s: s.last_active or s.started_at or "", reverse=True)
-        if limit is not None:
-            out = out[:limit]
-        return out
+            rows.append(s)
+        rows.sort(key=_sort_key, reverse=True)
+        rows = [s for s in rows if _passes_cursor(s, cur)]
+
+        # Fetch limit+1 to detect "more pages exist", same trick as server.
+        page = rows[: limit + 1]
+        has_more = len(page) > limit
+        page = page[:limit]
+        next_cursor = (
+            _encode_cursor(page[-1].last_active, page[-1].id)
+            if has_more and page
+            else None
+        )
+        return page, next_cursor
 
     def get(self, id: str) -> Optional[Session]:
         # Exact match first.
@@ -492,7 +642,25 @@ class NativeFilesSessionStore:
         since: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> list[Session]:
-        out: list[Session] = []
+        # Same trick as LocalSessionStore.list: defer to page() so sort
+        # and filter semantics are identical.
+        page_limit = limit if limit is not None else DEFAULT_PAGE_LIMIT
+        items, _ = self.page(tool=tool, cwd=cwd, since=since, limit=page_limit)
+        return items
+
+    def page(
+        self,
+        *,
+        tool: Optional[str] = None,
+        cwd: Optional[str] = None,
+        since: Optional[str] = None,
+        limit: int = DEFAULT_PAGE_LIMIT,
+        cursor: Optional[str] = None,
+    ) -> tuple[list[Session], Optional[str]]:
+        limit = _clamp_limit(limit)
+        cur = _decode_cursor(cursor)
+
+        rows: list[Session] = []
         for source, build_session in self._sources_with_session_builders():
             if tool is not None and source.name != tool:
                 continue
@@ -513,12 +681,20 @@ class NativeFilesSessionStore:
                     continue
                 if since is not None and (s.last_active or "") < since:
                     continue
-                out.append(s)
+                rows.append(s)
 
-        out.sort(key=lambda s: s.last_active or s.started_at or "", reverse=True)
-        if limit is not None:
-            out = out[:limit]
-        return out
+        rows.sort(key=_sort_key, reverse=True)
+        rows = [s for s in rows if _passes_cursor(s, cur)]
+
+        page = rows[: limit + 1]
+        has_more = len(page) > limit
+        page = page[:limit]
+        next_cursor = (
+            _encode_cursor(page[-1].last_active, page[-1].id)
+            if has_more and page
+            else None
+        )
+        return page, next_cursor
 
     def get(self, id: str) -> Optional[Session]:
         # Two-pass: exact match, then unique prefix.
@@ -655,10 +831,33 @@ class ChainedSessionStore:
                     continue
                 seen.add(s.id)
                 out.append(s)
-        out.sort(key=lambda s: s.last_active or s.started_at or "", reverse=True)
+        out.sort(key=_sort_key, reverse=True)
         if "limit" in kwargs and kwargs["limit"] is not None:
-            out = out[:kwargs["limit"]]
+            out = out[: kwargs["limit"]]
         return out
+
+    def page(
+        self,
+        *,
+        tool: Optional[str] = None,
+        cwd: Optional[str] = None,
+        since: Optional[str] = None,
+        limit: int = DEFAULT_PAGE_LIMIT,
+        cursor: Optional[str] = None,
+    ) -> tuple[list[Session], Optional[str]]:
+        # Cursor pagination across multiple stores requires a k-way
+        # merge with a composite cursor (one per backing store), which
+        # we don't need yet — the only paged consumer (`flt track ls
+        # --cursor`) targets a single backend at a time. If you want
+        # paged scripting, pick `--source native` / `stub` / `remote`
+        # explicitly. The interactive picker uses `list()` (eager merge)
+        # and never sees a cursor.
+        raise NotImplementedError(
+            "ChainedSessionStore.page() is intentionally unimplemented: "
+            "use --source native|stub|remote to paginate against a single "
+            "backend, or call .list() for the eager-merge view used by "
+            "the picker."
+        )
 
     def get(self, id: str) -> Optional[Session]:
         ambiguous: list[str] = []

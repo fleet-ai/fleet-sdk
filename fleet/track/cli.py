@@ -249,20 +249,62 @@ def list_sessions(
     tool: str = typer.Option(None, "--tool", "-t", help="Filter by tool (claude/codex/cursor/opencode)"),
     cwd: str = typer.Option(None, "--cwd", help="Filter by working directory"),
     since: str = typer.Option(None, "--since", help="Only sessions active since (ISO-8601 or natural)"),
-    limit: int = typer.Option(None, "--limit", "-n", help="Max number of rows"),
+    limit: int = typer.Option(50, "--limit", "-n", help="Max rows per page (1..200)"),
+    cursor: str = typer.Option(
+        None, "--cursor",
+        help="Opaque cursor from a prior `next_cursor:` line. Drives paged scripting.",
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON for scripting"),
     source: str = typer.Option(
         "auto", "--source",
         help="Where to read sessions from: auto (native+stub), native (~/.claude, ~/.codex), stub (LocalSessionStore), remote (theseus, not yet wired).",
     ),
 ) -> None:
-    """List sessions across all tracked AI tools."""
+    """List sessions across all tracked AI tools.
+
+    Sort is fixed at recency-first (`last_active DESC, id DESC`) — same
+    on every backend so cursors are interchangeable.
+
+    Pagination is cursor-based. Pass `--cursor <token>` from a previous
+    `next_cursor:` line to fetch the next page. The cursor format is
+    byte-compatible with the orchestrator's `/v1/track/sessions` endpoint
+    so scripting against either side uses the same opaque tokens.
+    """
+    from .store import _decode_cursor, ChainedSessionStore  # noqa: F401
+
     store = _resolve_session_store(source)
-    sessions = store.list(tool=tool, cwd=cwd, since=since, limit=limit)
+
+    # `--cursor` requires a single backing store; chained stores don't
+    # support pagination (see ChainedSessionStore.page).
+    if cursor and isinstance(store, ChainedSessionStore):
+        raise typer.BadParameter(
+            "--cursor requires --source native | stub | remote; the default "
+            "`auto` chains multiple backends and can't paginate across them."
+        )
+    # Fail fast on malformed cursors so the user sees a clear error.
+    if cursor:
+        try:
+            _decode_cursor(cursor)
+        except ValueError as e:
+            raise typer.BadParameter(str(e))
+
+    if cursor or json_out:
+        # Paged scripting flow — any caller who passed --cursor wants the
+        # next_cursor surfaced; --json shape promises {items, next_cursor}.
+        sessions, next_cursor = store.page(
+            tool=tool, cwd=cwd, since=since, limit=limit, cursor=cursor,
+        )
+    else:
+        # Interactive flow — keep the existing flat-list shape.
+        sessions = store.list(tool=tool, cwd=cwd, since=since, limit=limit)
+        next_cursor = None
 
     if json_out:
         from dataclasses import asdict
-        console.print_json(json.dumps([asdict(s) for s in sessions]))
+        console.print_json(json.dumps({
+            "items": [asdict(s) for s in sessions],
+            "next_cursor": next_cursor,
+        }))
         return
 
     if not sessions:
@@ -290,6 +332,8 @@ def list_sessions(
             fork,
         )
     console.print(table)
+    if next_cursor:
+        console.print(f"[dim]next_cursor:[/dim] {next_cursor}")
 
 
 @app.command()
