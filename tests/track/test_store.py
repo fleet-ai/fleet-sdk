@@ -585,15 +585,69 @@ def test_page_query_paginates_within_filtered_set(tmp_path: Path):
     assert cursor is None
 
 
-def test_chained_page_raises(tmp_path: Path):
-    """Cursor pagination across stores requires a k-way merge we
-    haven't built; chained must raise loudly so callers fall back to
-    a single backend."""
+def test_chained_page_eager_merge_paginates(tmp_path: Path):
+    """ChainedSessionStore.page() eager-merges across backing stores
+    and paginates the merged view via cursor. Means the picker's
+    default `--source auto` honors page-size and paging just like a
+    single backend."""
     from fleet.track.store import ChainedSessionStore, NativeFilesSessionStore
 
-    paths = TrackPaths.under(tmp_path)
-    chained = ChainedSessionStore(
-        _store(tmp_path), NativeFilesSessionStore(home=tmp_path)
+    local = _store(tmp_path)
+    for i in range(3):
+        local.create(
+            _session(id=f"local-{i}", tool="claude",
+                     last_active=f"2026-04-3{i}T00:00:00Z"),
+            [_msg("x")],
+        )
+
+    chained = ChainedSessionStore(local, NativeFilesSessionStore(home=tmp_path))
+
+    page1, cursor = chained.page(limit=2)
+    assert len(page1) == 2
+    assert cursor is not None
+    page2, cursor = chained.page(limit=2, cursor=cursor)
+    # 3 sessions total in chain; second page has the leftover one.
+    assert len(page2) == 1
+    assert cursor is None
+    seen = [s.id for s in page1] + [s.id for s in page2]
+    assert sorted(seen) == ["local-0", "local-1", "local-2"]
+
+
+def test_chained_page_dedupes_by_id(tmp_path: Path):
+    """When a session appears in multiple backing stores (e.g. native
+    and stub both have the same id), chained.page() emits it once."""
+    from fleet.track.store import ChainedSessionStore
+
+    local_a = _store(tmp_path)
+    local_b = LocalSessionStore(TrackPaths.under(tmp_path), name="other-store")
+    for store in (local_a, local_b):
+        store.create(
+            _session(id="shared", tool="claude",
+                     last_active="2026-04-30T00:00:00Z"),
+            [_msg("x")],
+        )
+
+    chained = ChainedSessionStore(local_a, local_b)
+    items, cursor = chained.page(limit=10)
+    assert [s.id for s in items] == ["shared"]
+    assert cursor is None
+
+
+def test_chained_page_query_filter(tmp_path: Path):
+    """Query filter applies before merging — and stays valid across
+    backing stores."""
+    from fleet.track.store import ChainedSessionStore, NativeFilesSessionStore
+
+    local = _store(tmp_path)
+    local.create(
+        _session(id="keep", metadata={"title": "match-me"}),
+        [_msg("x")],
     )
-    with pytest.raises(NotImplementedError, match="--source"):
-        chained.page(limit=10)
+    local.create(
+        _session(id="drop", metadata={"title": "ignore-me"}),
+        [_msg("x")],
+    )
+    chained = ChainedSessionStore(local, NativeFilesSessionStore(home=tmp_path))
+
+    items, _ = chained.page(query="match-me", limit=10)
+    assert [s.id for s in items] == ["keep"]

@@ -71,6 +71,13 @@ log = logging.getLogger("fleet.track.store")
 MAX_PAGE_LIMIT: int = 200
 DEFAULT_PAGE_LIMIT: int = 50
 
+# Internal cap for ChainedSessionStore.page(): the maximum number of
+# rows pulled from each backing store per call. Only matters when the
+# total filtered row count across all stores exceeds this — for which
+# later cursor pages would miss data that fell off the per-store cap.
+# Tuned to comfortably exceed any single user's session count today.
+_CHAINED_BUFFER_CAP: int = 2000
+
 
 def _encode_cursor(last_active: Optional[str], id: str) -> str:
     raw = json.dumps({"la": last_active, "id": id}, separators=(",", ":"))
@@ -884,19 +891,64 @@ class ChainedSessionStore:
         limit: int = DEFAULT_PAGE_LIMIT,
         cursor: Optional[str] = None,
     ) -> tuple[list[Session], Optional[str]]:
-        # Cursor pagination across multiple stores requires a k-way
-        # merge with a composite cursor (one per backing store), which
-        # we don't need yet — the only paged consumer (`flt track ls
-        # --cursor`) targets a single backend at a time. If you want
-        # paged scripting, pick `--source native` / `stub` / `remote`
-        # explicitly. The interactive picker uses `list()` (eager merge)
-        # and never sees a cursor.
-        raise NotImplementedError(
-            "ChainedSessionStore.page() is intentionally unimplemented: "
-            "use --source native|stub|remote to paginate against a single "
-            "backend, or call .list() for the eager-merge view used by "
-            "the picker."
+        """Eager-merge then paginate.
+
+        We pull up to `_CHAINED_BUFFER_CAP` rows from each backing store
+        with the same filters, dedupe by `id` (first store wins),
+        merge-sort by the global key, then apply the cursor predicate
+        and slice into a page.
+
+        The `(la, id)` cursor format is the same as the single-store
+        backends — it indexes into the merged-and-sorted view, not into
+        any one store's local sequence. So a cursor minted on chained is
+        only meaningful against the same chained instance with the same
+        filters; that's fine because nobody passes chained cursors to
+        anything else.
+
+        Limitation: if the total filtered row count across all backends
+        exceeds `_CHAINED_BUFFER_CAP`, later pages would miss whatever
+        fell off each store's per-call cap. For interactive picker use
+        (typical user has <2000 sessions across all backends today)
+        this is invisible; revisit when remote scale arrives and have
+        chained delegate paging to a RemoteSessionStore that owns the
+        global ordering.
+        """
+        cur = _decode_cursor(cursor)
+        seen: set[str] = set()
+        rows: list[Session] = []
+        for store in self._stores:
+            try:
+                store_rows = list(store.list(
+                    tool=tool, cwd=cwd, since=since, query=query,
+                    limit=_CHAINED_BUFFER_CAP,
+                ))
+            except TypeError:
+                # Backwards-compat: a backing store that hasn't grown the
+                # `query` kwarg yet — fall back to filtering ourselves.
+                store_rows = list(store.list(
+                    tool=tool, cwd=cwd, since=since,
+                    limit=_CHAINED_BUFFER_CAP,
+                ))
+                if query:
+                    store_rows = [s for s in store_rows if _matches_query(s, query)]
+            for s in store_rows:
+                if s.id in seen:
+                    continue
+                seen.add(s.id)
+                rows.append(s)
+
+        rows.sort(key=_sort_key, reverse=True)
+        rows = [s for s in rows if _passes_cursor(s, cur)]
+
+        page = rows[: limit + 1]
+        has_more = len(page) > limit
+        page = page[:limit]
+        next_cursor = (
+            _encode_cursor(page[-1].last_active, page[-1].id)
+            if has_more and page
+            else None
         )
+        return page, next_cursor
 
     def get(self, id: str) -> Optional[Session]:
         ambiguous: list[str] = []

@@ -407,27 +407,17 @@ def resume(
             pick_tool,
         )
         from .picker import _terminal_page_size
-        from .store import (
-            ChainedSessionStore,
-            DEFAULT_PAGE_LIMIT,
-            MAX_PAGE_LIMIT,
-        )
-        # Cursor paging requires a single backend (chained doesn't
-        # implement page()). Auto/chained falls back to eager buffer.
-        if isinstance(store, ChainedSessionStore):
-            sessions_iter = store.list(limit=MAX_PAGE_LIMIT)
-            page_state = None
-        else:
-            # Page size = terminal-readable height. fzf is `--disabled`
-            # so every keystroke re-queries server-side; user never sees
-            # a screen-full of pre-buffered rows they have to scroll.
-            page_limit = _terminal_page_size()
-            first_page, _ = store.page(limit=page_limit)
-            sessions_iter = first_page
-            page_state = PageState(source=source, limit=page_limit)
+        # Page size = terminal-readable height. fzf is `--disabled` so
+        # every keystroke re-queries server-side; user never sees a
+        # screen-full of pre-buffered rows they have to scroll. All
+        # backends (including chained `auto`) implement `page()` now,
+        # so the same path works regardless of `--source`.
+        page_limit = _terminal_page_size()
+        first_page, _ = store.page(limit=page_limit)
+        page_state = PageState(source=source, limit=page_limit)
         try:
             target_session = pick_session(
-                sessions_iter,
+                first_page,
                 header="type to search · → next page · ← prev",
                 page_state=page_state,
             )
