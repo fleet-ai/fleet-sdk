@@ -401,18 +401,53 @@ def resume(
         # Interactive picker — two stages: session, then target tool.
         from .picker import (
             FzfNotInstalled,
+            PageState,
             installed_tools,
             pick_session,
             pick_tool,
         )
+        from .picker import _terminal_page_size
+        from .store import (
+            ChainedSessionStore,
+            DEFAULT_PAGE_LIMIT,
+            MAX_PAGE_LIMIT,
+        )
+        # Cursor paging requires a single backend (chained doesn't
+        # implement page()). Auto/chained falls back to eager buffer.
+        if isinstance(store, ChainedSessionStore):
+            sessions_iter = store.list(limit=MAX_PAGE_LIMIT)
+            page_state = None
+        else:
+            # Page size = terminal-readable height. fzf is `--disabled`
+            # so every keystroke re-queries server-side; user never sees
+            # a screen-full of pre-buffered rows they have to scroll.
+            page_limit = _terminal_page_size()
+            first_page, _ = store.page(limit=page_limit)
+            sessions_iter = first_page
+            page_state = PageState(source=source, limit=page_limit)
         try:
-            target_session = pick_session(store.list(), header="Resume which session?")
+            target_session = pick_session(
+                sessions_iter,
+                header="type to search · → next page · ← prev",
+                page_state=page_state,
+            )
         except FzfNotInstalled as e:
             console.print(f"[red]{e}[/red]")
             raise typer.Exit(1)
         if target_session is None:
             console.print("[dim]Cancelled.[/dim]")
             raise typer.Exit(0)
+        # If pick_session returned a synthetic Session (id-only, picked
+        # from a later page that wasn't in the initial buffer), resolve
+        # the full record via the store.
+        if target_session.tool == "?":
+            resolved = store.get(target_session.id)
+            if resolved is None:
+                console.print(
+                    f"[red]Picked session {target_session.id!r} not found in store.[/red]"
+                )
+                raise typer.Exit(1)
+            target_session = resolved
 
         # Stage 2: target tool. Skip the picker if the user already passed
         # `--in`, or if there's exactly one CLI installed (no choice to make).

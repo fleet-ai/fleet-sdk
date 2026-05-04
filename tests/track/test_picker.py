@@ -123,6 +123,48 @@ def test_format_line_includes_event_count():
     assert "42e" in _format_line(s)
 
 
+def test_format_line_includes_metadata_title():
+    s = Session(id="x", tool="claude", metadata={"title": "Implementing fleet-track sidecar"})
+    line = _format_line(s)
+    assert "Implementing fleet-track sidecar" in line
+
+
+def test_format_line_truncates_long_titles():
+    s = Session(
+        id="x", tool="claude",
+        metadata={"title": "x" * 200},
+    )
+    line = _format_line(s)
+    # Title cap is 60 — final char is the ellipsis.
+    assert "…" in line
+
+
+def test_format_line_collapses_newlines_in_title():
+    """Titles never break the fzf row — newlines and tabs collapse to spaces."""
+    s = Session(
+        id="x", tool="claude",
+        metadata={"title": "first line\nsecond line\twith tab"},
+    )
+    line = _format_line(s)
+    assert "\n" not in line
+    assert "first line second line with tab" in line
+
+
+def test_format_line_no_title_when_metadata_absent():
+    s = Session(id="x", tool="claude")
+    line = _format_line(s)
+    # Just shouldn't crash; trailing whitespace is fine.
+    assert line.startswith("x")
+
+
+def test_format_line_no_title_when_metadata_not_dict():
+    """Defensive: if metadata round-trips as something weird, don't crash."""
+    s = Session(id="x", tool="claude")
+    object.__setattr__(s, "metadata", "not-a-dict")  # bypass frozen for test
+    line = _format_line(s)
+    assert line.startswith("x")
+
+
 # ------------------------------------------------------------------ #
 # fzf availability check                                               #
 # ------------------------------------------------------------------ #

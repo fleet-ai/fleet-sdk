@@ -119,6 +119,27 @@ def _sort_key(s: "Session") -> tuple[int, str, str]:
     return (1 if la else 0, la or "", s.id)
 
 
+def _matches_query(s: "Session", query: Optional[str]) -> bool:
+    """Case-insensitive substring match across the fields a user is
+    likely to type (id, tool, cwd, metadata.title). Empty/None query
+    matches everything.
+
+    Server-side this becomes ILIKE on the same columns; both sides apply
+    the predicate BEFORE the cursor walk so a cursor minted with a query
+    keeps walking the same filtered set.
+    """
+    if not query:
+        return True
+    needle = query.lower()
+    title = ""
+    if isinstance(s.metadata, dict):
+        t = s.metadata.get("title")
+        if isinstance(t, str):
+            title = t
+    haystack = " ".join((s.id, s.tool or "", s.cwd or "", title)).lower()
+    return needle in haystack
+
+
 def _passes_cursor(s: "Session", cursor: Optional[dict]) -> bool:
     """True if `s` comes strictly AFTER the cursor's row in the global
     ordering. Mirrors the server's WHERE predicate exactly so a cursor
@@ -227,6 +248,7 @@ class SessionStore(Protocol):
         tool: Optional[str] = None,
         cwd: Optional[str] = None,
         since: Optional[str] = None,
+        query: Optional[str] = None,
         limit: int = DEFAULT_PAGE_LIMIT,
         cursor: Optional[str] = None,
     ) -> tuple[list[Session], Optional[str]]:
@@ -236,6 +258,10 @@ class SessionStore(Protocol):
         backend so cursors are interchangeable. `limit` is clamped to
         [1, MAX_PAGE_LIMIT] (matching the orchestrator). `cursor` is an
         opaque token from a prior call; pass `None` for the first page.
+
+        `query` is a case-insensitive substring match across id/tool/cwd/
+        metadata.title — used by the picker's live-search to re-query the
+        store on each keystroke.
 
         Returns `(items, next_cursor)`. `next_cursor is None` when this
         is the last page. The cursor format is byte-compatible with
@@ -343,13 +369,16 @@ class LocalSessionStore:
         tool: Optional[str] = None,
         cwd: Optional[str] = None,
         since: Optional[str] = None,
+        query: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> list[Session]:
         # Backed by `page()` so sort+filter semantics stay identical to
         # the cursor-paginated path. `limit=None` means "first page using
         # the default limit"; callers wanting more should use `page()`.
         page_limit = limit if limit is not None else DEFAULT_PAGE_LIMIT
-        items, _ = self.page(tool=tool, cwd=cwd, since=since, limit=page_limit)
+        items, _ = self.page(
+            tool=tool, cwd=cwd, since=since, query=query, limit=page_limit,
+        )
         return items
 
     def page(
@@ -358,6 +387,7 @@ class LocalSessionStore:
         tool: Optional[str] = None,
         cwd: Optional[str] = None,
         since: Optional[str] = None,
+        query: Optional[str] = None,
         limit: int = DEFAULT_PAGE_LIMIT,
         cursor: Optional[str] = None,
     ) -> tuple[list[Session], Optional[str]]:
@@ -374,6 +404,8 @@ class LocalSessionStore:
             if cwd is not None and s.cwd != cwd:
                 continue
             if since is not None and (s.last_active or "") < since:
+                continue
+            if not _matches_query(s, query):
                 continue
             rows.append(s)
         rows.sort(key=_sort_key, reverse=True)
@@ -640,12 +672,15 @@ class NativeFilesSessionStore:
         tool: Optional[str] = None,
         cwd: Optional[str] = None,
         since: Optional[str] = None,
+        query: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> list[Session]:
         # Same trick as LocalSessionStore.list: defer to page() so sort
         # and filter semantics are identical.
         page_limit = limit if limit is not None else DEFAULT_PAGE_LIMIT
-        items, _ = self.page(tool=tool, cwd=cwd, since=since, limit=page_limit)
+        items, _ = self.page(
+            tool=tool, cwd=cwd, since=since, query=query, limit=page_limit,
+        )
         return items
 
     def page(
@@ -654,6 +689,7 @@ class NativeFilesSessionStore:
         tool: Optional[str] = None,
         cwd: Optional[str] = None,
         since: Optional[str] = None,
+        query: Optional[str] = None,
         limit: int = DEFAULT_PAGE_LIMIT,
         cursor: Optional[str] = None,
     ) -> tuple[list[Session], Optional[str]]:
@@ -680,6 +716,8 @@ class NativeFilesSessionStore:
                 if cwd is not None and s.cwd != cwd:
                     continue
                 if since is not None and (s.last_active or "") < since:
+                    continue
+                if not _matches_query(s, query):
                     continue
                 rows.append(s)
 
@@ -842,6 +880,7 @@ class ChainedSessionStore:
         tool: Optional[str] = None,
         cwd: Optional[str] = None,
         since: Optional[str] = None,
+        query: Optional[str] = None,
         limit: int = DEFAULT_PAGE_LIMIT,
         cursor: Optional[str] = None,
     ) -> tuple[list[Session], Optional[str]]:

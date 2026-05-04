@@ -523,6 +523,68 @@ def test_list_uses_default_page_limit(tmp_path: Path):
     assert len(out) == DEFAULT_PAGE_LIMIT
 
 
+def test_page_query_filter_substring_match(tmp_path: Path):
+    """`query` is case-insensitive substring across id/tool/cwd/title."""
+    store = _store(tmp_path)
+    store.create(
+        _session(id="abc-fleet", cwd="/tmp/fleet-sdk",
+                 metadata={"title": "fleet-track sidecar"}),
+        [_msg("x")],
+    )
+    store.create(
+        _session(id="def-other", cwd="/tmp/theseus",
+                 metadata={"title": "session metadata index"}),
+        [_msg("x")],
+    )
+
+    items, _ = store.page(query="fleet", limit=10)
+    assert {s.id for s in items} == {"abc-fleet"}
+
+    items, _ = store.page(query="THESEUS", limit=10)  # case-insensitive
+    assert {s.id for s in items} == {"def-other"}
+
+    items, _ = store.page(query="metadata", limit=10)  # title field
+    assert {s.id for s in items} == {"def-other"}
+
+
+def test_page_query_empty_string_is_no_filter(tmp_path: Path):
+    """Empty query (what fzf passes when the user has typed nothing)
+    matches everything, like a missing query."""
+    store = _store(tmp_path)
+    store.create(_session(id="a"), [_msg("x")])
+    store.create(_session(id="b"), [_msg("x")])
+
+    items_none, _ = store.page(query=None, limit=10)
+    items_empty, _ = store.page(query="", limit=10)
+    assert {s.id for s in items_none} == {s.id for s in items_empty} == {"a", "b"}
+
+
+def test_page_query_paginates_within_filtered_set(tmp_path: Path):
+    """A cursor minted with a query must keep walking the same filtered
+    set, not leak unfiltered rows on subsequent pages."""
+    store = _store(tmp_path)
+    for i in range(4):
+        store.create(
+            _session(id=f"keep-{i}", tool="claude",
+                     last_active=f"2026-04-3{i}T00:00:00Z",
+                     metadata={"title": "keep-me"}),
+            [_msg("x")],
+        )
+    for i in range(3):
+        store.create(
+            _session(id=f"drop-{i}", tool="claude",
+                     last_active=f"2026-04-3{i}T00:00:00Z",
+                     metadata={"title": "drop-me"}),
+            [_msg("x")],
+        )
+
+    page1, cursor = store.page(query="keep-me", limit=2)
+    assert {s.id for s in page1} == {"keep-3", "keep-2"}
+    page2, cursor = store.page(query="keep-me", limit=2, cursor=cursor)
+    assert {s.id for s in page2} == {"keep-1", "keep-0"}
+    assert cursor is None
+
+
 def test_chained_page_raises(tmp_path: Path):
     """Cursor pagination across stores requires a k-way merge we
     haven't built; chained must raise loudly so callers fall back to
