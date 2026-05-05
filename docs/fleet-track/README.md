@@ -1,38 +1,11 @@
-# FleetTrack Planning
+# FleetTrack
 
-FleetTrack currently exists as a passive local-session sync daemon in the SDK plus
-thin server support in Theseus. This directory captures the plan for turning that
-prototype into a durable session archive and migration system.
+FleetTrack is the SDK feature for syncing local AI coding sessions to Fleet and
+resuming them locally or across tools.
 
-## Current Decision
+## Current Behavior
 
-Do not scrap everything. Keep the current implementation as a useful bootstrap,
-but do not ship the current sync protocol as the long-term design.
-
-Keep:
-
-- Browser/JWT login flow and team/user-scoped auth.
-- `flt track enable/status/daemon` product surface.
-- OS service installation through launchd/systemd.
-- Source discovery for Claude, Codex, and Cursor local session stores.
-- Local SQLite queue and background daemon shape.
-- Orchestrator-as-control-plane model with presigned S3 uploads.
-- S3 tenant isolation by `team_id/user_id/device_id`.
-- Client and server-side path blocklists.
-
-Replace before scale:
-
-- Whole-file uploads for every changed transcript.
-- Flat "Merkle" manifest that only maps `path -> sha256`.
-- Raw-only storage with no semantic session/version model.
-- Lack of compression.
-- Lack of explicit commit protocol and conflict detection.
-- Reliance on S3 versioning as the only version history.
-- No local restore/resume validation before writing into live tool stores.
-
-## Existing Behavior
-
-The SDK watches:
+The SDK scans:
 
 - `~/.claude/projects/**/*.jsonl`
 - `~/.cursor/projects/**/agent-transcripts/**/*.jsonl`
@@ -40,18 +13,25 @@ The SDK watches:
 - `~/.codex/sessions/**/*.jsonl`
 - `~/.codex/archived_sessions/**/*.jsonl`
 
-The v1 daemon uses full reconciliation as the sync trigger. On startup, and then
+The v1 syncer uses full reconciliation as the sync trigger. On startup, and then
 every 10 minutes, it scans local session files, diffs them against the remote
 manifest, queues changed files, uploads complete scrubbed file bodies through
-presigned S3 `PUT` URLs, and writes a new manifest after successful uploads.
-There is no chunking or compression. The file watcher code remains available, but
-v1 does not use watcher-driven uploads by default.
+presigned S3 `PUT` URLs, and writes a new manifest after successful uploads. The
+file watcher code remains available, but v1 does not use watcher-driven uploads
+by default.
 
-Theseus currently exposes:
+The SDK also upserts session metadata after successful uploads so `flt track ls`
+and `flt track resume` can use the remote session index.
+
+The public Fleet API currently exposes:
 
 - `POST /v1/track/provision`
 - `GET /v1/track/manifest`
 - `POST /v1/track/upload-urls`
+- `POST /v1/track/sessions/{id}`
+- `GET /v1/track/sessions`
+- `GET /v1/track/sessions/{id}`
+- `GET /v1/track/sessions/{id}/content`
 
 Objects are stored under:
 
@@ -64,25 +44,34 @@ fleet-track-sessions/
     raw/.codex/sessions/...
 ```
 
-## Target Direction
+Authentication is user-scoped. `flt login` obtains browser/SSO credentials, and
+the SDK refreshes them through Fleet/orchestrator instead of talking to Supabase
+directly. The orchestrator remains the control plane; session bytes go directly
+to S3 through presigned URLs.
 
-FleetTrack v2 should store immutable, compressed, content-addressed session
-segments plus explicit version manifests. The raw source archive remains the
-source of truth. A Fleet-owned canonical session model is a versioned projection
-over the raw archive, not a replacement for it.
-
-The core invariant is:
+## Commands
 
 ```text
-raw restore must be byte-identical and load-safe; cross-tool conversion may be
-lossy, but must never write invalid native session files.
+flt track enable
+flt track disable
+flt track status
+flt track daemon --once
+flt track logs
+flt track ls
+flt track resume
+flt track gc
 ```
 
-See:
+## Design Notes
 
-- [Current State Assessment](./current-state-assessment.md)
-- [Goals](./goals.md)
-- [V2 Architecture](./v2-architecture.md)
-- [V2 Git-Like Sync Research](./v2-git-like-sync-research.md)
-- [Unified Session Format](./unified-session-format.md)
-- [Local Resume Test Plan](./local-resume-test-plan.md)
+- Raw native session files remain the restore source of truth.
+- The unified event model is a projection for listing, search, compaction, and
+  cross-tool continuation.
+- Same-tool resume should prefer native tool resume when the source session is
+  available locally.
+- Cross-tool resume may be lossy, but must create valid target-tool session
+  state or fail closed.
+- Bulk session bytes should keep going directly to object storage; orchestrator
+  should not proxy large payloads.
+
+See [Goals](./goals.md) for the organized remaining work.
