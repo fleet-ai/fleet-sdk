@@ -40,10 +40,12 @@ The SDK watches:
 - `~/.codex/sessions/**/*.jsonl`
 - `~/.codex/archived_sessions/**/*.jsonl`
 
-The daemon reacts to file events after a 2.5 second debounce, drains the upload
-queue every 10 seconds, and runs a full reconciliation every 10 minutes. Changed
-files are uploaded as complete scrubbed file bodies through presigned S3 `PUT`
-URLs. There is no chunking or compression.
+The v1 daemon uses full reconciliation as the sync trigger. On startup, and then
+every 10 minutes, it scans local session files, diffs them against the remote
+manifest, queues changed files, uploads complete scrubbed file bodies through
+presigned S3 `PUT` URLs, and writes a new manifest after successful uploads.
+There is no chunking or compression. The file watcher code remains available, but
+v1 does not use watcher-driven uploads by default.
 
 Theseus currently exposes:
 
@@ -81,5 +83,6 @@ See:
 - [Current State Assessment](./current-state-assessment.md)
 - [Goals](./goals.md)
 - [V2 Architecture](./v2-architecture.md)
+- [V2 Git-Like Sync Research](./v2-git-like-sync-research.md)
 - [Unified Session Format](./unified-session-format.md)
 - [Local Resume Test Plan](./local-resume-test-plan.md)

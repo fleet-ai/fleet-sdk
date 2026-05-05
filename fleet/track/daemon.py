@@ -1,17 +1,20 @@
 """Fleet track daemon.
 
+V1 is intentionally simple: periodic full reconciliation is the source of truth.
+The daemon scans local session files, diffs them against the remote manifest,
+uploads whole changed files, then uploads a new manifest after successful PUTs.
+
 Main loop:
-  1. FSEvents/inotify watcher → debounce → queue
-  2. Upload worker pool drains queue via presigned URLs
-  3. Hourly reconciliation loop: full Merkle diff → catch FSEvents gaps
-  4. SIGTERM → drain in-flight uploads → exit cleanly
+  1. Initial full reconcile on startup.
+  2. Upload worker pool drains queue via presigned URLs.
+  3. Reconciliation loop: full Merkle diff every RECONCILE_INTERVAL.
+  4. SIGTERM → drain in-flight uploads → exit cleanly.
 
 Invoked by launchd/systemd as: flt track daemon
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import logging.handlers
@@ -20,8 +23,7 @@ import signal
 import threading
 import time
 import uuid
-from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from .api import TrackAPIClient, TrackAPIError
 from .drainer import QueueDrainer
@@ -29,18 +31,19 @@ from .merkle import HashCache, MerkleTree
 from .paths import TrackPaths
 from .queue import UploadQueue
 from .reconciler import Reconciler
-from .sources import relative_to_home, source_summary
+from .sources import source_summary
 from .status import (
     TrackStatus,
     clear_pid,
     write_pid,
     write_status,
 )
-from .uploader import UploadPool
-from .watcher import FileWatcher
+from .uploader import HttpxTransport, Transport, UploadPool
 
-RECONCILE_INTERVAL = 600   # full Merkle diff every 10 minutes
-HOT_FILE_INTERVAL = 120     # active session files flushed every 2 min
+if TYPE_CHECKING:
+    from .reconciler import ReconcileResult
+
+RECONCILE_INTERVAL = 600  # full Merkle diff every 10 minutes
 
 
 def _setup_logging(paths: TrackPaths) -> None:
@@ -49,7 +52,9 @@ def _setup_logging(paths: TrackPaths) -> None:
         paths.log_file, maxBytes=10 * 1024 * 1024, backupCount=3
     )
     handler.setFormatter(
-        logging.Formatter('{"time":"%(asctime)s","level":"%(levelname)s","component":"%(name)s","msg":"%(message)s"}')
+        logging.Formatter(
+            '{"time":"%(asctime)s","level":"%(levelname)s","component":"%(name)s","msg":"%(message)s"}'
+        )
     )
     root = logging.getLogger()
     root.addHandler(handler)
@@ -67,6 +72,7 @@ def _make_device_id() -> str:
     """
     import re
     import socket
+
     hostname = re.sub(r"[^a-z0-9-]", "-", socket.gethostname().lower())[:20].strip("-")
     suffix = str(uuid.uuid4()).replace("-", "")[:8]
     return f"{hostname}-{suffix}"
@@ -81,6 +87,18 @@ def _load_config(paths: TrackPaths) -> dict:
     return config
 
 
+def _identity_from_config(cfg: dict, device_id: str) -> dict:
+    return {
+        "user_id": cfg.get("user_id", ""),
+        "email": cfg.get("email", ""),
+        "team_id": cfg.get("team_id", ""),
+        "team_name": cfg.get("team_name", ""),
+        "device_id": device_id,
+        "hostname": cfg.get("hostname", ""),
+        "platform": cfg.get("platform", ""),
+    }
+
+
 class Daemon:
     def __init__(
         self,
@@ -90,6 +108,7 @@ class Daemon:
         cache: Optional[HashCache] = None,
         tree: Optional[MerkleTree] = None,
         api: Optional[TrackAPIClient] = None,
+        upload_transport: Optional[Transport] = None,
     ) -> None:
         self._paths = paths or TrackPaths.default()
         self._stop = threading.Event()
@@ -98,6 +117,7 @@ class Daemon:
         self._cache = cache or HashCache(self._paths)
         self._tree = tree or MerkleTree(self._cache)
         self._api = api or TrackAPIClient()
+        self._upload_transport = upload_transport
         self._pool: Optional[UploadPool] = None
         self._reconciler = Reconciler(
             queue=self._queue, cache=self._cache, tree=self._tree, api=self._api
@@ -118,20 +138,25 @@ class Daemon:
     # Public entry points                                                  #
     # ------------------------------------------------------------------ #
 
-    def run_once(self, *, device_id: str = "test-device") -> "ReconcileResult":  # type: ignore[name-defined]
+    def run_once(self, *, device_id: Optional[str] = None) -> "ReconcileResult":  # type: ignore[name-defined]
         """One reconcile pass + drain. Test seam and `flt track daemon --once`.
 
         Sets up a pool inline, runs Reconciler.reconcile, then Drainer.drain_once
-        until the queue is empty, then waits for in-flight uploads. Does NOT
-        install signal handlers or start the watcher. Caller owns paths and is
-        responsible for `paths.ensure_track_dir()`.
+        until the queue is empty, waits for in-flight uploads, then uploads the
+        manifest if any files were confirmed. Does NOT install signal handlers.
         """
-        from .reconciler import ReconcileResult  # local import for the type
+        if device_id is None:
+            cfg = _load_config(self._paths)
+            device_id = cfg["device_id"]
+            self._identity = _identity_from_config(cfg, device_id)
+        elif not self._identity:
+            self._identity = {"device_id": device_id}
 
         if self._pool is None:
             self._pool = UploadPool(
                 on_done=self._on_upload_done,
                 on_failed=self._on_upload_failed,
+                transport=self._upload_transport,
             )
             self._drainer = QueueDrainer(
                 paths=self._paths,
@@ -152,6 +177,12 @@ class Daemon:
 
         # Wait for in-flight uploads.
         self._pool.drain(timeout=60)
+        if self._manifest_dirty:
+            self._upload_manifest()
+            self._manifest_dirty = False
+        self._pool.shutdown()
+        self._pool = None
+        self._drainer = None
         return result
 
     def run(self) -> None:
@@ -159,16 +190,13 @@ class Daemon:
         write_pid(self._paths)
         cfg = _load_config(self._paths)
         self._device_id = cfg["device_id"]
-        self._identity = {
-            "user_id": cfg.get("user_id", ""),
-            "email": cfg.get("email", ""),
-            "team_id": cfg.get("team_id", ""),
-            "team_name": cfg.get("team_name", ""),
-            "device_id": self._device_id,
-            "hostname": cfg.get("hostname", ""),
-            "platform": cfg.get("platform", ""),
-        }
-        log.info("daemon starting run_id=%s pid=%s device=%s", self._run_id, os.getpid(), self._device_id)
+        self._identity = _identity_from_config(cfg, self._device_id)
+        log.info(
+            "daemon starting run_id=%s pid=%s device=%s",
+            self._run_id,
+            os.getpid(),
+            self._device_id,
+        )
 
         signal.signal(signal.SIGTERM, self._handle_sigterm)
         signal.signal(signal.SIGINT, self._handle_sigterm)
@@ -176,6 +204,7 @@ class Daemon:
         self._pool = UploadPool(
             on_done=self._on_upload_done,
             on_failed=self._on_upload_failed,
+            transport=self._upload_transport,
         )
         self._drainer = QueueDrainer(
             paths=self._paths,
@@ -184,19 +213,12 @@ class Daemon:
             pool=self._pool,
         )
 
-        # Start FSEvents/inotify watcher
-        try:
-            watcher = FileWatcher(callback=self._on_files_changed)
-            watcher.start()
-            log.info("file watcher started")
-        except Exception as e:
-            log.warning("file watcher unavailable (%s) — polling only", e)
-            watcher = None
-
         # Initial full sync
         self._reconcile()
 
-        # Main loop: reconcile hourly, reset failed items, write status
+        # Main loop: reconcile periodically, reset failed items, write status.
+        # V1 intentionally avoids watcher-driven whole-file uploads; changed
+        # files are discovered by reconciliation.
         last_reconcile = time.monotonic()
         last_queue_reset = time.monotonic()
 
@@ -231,31 +253,10 @@ class Daemon:
             self._pool.shutdown()
         if self._manifest_dirty:
             self._upload_manifest()
-        if watcher:
-            watcher.stop()
         self._queue.close()
         self._cache.close()
         clear_pid(self._paths)
         log.info("daemon stopped")
-
-    # ------------------------------------------------------------------ #
-    # FSEvents callback                                                    #
-    # ------------------------------------------------------------------ #
-
-    def _on_files_changed(self, paths: list[Path]) -> None:
-        items = []
-        for path in paths:
-            if not path.exists():
-                continue
-            digest = self._cache.get_or_compute(path)
-            if digest:
-                rel = relative_to_home(path)
-                items.append((rel, digest))
-
-        if items:
-            self._queue.enqueue_batch(items)
-            log.debug("queued %d changed files", len(items))
-            self._drain_queue()
 
     # ------------------------------------------------------------------ #
     # Reconciliation (full Merkle diff)                                   #
@@ -287,7 +288,9 @@ class Daemon:
         if not result.in_sync:
             self._drain_queue()
 
-        log.info("reconcile done run_id=%s changed=%d", run_id, len(result.changed_paths))
+        log.info(
+            "reconcile done run_id=%s changed=%d", run_id, len(result.changed_paths)
+        )
 
     def _upload_manifest(self) -> None:
         """PUT manifest.json reflecting only files confirmed uploaded to S3.
@@ -300,23 +303,36 @@ class Daemon:
             confirmed = dict(self._confirmed_map)
 
         root = MerkleTree.compute_root(confirmed)
-        manifest = json.dumps({
-            "root_hash": root,
-            **self._identity,
-            "files": confirmed,
-        }, separators=(",", ":"))
+        manifest = json.dumps(
+            {
+                "root_hash": root,
+                **self._identity,
+                "files": confirmed,
+            },
+            separators=(",", ":"),
+        )
         try:
             url_map = self._api.get_upload_urls(self._device_id, ["manifest.json"])
             url = url_map.get("manifest.json")
             if not url:
                 log.warning("manifest upload: no presigned URL returned")
                 return
-            import httpx
-            resp = httpx.put(url, content=manifest.encode(), headers={"Content-Type": "application/octet-stream"}, timeout=30)
-            if resp.status_code not in (200, 204):
-                log.warning("manifest upload failed: HTTP %s", resp.status_code)
+            owned_transport = None
+            transport = self._upload_transport
+            if transport is None:
+                owned_transport = HttpxTransport()
+                transport = owned_transport
+            try:
+                status = transport.put(url, manifest.encode())
+            finally:
+                if owned_transport is not None:
+                    owned_transport.close()
+            if status not in (200, 204):
+                log.warning("manifest upload failed: HTTP %s", status)
             else:
-                log.info("manifest uploaded root=%s files=%d", root[:12], len(confirmed))
+                log.info(
+                    "manifest uploaded root=%s files=%d", root[:12], len(confirmed)
+                )
         except Exception as e:
             log.warning("manifest upload error: %s", e)
 
@@ -369,5 +385,9 @@ class Daemon:
         self._stop.set()
 
 
-def main() -> None:
-    Daemon().run()
+def main(*, once: bool = False) -> None:
+    daemon = Daemon()
+    if once:
+        daemon.run_once()
+        return
+    daemon.run()

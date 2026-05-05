@@ -31,8 +31,8 @@ The prototype does not yet prove the hard parts:
 | Auth | Browser/JWT login plus team ID | Yes | Track requires user-scoped credentials; this is correct for per-user isolation. |
 | Service install | launchd/systemd user daemon | Yes | Correct product shape. Needs better diagnostics. |
 | Source discovery | Claude, Cursor, Codex local paths | Yes | Keep but move source definitions into adapter modules. |
-| Watcher | watchdog with 2.5 second debounce | Yes | Useful for low-latency queueing. Not sufficient as the only correctness mechanism. |
-| Reconcile | full scan every 10 minutes | Yes | Keep as safety net. Replace whole-file hash diff with segment/version reconciliation. |
+| Watcher | watchdog module exists, but v1 daemon does not use watcher-driven uploads by default | Maybe | Useful later for latency, but too aggressive for whole-file v1 uploads. |
+| Reconcile | full scan on startup and every 10 minutes | Yes | V1 now treats this as the sync trigger. Replace whole-file hash diff with segment/version reconciliation in v2. |
 | Hash cache | SQLite path/mtime/size cache | Partly | Keep local state pattern. Extend for record offsets, generations, and segment manifests. |
 | Queue | SQLite upload queue | Yes | Keep. Change rows from file uploads to object uploads and version commits. |
 | Upload | whole scrubbed file via presigned S3 PUT | Replace | This is the main scalability problem. |
@@ -83,4 +83,3 @@ Do not scrap the branch. Port it and use it as the product skeleton.
 
 Do scrap the storage/sync protocol before relying on it for long sessions or
 cross-machine restore.
-

@@ -162,9 +162,15 @@ def status() -> None:
 
 
 @app.command()
-def daemon() -> None:
+def daemon(
+    once: bool = typer.Option(
+        False,
+        "--once",
+        help="Run one reconcile/upload/manifest pass and exit. Useful for local E2E tests.",
+    ),
+) -> None:
     """Run the sync daemon (called by launchd/systemd — not for direct use)."""
-    daemon_main()
+    daemon_main(once=once)
 
 
 @app.command()
