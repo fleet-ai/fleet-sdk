@@ -2,11 +2,10 @@
 
 import json
 import os
-import signal
 import sys
 import threading
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 # Load .env file if present (before other imports that might need env vars)
 try:
@@ -19,7 +18,6 @@ except ImportError:
 try:
     import typer
     from rich.console import Console
-    from rich.live import Live
     from rich.panel import Panel
     from rich.progress import (
         Progress,
@@ -39,7 +37,6 @@ except ImportError:
     sys.exit(1)
 
 from .client import Fleet
-from .models import JobCreateRequest
 
 
 app = typer.Typer(
@@ -121,15 +118,36 @@ def get_client() -> Fleet:
     raise typer.Exit(1)
 
 
+def _oversight_auth_headers() -> Optional[Dict[str, str]]:
+    headers = {
+        "accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
+    api_key = os.getenv("FLEET_API_KEY")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+        return headers
+
+    from .auth import get_valid_token
+
+    result = get_valid_token()
+    if not result:
+        return None
+
+    jwt, team_id = result
+    headers["X-JWT-Token"] = jwt
+    headers["X-Team-ID"] = team_id
+    return headers
+
+
 def _run_oversight(job_id: str, model: str = "anthropic/claude-sonnet-4"):
     """Run oversight summarization on a completed job."""
     import httpx
 
-    api_key = os.getenv("FLEET_API_KEY")
-    if not api_key:
-        console.print(
-            "[yellow]Warning:[/yellow] FLEET_API_KEY not set, skipping oversight"
-        )
+    headers = _oversight_auth_headers()
+    if not headers:
+        console.print("[yellow]Warning:[/yellow] Not authenticated, skipping oversight")
         return
 
     base_url = os.getenv("FLEET_BASE_URL", CLI_DEFAULT_BASE_URL)
@@ -142,11 +160,7 @@ def _run_oversight(job_id: str, model: str = "anthropic/claude-sonnet-4"):
         with httpx.Client(timeout=300) as client:
             response = client.post(
                 oversight_url,
-                headers={
-                    "accept": "application/json",
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers=headers,
                 json={
                     "job_id": job_id,
                     "model": model,
@@ -158,7 +172,7 @@ def _run_oversight(job_id: str, model: str = "anthropic/claude-sonnet-4"):
 
             if response.status_code == 200:
                 result = response.json()
-                console.print(f"[green]✓[/green] Oversight analysis started")
+                console.print("[green]✓[/green] Oversight analysis started")
                 if "summary_id" in result:
                     console.print(f"  Summary ID: [cyan]{result['summary_id']}[/cyan]")
                 # Show link to dashboard
@@ -219,7 +233,7 @@ def list_jobs(
     console.print(f"[dim]  Job details:       flt jobs get {first_job_id}[/dim]")
     console.print(f"[dim]  Job sessions:      flt jobs sessions {first_job_id}[/dim]")
     console.print(
-        f"[dim]  Session transcript: flt sessions transcript <session-id>[/dim]"
+        "[dim]  Session transcript: flt sessions transcript <session-id>[/dim]"
     )
 
 
@@ -341,7 +355,7 @@ def create_job(
         console.print(json.dumps(result.model_dump(), indent=2, default=str))
         return
 
-    console.print(f"[green]Job created successfully![/green]")
+    console.print("[green]Job created successfully![/green]")
     console.print(f"  Job ID: [cyan]{result.job_id}[/cyan]")
     if result.workflow_job_id:
         console.print(f"  Workflow ID: {result.workflow_job_id}")
@@ -366,7 +380,7 @@ def get_job(
         console.print(json.dumps(job.model_dump(), indent=2, default=str))
         return
 
-    console.print(f"[bold]Job Details[/bold]")
+    console.print("[bold]Job Details[/bold]")
     console.print(f"  ID: [cyan]{job.id}[/cyan]")
     console.print(f"  Name: {job.name or '-'}")
     console.print(f"  Status: {format_status(job.status)}")
@@ -377,7 +391,7 @@ def get_job(
     console.print("[dim]Tips:[/dim]")
     console.print(f"[dim]  Job sessions:      flt jobs sessions {job.id}[/dim]")
     console.print(
-        f"[dim]  Session transcript: flt sessions transcript <session-id>[/dim]"
+        "[dim]  Session transcript: flt sessions transcript <session-id>[/dim]"
     )
 
 
@@ -481,7 +495,7 @@ def get_session_transcript(
         return
 
     # Header
-    console.print(f"[bold]Session Transcript[/bold]")
+    console.print("[bold]Session Transcript[/bold]")
     if result.instance:
         console.print(f"  Status: {format_status(result.instance.status)}")
     console.print()
@@ -493,7 +507,7 @@ def get_session_transcript(
         if result.task.version:
             console.print(f"  Version: {result.task.version}")
         console.print()
-        console.print(f"[bold]Prompt:[/bold]")
+        console.print("[bold]Prompt:[/bold]")
         console.print(f"  {result.task.prompt}")
         console.print()
 
@@ -544,13 +558,13 @@ def get_session_transcript(
                             text = text[:500] + "..."
                         console.print(f"  {text}")
                     elif item.get("type") == "image_url":
-                        console.print(f"  [dim][Image][/dim]")
+                        console.print("  [dim][Image][/dim]")
                     elif item.get("type") == "tool_use":
                         console.print(
                             f"  [dim]Tool: {item.get('name', 'unknown')}[/dim]"
                         )
                     elif item.get("type") == "tool_result":
-                        console.print(f"  [dim]Tool Result[/dim]")
+                        console.print("  [dim]Tool Result[/dim]")
                 else:
                     console.print(f"  {item}")
         else:
@@ -701,7 +715,7 @@ def _run_local_agent(
     console.print(f"  [bold]Concurrent[/bold]  {max_concurrent}")
     if headful:
         console.print(
-            f"  [bold]Headful[/bold]     [green]Yes[/green] (browser visible via noVNC)"
+            "  [bold]Headful[/bold]     [green]Yes[/green] (browser visible via noVNC)"
         )
     console.print()
 
@@ -772,7 +786,7 @@ def _run_local_agent(
         console.print(f"[dim]  Job details:        flt jobs get {job_id}[/dim]")
         console.print(f"[dim]  Job sessions:       flt jobs sessions {job_id}[/dim]")
         console.print(
-            f"[dim]  Session transcript: flt sessions transcript <session-id>[/dim]"
+            "[dim]  Session transcript: flt sessions transcript <session-id>[/dim]"
         )
 
     # Summary
@@ -1001,7 +1015,7 @@ def eval_run(
 
         # Check if it's a model not found error and format nicely
         if "not found" in error_str.lower() and "available models" in error_str.lower():
-            console.print(f"[red]Error:[/red] Invalid model specified")
+            console.print("[red]Error:[/red] Invalid model specified")
             console.print()
             # Extract and display available models
             if "Available models:" in error_str:
@@ -1014,7 +1028,7 @@ def eval_run(
                     console.print("[bold]Available models:[/bold]")
                     for m in sorted(available):
                         console.print(f"  [cyan]{m}[/cyan]")
-                except:
+                except Exception:
                     console.print(f"[dim]{error_str}[/dim]")
         else:
             console.print(f"[red]Error creating job:[/red] {e}")
@@ -1054,7 +1068,7 @@ def eval_run(
     console.print(f"[dim]  Job details:       flt jobs get {job_id}[/dim]")
     console.print(f"[dim]  Job sessions:      flt jobs sessions {job_id}[/dim]")
     console.print(
-        f"[dim]  Session transcript: flt sessions transcript <session-id>[/dim]"
+        "[dim]  Session transcript: flt sessions transcript <session-id>[/dim]"
     )
     console.print()
 
@@ -1133,7 +1147,7 @@ def eval_run(
                         # Check if all sessions are done
                         if completed >= total:
                             break
-                except:
+                except Exception:
                     # Sessions endpoint might not be ready yet
                     pass
 
@@ -1142,7 +1156,7 @@ def eval_run(
                     job = client.get_job(job_id)
                     if job.status in TERMINAL_JOB_STATUSES:
                         break
-                except:
+                except Exception:
                     pass
 
                 # Check if user pressed Ctrl+B to detach
@@ -1188,7 +1202,7 @@ def eval_run(
                         console.print(
                             f"  {task_name}: {tg.passed_sessions}/{tg.total_sessions} ({task_rate:.0f}%)"
                         )
-        except:
+        except Exception:
             pass
 
         # Run oversight if requested and job completed (not detached)
