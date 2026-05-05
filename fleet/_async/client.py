@@ -515,8 +515,6 @@ class AsyncFleet:
         httpx_client: Optional[httpx.AsyncClient] = None,
         max_retries: int = DEFAULT_MAX_RETRIES,
         timeout: float = DEFAULT_TIMEOUT,
-        jwt: Optional[str] = None,
-        team_id: Optional[str] = None,
     ):
         if api_key is None:
             api_key = os.getenv("FLEET_API_KEY")
@@ -527,8 +525,6 @@ class AsyncFleet:
             api_key=api_key,
             base_url=base_url,
             httpx_client=self._httpx_client,
-            jwt=jwt,
-            team_id=team_id,
         )
 
     async def list_envs(self) -> List[EnvironmentModel]:
