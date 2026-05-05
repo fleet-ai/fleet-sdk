@@ -23,6 +23,11 @@ app = typer.Typer(help="Track local AI coding sessions", no_args_is_help=True)
 console = Console()
 
 
+def _write_config(paths: TrackPaths, config: dict) -> None:
+    paths.ensure_track_dir()
+    paths.config_file.write_text(json.dumps(config, indent=2))
+
+
 @app.command()
 def enable() -> None:
     """Scan this machine for AI sessions and start syncing."""
@@ -41,7 +46,6 @@ def enable() -> None:
         config = json.loads(paths.config_file.read_text())
     else:
         config = {}
-        paths.config_file.write_text(json.dumps(config, indent=2))
 
     if "device_id" not in config:
         import re
@@ -51,6 +55,7 @@ def enable() -> None:
             "-"
         )
         config["device_id"] = f"{hostname}-{str(uuid.uuid4()).replace('-', '')[:8]}"
+        _write_config(paths, config)
 
     device_id = config["device_id"]
 
@@ -71,7 +76,7 @@ def enable() -> None:
 
         config["hostname"] = socket.gethostname()
         config["platform"] = platform.system().lower()
-        paths.config_file.write_text(json.dumps(config, indent=2))
+        _write_config(paths, config)
     except TrackAPIError as e:
         console.print(f"[red]Provision failed:[/red] {e}")
         raise typer.Exit(1)
