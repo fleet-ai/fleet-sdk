@@ -47,6 +47,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Iterator, Optional, Protocol
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from .paths import TrackPaths
 from .unified import Event
 
@@ -107,6 +109,23 @@ def _clamp_limit(limit: int) -> int:
     if limit > MAX_PAGE_LIMIT:
         return MAX_PAGE_LIMIT
     return limit
+
+
+def _read_local_device_id() -> Optional[str]:
+    """Pull the device_id stamped on this machine by `flt track enable`.
+
+    Used to populate `Session.origin_device` for sessions produced
+    locally. None when the user hasn't enabled tracking yet (the LocalSessionStore
+    still works as a dev stub; it just won't carry origin info)."""
+    try:
+        cfg_path = TrackPaths.default().config_file
+        if not cfg_path.exists():
+            return None
+        cfg = json.loads(cfg_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    did = cfg.get("device_id")
+    return did if isinstance(did, str) and did else None
 
 
 def _sort_key(s: "Session") -> tuple[int, str, str]:
@@ -178,6 +197,43 @@ def _passes_cursor(s: "Session", cursor: Optional[dict]) -> bool:
 # ------------------------------------------------------------------ #
 
 
+class SessionMetadata(BaseModel):
+    """Canonical schema for `Session.metadata`.
+
+    Both the SDK and the orchestrator should read/write metadata
+    conforming to this model. The dict on `Session.metadata` itself
+    stays a plain dict for ergonomics (existing callers do
+    `s.metadata.get("title")`); `Session.metadata_typed()` parses it
+    through this model when typed access is needed.
+
+    `extra="allow"` so the model is forward-compatible — a server-side
+    field we haven't pinned yet still survives round-trip.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    # Display
+    title: Optional[str] = None
+
+    # Repo identity (cross-machine resume key)
+    # `repo_url` is the canonical key — normalized via `normalize_repo_url`
+    # in `fleet.track.repos`. `repo_subpath` is the path relative to the
+    # repo root. `origin_cwd` is the absolute path on the originating
+    # machine, kept as a fallback for sessions outside any git repo.
+    repo_url: Optional[str] = None
+    repo_subpath: Optional[str] = None
+    origin_cwd: Optional[str] = None
+
+    # Source-recorded context (populated where the source format exposes it)
+    model: Optional[str] = None
+    agent_version: Optional[str] = None
+    git_branch: Optional[str] = None
+
+    # User-tagged labels (free-form). Reserved for future server-driven
+    # workflows; ingest writes none.
+    tags: list[str] = Field(default_factory=list)
+
+
 @dataclass(frozen=True)
 class Session:
     """One session in the store.
@@ -190,8 +246,10 @@ class Session:
         Same as the unified Event.source, lifted to the session level
         for fast filtering without parsing events.
 
-    `cwd` — the working directory the agent was run in. Used by
-        the resume flow to pick the right local target dir.
+    `cwd` — the working directory the agent was run in (originating
+        machine's absolute path). Use `metadata.repo_url` +
+        `metadata.repo_subpath` for cross-machine resume; cwd is only
+        meaningful on the device that produced the session.
 
     `started_at` / `last_active` — ISO-8601 timestamps. `last_active` is
         a max over the session's events; the daemon updates it on
@@ -204,9 +262,15 @@ class Session:
         sessions (e.g. claude resume of a codex session). The original
         sessions have both as None.
 
-    `metadata` — open-ended bag for future extensions (model, agent
-        version, git_branch, anything else). Stored verbatim, not
-        validated.
+    `origin_device` — id of the machine that produced this session
+        (`device_id` from `~/.fleet/track/config.json`). Top-level (not
+        metadata) because it's identity, not annotation. None when
+        unknown (e.g. NativeFilesSessionStore on a host that never ran
+        `flt track enable`).
+
+    `metadata` — open-ended bag conforming to `SessionMetadata`.
+        Validated lazily via `metadata_typed()`; stored as dict so
+        callers can read/write known keys directly.
     """
 
     id: str
@@ -217,7 +281,12 @@ class Session:
     event_count: int = 0
     forked_from: Optional[str] = None
     fork_point: Optional[int] = None
+    origin_device: Optional[str] = None
     metadata: dict = field(default_factory=dict)
+
+    def metadata_typed(self) -> SessionMetadata:
+        """Parse `metadata` through `SessionMetadata` for typed access."""
+        return SessionMetadata.model_validate(self.metadata)
 
 
 # ------------------------------------------------------------------ #
@@ -228,6 +297,14 @@ class Session:
 class SessionStore(Protocol):
     """The contract. Both LocalSessionStore and (future) RemoteSessionStore
     implement this."""
+
+    # Optional opt-in flag for ChainedSessionStore. When True, the chain
+    # delegates paging entirely to this store (it owns global ordering)
+    # and overlays other stores' rows only inside the returned page's
+    # (last_active, id) window. Local stores leave this False/absent so
+    # the legacy eager-merge path is used. RemoteSessionStore sets it
+    # True so paging scales beyond `_CHAINED_BUFFER_CAP`.
+    prefers_authoritative_paging: bool = False
 
     def list(
         self,
@@ -477,6 +554,12 @@ class LocalSessionStore:
 
         # Materialize events to count; we need event_count anyway.
         events_list = list(events)
+        # Stamp `origin_device` from the local config when the caller
+        # didn't set one. The local store is by definition the device
+        # producing the session, so pinning it here gives every record
+        # in the dev stub a stable origin id without callers having to
+        # know about it.
+        origin_device = session.origin_device or _read_local_device_id()
         normalized = Session(
             id=session.id,
             tool=session.tool,
@@ -486,6 +569,7 @@ class LocalSessionStore:
             event_count=len(events_list),
             forked_from=session.forked_from,
             fork_point=session.fork_point,
+            origin_device=origin_device,
             metadata=dict(session.metadata),
         )
 
@@ -891,28 +975,40 @@ class ChainedSessionStore:
         limit: int = DEFAULT_PAGE_LIMIT,
         cursor: Optional[str] = None,
     ) -> tuple[list[Session], Optional[str]]:
-        """Eager-merge then paginate.
+        """Page across the chained backends.
 
-        We pull up to `_CHAINED_BUFFER_CAP` rows from each backing store
-        with the same filters, dedupe by `id` (first store wins),
-        merge-sort by the global key, then apply the cursor predicate
-        and slice into a page.
+        Two strategies:
 
-        The `(la, id)` cursor format is the same as the single-store
-        backends — it indexes into the merged-and-sorted view, not into
-        any one store's local sequence. So a cursor minted on chained is
-        only meaningful against the same chained instance with the same
-        filters; that's fine because nobody passes chained cursors to
-        anything else.
+        1. **Authoritative-paging delegation** — when one of the backing
+           stores opts in via `prefers_authoritative_paging` (today: the
+           future RemoteSessionStore), we delegate paging entirely to
+           that store and merge other backends' rows ONLY into the
+           returned page. The authoritative store owns global ordering;
+           other stores contribute local-only rows that the authority
+           doesn't know about (e.g. a local fork that hasn't synced yet).
 
-        Limitation: if the total filtered row count across all backends
-        exceeds `_CHAINED_BUFFER_CAP`, later pages would miss whatever
-        fell off each store's per-call cap. For interactive picker use
-        (typical user has <2000 sessions across all backends today)
-        this is invisible; revisit when remote scale arrives and have
-        chained delegate paging to a RemoteSessionStore that owns the
-        global ordering.
+           Cursors in this mode are the authority's cursors verbatim —
+           pass-through, no rewrap. The local rows we overlay are
+           filtered to those that fit *within* the authority page's
+           (last_active, id) window, so we don't accidentally shadow
+           rows from later authority pages.
+
+        2. **Eager-merge** — when all backends are local, pull up to
+           `_CHAINED_BUFFER_CAP` rows from each, dedupe by id, sort,
+           cursor-walk, slice. Cheap and correct as long as the total
+           fits in the buffer (typical: <2000 rows across local +
+           native combined).
         """
+        # Strategy 1: delegate to authoritative-paging store if any.
+        for i, store in enumerate(self._stores):
+            if getattr(store, "prefers_authoritative_paging", False):
+                return self._authoritative_page(
+                    auth_idx=i,
+                    tool=tool, cwd=cwd, since=since,
+                    query=query, limit=limit, cursor=cursor,
+                )
+
+        # Strategy 2: legacy eager-merge.
         cur = _decode_cursor(cursor)
         seen: set[str] = set()
         rows: list[Session] = []
@@ -949,6 +1045,74 @@ class ChainedSessionStore:
             else None
         )
         return page, next_cursor
+
+    def _authoritative_page(
+        self,
+        *,
+        auth_idx: int,
+        tool: Optional[str],
+        cwd: Optional[str],
+        since: Optional[str],
+        query: Optional[str],
+        limit: int,
+        cursor: Optional[str],
+    ) -> tuple[list[Session], Optional[str]]:
+        """Delegate paging to `self._stores[auth_idx]` and overlay
+        rows from the other backends into the same window."""
+        auth = self._stores[auth_idx]
+        auth_page, next_cursor = auth.page(
+            tool=tool, cwd=cwd, since=since, query=query,
+            limit=limit, cursor=cursor,
+        )
+        if not auth_page:
+            return auth_page, next_cursor
+
+        # Ordering window of the authority's page: (top_la, top_id) is the
+        # newest row, (bot_la, bot_id) is the oldest. We let local rows
+        # in only if they sort within (or below) the bottom row — pages
+        # to come from the authority will pick up anything above us.
+        # We compare rows by `_sort_key` and keep those whose tuple is
+        # ≤ the top tuple AND ≥ the bottom tuple. (Larger sort key =
+        # newer row; reverse=True sort puts them first.)
+        top_key = _sort_key(auth_page[0])
+        bot_key = _sort_key(auth_page[-1])
+
+        seen: set[str] = {s.id for s in auth_page}
+        local_in_window: list[Session] = []
+        for j, store in enumerate(self._stores):
+            if j == auth_idx:
+                continue
+            try:
+                rows = list(store.list(
+                    tool=tool, cwd=cwd, since=since, query=query,
+                    limit=_CHAINED_BUFFER_CAP,
+                ))
+            except TypeError:
+                rows = list(store.list(
+                    tool=tool, cwd=cwd, since=since,
+                    limit=_CHAINED_BUFFER_CAP,
+                ))
+                if query:
+                    rows = [s for s in rows if _matches_query(s, query)]
+            for s in rows:
+                if s.id in seen:
+                    continue
+                k = _sort_key(s)
+                if not (bot_key <= k <= top_key):
+                    continue  # outside the page's window — skip
+                seen.add(s.id)
+                local_in_window.append(s)
+
+        # Merge: keep authority page rows, splice in local-window rows
+        # at their proper sorted position. Tie-break: the authority's
+        # row wins because it's the source of truth for ids it knows.
+        merged = sorted(
+            list(auth_page) + local_in_window,
+            key=_sort_key, reverse=True,
+        )
+        # Trim to the requested limit so we don't return more than asked.
+        merged = merged[:limit]
+        return merged, next_cursor
 
     def get(self, id: str) -> Optional[Session]:
         ambiguous: list[str] = []
@@ -1070,21 +1234,59 @@ def _looks_like_uuid(s: str) -> bool:
 
 
 def _decode_claude_cwd(path) -> Optional[str]:
-    """Reverse claude's cwd encoding: the parent dir name is `cwd` with
-    every non-alnum/dash/underscore replaced by '-'. We can't perfectly
-    recover originals (the encoding is lossy: `/foo` and `-foo` both
-    encode to `-foo`), but `/<dirname>` is a safe approximation that's
-    correct for the canonical macOS / linux paths."""
+    """Recover the session's original cwd.
+
+    Strategy: read the actual `cwd` field from the session file. Claude
+    writes it verbatim on user/assistant rows; that's the ground truth.
+    The directory-name encoding (`/Users/me/git/foo-bar` →
+    `-Users-me-git-foo-bar`) is irreversibly lossy because both `/` and
+    `-` collapse to `-`, so we only fall back to it when the file has
+    no row with a `cwd` field (empty / corrupt file).
+
+    Reads up to `_CWD_SCAN_LIMIT` rows; the early metadata rows don't
+    carry `cwd` but the first user message does, so a small bound is
+    enough.
+    """
+    cwd = _read_claude_cwd(path)
+    if cwd:
+        return cwd
+    # Fallback: lossy decode of the encoded parent dir. Useful only when
+    # the session file is empty or unreadable.
     try:
         encoded = path.parent.name
     except AttributeError:
         return None
     if not encoded.startswith("-"):
         return None
-    # Replace `-` with `/`. Lossy when the original had literal dashes
-    # but matches the common case; resume code resolves through cwd
-    # anyway so this is a display-only field.
     return "/" + encoded[1:].replace("-", "/")
+
+
+_CWD_SCAN_LIMIT: int = 20
+
+
+def _read_claude_cwd(path) -> Optional[str]:
+    """Scan the first few rows of a claude session for the `cwd` field.
+    Returns None if the file is missing, empty, or no row carries cwd
+    within the scan window."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                if i >= _CWD_SCAN_LIMIT:
+                    break
+                if not line.strip():
+                    continue
+                try:
+                    d = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(d, dict):
+                    continue
+                cwd = d.get("cwd")
+                if isinstance(cwd, str) and cwd:
+                    return cwd
+    except OSError:
+        return None
+    return None
 
 
 def _read_codex_cwd(path) -> Optional[str]:
@@ -1112,8 +1314,16 @@ def _read_codex_cwd(path) -> Optional[str]:
 
 def _build_session_from_path(*, tool: str, id: str, path, cwd: Optional[str]) -> Session:
     """Cheap Session record from a path's stat. event_count is approximated
-    by line count (avoids parsing); fine for picker display."""
+    by line count (avoids parsing); fine for picker display.
+
+    Also stamps `metadata.repo_url` / `repo_subpath` / `origin_cwd` so the
+    resumer can locate a local checkout regardless of the absolute cwd
+    matching the current machine. `capture_repo()` is module-cached, so
+    repeated builds for sessions in the same cwd shell out only once.
+    """
     import datetime as _dt
+    from .repos import capture_repo
+
     stat = path.stat()
     last_active = _dt.datetime.fromtimestamp(stat.st_mtime, tz=_dt.timezone.utc).isoformat()
     started_at = _dt.datetime.fromtimestamp(stat.st_ctime, tz=_dt.timezone.utc).isoformat()
@@ -1125,10 +1335,25 @@ def _build_session_from_path(*, tool: str, id: str, path, cwd: Optional[str]) ->
                 line_count += 1
     except OSError:
         pass
+
+    metadata: dict = {}
+    if cwd:
+        info = capture_repo(cwd)
+        metadata["origin_cwd"] = info.origin_cwd
+        if info.url:
+            metadata["repo_url"] = info.url
+            metadata["repo_subpath"] = info.subpath
+
+    # Native files were written by this machine, so origin_device is the
+    # local device id when we have one stamped on disk.
+    origin_device = _read_local_device_id()
+
     return Session(
         id=id, tool=tool, cwd=cwd,
         started_at=started_at, last_active=last_active,
         event_count=line_count,
+        origin_device=origin_device,
+        metadata=metadata,
     )
 
 

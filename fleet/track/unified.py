@@ -1,5 +1,23 @@
 """Unified event format for AI coding sessions.
 
+# Cross-codebase shared schema
+
+This module — together with `fleet.track.sources` — is **the single
+source of truth for the unified Event schema and per-source parsers**.
+
+The orchestrator (`theseus`) imports these modules directly to parse
+sessions uploaded from clients into `Session` records. Do NOT fork the
+schema or parsers in the orchestrator; depend on this package and bump
+the SDK pin when adding new event types or source quirks. Bidirectional
+drift would silently produce stale or incompatible session records on
+the server.
+
+Public surface for orchestrator consumption:
+  - `fleet.track.unified.Event` (discriminated union) and its variants
+  - `fleet.track.unified.SessionMetadata` schema (in `store.py` for now;
+    move here if the orchestrator import path becomes a hot spot)
+  - `fleet.track.sources.{ClaudeSource, CodexSource, ...}` for parsing
+
 Every format we ingest (claude, codex, cursor, opencode) parses into the
 same `Event` discriminated union. Each event carries:
 

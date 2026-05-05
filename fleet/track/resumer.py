@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import subprocess
 import uuid
 from dataclasses import dataclass
@@ -40,6 +39,23 @@ log = logging.getLogger("fleet.track.resumer")
 
 # Tool registry — what the SDK currently knows how to resume into.
 SUPPORTED_TOOLS: frozenset[str] = frozenset({"claude", "codex"})
+
+
+class RepoNotLocalError(Exception):
+    """Raised when a session's repo isn't checked out anywhere local.
+
+    Surfaced to the CLI which prints the message (which already includes
+    a `git clone <url>` hint) and exits non-zero. Lower-level than a
+    plain RuntimeError so the CLI can distinguish missing-repo from
+    other resume failures."""
+
+
+def _url_to_clone_form(normalized: str) -> str:
+    """Turn a normalized url back into a clone-able form. Best-effort —
+    we don't know whether the user prefers ssh or https, so we default
+    to https because it works without auth setup. The user can rewrite
+    to ssh form themselves."""
+    return f"https://{normalized}.git" if normalized else ""
 
 
 # Compaction lives in `fleet.track.compactor` (see TruncationCompactor +
@@ -90,8 +106,29 @@ def resume_session(
 
     paths = paths or TrackPaths.default()
 
+    # Resolve the local cwd to launch the CLI in. Both claude and codex
+    # scope `--resume <id>` to the current project, so we have to land
+    # in the right directory. For cross-machine resume, this is where
+    # we map repo_url → a local checkout via the registry/scan.
+    target_cwd_local = _resolve_local_cwd(session)
+    if target_cwd_local is None:
+        repo_url = (session.metadata or {}).get("repo_url") if session.metadata else None
+        if repo_url:
+            raise RepoNotLocalError(
+                f"Session was created in {repo_url!r} but no local checkout "
+                f"of that repo was found. Clone it locally and retry:\n"
+                f"  git clone {_url_to_clone_form(repo_url)}"
+            )
+        # No repo metadata; honor the original cwd if we can.
+        target_cwd_local = _resolve_cwd(session.cwd) if session.cwd else None
+
     if session.tool == target_tool:
-        return _exec_native_resume(target_tool, session.id, prompt=prompt)
+        return _exec_native_resume(
+            target_tool,
+            session.id,
+            prompt=prompt,
+            cwd=target_cwd_local,
+        )
 
     # Cross-tool: pick a default compactor sized to the target. Pass an
     # `emission_estimator` so the compactor can verify post-serialization
@@ -118,7 +155,15 @@ def resume_session(
         store=store, session=session, target_tool=target_tool,
         paths=paths, compactor=compactor,
     )
-    return _exec_native_resume(target_tool, checkout.ephemeral_id, prompt=prompt)
+    # The checkout file lives under the resolved-target-cwd's project dir
+    # (see `_checkout_path`); launch the CLI from there so its project
+    # scan picks the file up.
+    return _exec_native_resume(
+        target_tool,
+        checkout.ephemeral_id,
+        prompt=prompt,
+        cwd=target_cwd_local,
+    )
 
 
 # ------------------------------------------------------------------ #
@@ -143,10 +188,12 @@ def _create_checkout(
     """
     ephemeral_id = str(uuid.uuid4())
 
-    # Resolve cwd for the target. The session's recorded cwd is the
-    # original — resolve symlinks (mac /tmp → /private/tmp) so the
-    # target CLI's resume scan finds it.
-    target_cwd = _resolve_cwd(session.cwd or "/tmp")
+    # Resolve where the checkout should live on THIS machine. For sessions
+    # captured on another device, `session.cwd` is meaningless absolute
+    # path; the resolver maps `metadata.repo_url` → local checkout via
+    # the registry / scan and falls back to `session.cwd` only if a
+    # local path actually exists there.
+    target_cwd = _resolve_local_cwd(session) or _resolve_cwd(session.cwd or "/tmp")
 
     # Walk parents, gather events; the converter then emits target-format
     # bytes. We embed `_synth` metadata so cross-source synthesizers
@@ -292,6 +339,40 @@ def _resolve_cwd(cwd: str) -> str:
         return cwd
 
 
+def _resolve_local_cwd(session: Session) -> Optional[str]:
+    """Map a Session to a local cwd we can launch a CLI in.
+
+    Honours `metadata.repo_url` first (the cross-machine key) so a
+    session captured on another device still finds the right local
+    checkout. Falls back to `session.cwd` when no repo metadata or no
+    matching local checkout exists.
+
+    Returns None when nothing usable was found — the caller should
+    print a clone hint or surface a clear error rather than launching
+    in some random cwd that won't have the project files.
+    """
+    from .repos import RepoRegistry, resolve_repo_cwd
+
+    md = session.metadata or {}
+    repo_url = md.get("repo_url")
+    repo_subpath = md.get("repo_subpath")
+    origin_cwd = md.get("origin_cwd") or session.cwd
+
+    if not repo_url and not origin_cwd:
+        return None
+
+    registry = RepoRegistry() if repo_url else None
+    resolved = resolve_repo_cwd(
+        repo_url=repo_url,
+        repo_subpath=repo_subpath,
+        origin_cwd=origin_cwd,
+        registry=registry,
+    )
+    if resolved is None:
+        return None
+    return _resolve_cwd(resolved)
+
+
 def _inject_codex_checkout_meta(body: bytes, meta: dict) -> bytes:
     """Add a `_fleet_meta` field inside the first session_meta row's
     payload so the daemon can read fork lineage on upload."""
@@ -316,25 +397,37 @@ def _inject_codex_checkout_meta(body: bytes, meta: dict) -> bytes:
 # ------------------------------------------------------------------ #
 
 
-def _exec_native_resume(tool: str, session_id: str, *, prompt: Optional[str]) -> int:
+def _exec_native_resume(
+    tool: str,
+    session_id: str,
+    *,
+    prompt: Optional[str],
+    cwd: Optional[str] = None,
+) -> int:
     """Run the tool's native resume command. Returns the exit code.
 
     Inherits stdio so the user can interact (TUI). For non-interactive
     use (testing), pass `--print` for claude or use `codex exec resume`
     — but those are choices for the caller of `resume_session` to
-    pre-bake into the prompt argument."""
+    pre-bake into the prompt argument.
+
+    `cwd`, when set, is the project directory the CLI should run in.
+    Both claude and codex scope their resume lookup to the current
+    project, so resuming a session that was created in a different
+    directory requires launching from there.
+    """
     if tool == "claude":
         cmd = ["claude", "--resume", session_id]
         if prompt:
             cmd.extend(["--print", prompt])
-        return subprocess.call(cmd)
+        return subprocess.call(cmd, cwd=cwd)
     if tool == "codex":
         cmd = ["codex"]
         if prompt:
             cmd.extend(["exec", "--skip-git-repo-check", "resume", session_id, prompt])
         else:
             cmd.extend(["resume", session_id])
-        return subprocess.call(cmd)
+        return subprocess.call(cmd, cwd=cwd)
     raise ValueError(f"Unknown tool: {tool}")
 
 

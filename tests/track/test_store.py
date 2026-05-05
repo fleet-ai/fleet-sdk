@@ -10,8 +10,6 @@ from fleet.track.paths import TrackPaths
 from fleet.track.store import LocalSessionStore, Session
 from fleet.track.unified import (
     AssistantMessage,
-    SessionStart,
-    ToolCall,
     UserMessage,
 )
 
@@ -86,10 +84,13 @@ def test_create_requires_id(tmp_path: Path):
 
 def test_events_returns_what_was_stored(tmp_path: Path):
     store = _store(tmp_path)
-    store.create(_session(id="s1"), [
-        _msg("first"),
-        AssistantMessage(source="claude", text="answer"),
-    ])
+    store.create(
+        _session(id="s1"),
+        [
+            _msg("first"),
+            AssistantMessage(source="claude", text="answer"),
+        ],
+    )
     events = list(store.events("s1"))
     assert len(events) == 2
     assert events[0].text == "first"
@@ -137,15 +138,18 @@ def test_fork_walks_ancestor_chain(tmp_path: Path):
     # Expected: first 3 from root, then 2 from fork1 = 5 total.
     assert len(events) == 5
     assert [e.text for e in events] == [
-        "root-0", "root-1", "root-2", "claude-a", "claude-b",
+        "root-0",
+        "root-1",
+        "root-2",
+        "claude-a",
+        "claude-b",
     ]
 
 
 def test_fork_chain_three_levels(tmp_path: Path):
     """codex(0..10) → claude(0..3) → codex(0..2)."""
     store = _store(tmp_path)
-    store.create(_session(id="A", tool="codex"),
-                 [_msg(f"A-{i}") for i in range(10)])
+    store.create(_session(id="A", tool="codex"), [_msg(f"A-{i}") for i in range(10)])
     store.create(
         _session(id="B", tool="claude", forked_from="A", fork_point=4),
         [_msg(f"B-{i}") for i in range(3)],
@@ -235,7 +239,9 @@ def test_list_sorts_most_recent_first(tmp_path: Path):
 def test_list_limit(tmp_path: Path):
     store = _store(tmp_path)
     for i in range(5):
-        store.create(_session(id=f"s{i}", last_active=f"2026-04-3{i}T00:00:00Z"), [_msg("x")])
+        store.create(
+            _session(id=f"s{i}", last_active=f"2026-04-3{i}T00:00:00Z"), [_msg("x")]
+        )
     out = list(store.list(limit=3))
     assert len(out) == 3
 
@@ -309,12 +315,17 @@ def test_index_ignores_unknown_fields(tmp_path: Path):
     """An older store reading a session written by a newer schema
     must not crash."""
     import json as j
+
     store = _store(tmp_path)
     store.create(_session(id="s1"), [_msg("a")])
     # Manually append a row with extra fields.
     paths = TrackPaths.under(tmp_path)
-    extra = {"id": "s2", "tool": "claude", "future_field": "surprise",
-             "started_at": "2026-04-30T00:00:00Z"}
+    extra = {
+        "id": "s2",
+        "tool": "claude",
+        "future_field": "surprise",
+        "started_at": "2026-04-30T00:00:00Z",
+    }
     with open(paths.track_dir / "local-store" / "index.jsonl", "a") as f:
         f.write(j.dumps(extra) + "\n")
     # Should still read both sessions.
@@ -371,6 +382,7 @@ def test_cursor_decode_rejects_missing_keys():
 
 def test_cursor_decode_empty_returns_none():
     from fleet.track.store import _decode_cursor
+
     assert _decode_cursor(None) is None
     assert _decode_cursor("") is None
 
@@ -527,13 +539,19 @@ def test_page_query_filter_substring_match(tmp_path: Path):
     """`query` is case-insensitive substring across id/tool/cwd/title."""
     store = _store(tmp_path)
     store.create(
-        _session(id="abc-fleet", cwd="/tmp/fleet-sdk",
-                 metadata={"title": "fleet-track sidecar"}),
+        _session(
+            id="abc-fleet",
+            cwd="/tmp/fleet-sdk",
+            metadata={"title": "fleet-track sidecar"},
+        ),
         [_msg("x")],
     )
     store.create(
-        _session(id="def-other", cwd="/tmp/theseus",
-                 metadata={"title": "session metadata index"}),
+        _session(
+            id="def-other",
+            cwd="/tmp/theseus",
+            metadata={"title": "session metadata index"},
+        ),
         [_msg("x")],
     )
 
@@ -565,16 +583,22 @@ def test_page_query_paginates_within_filtered_set(tmp_path: Path):
     store = _store(tmp_path)
     for i in range(4):
         store.create(
-            _session(id=f"keep-{i}", tool="claude",
-                     last_active=f"2026-04-3{i}T00:00:00Z",
-                     metadata={"title": "keep-me"}),
+            _session(
+                id=f"keep-{i}",
+                tool="claude",
+                last_active=f"2026-04-3{i}T00:00:00Z",
+                metadata={"title": "keep-me"},
+            ),
             [_msg("x")],
         )
     for i in range(3):
         store.create(
-            _session(id=f"drop-{i}", tool="claude",
-                     last_active=f"2026-04-3{i}T00:00:00Z",
-                     metadata={"title": "drop-me"}),
+            _session(
+                id=f"drop-{i}",
+                tool="claude",
+                last_active=f"2026-04-3{i}T00:00:00Z",
+                metadata={"title": "drop-me"},
+            ),
             [_msg("x")],
         )
 
@@ -595,8 +619,9 @@ def test_chained_page_eager_merge_paginates(tmp_path: Path):
     local = _store(tmp_path)
     for i in range(3):
         local.create(
-            _session(id=f"local-{i}", tool="claude",
-                     last_active=f"2026-04-3{i}T00:00:00Z"),
+            _session(
+                id=f"local-{i}", tool="claude", last_active=f"2026-04-3{i}T00:00:00Z"
+            ),
             [_msg("x")],
         )
 
@@ -622,8 +647,7 @@ def test_chained_page_dedupes_by_id(tmp_path: Path):
     local_b = LocalSessionStore(TrackPaths.under(tmp_path), name="other-store")
     for store in (local_a, local_b):
         store.create(
-            _session(id="shared", tool="claude",
-                     last_active="2026-04-30T00:00:00Z"),
+            _session(id="shared", tool="claude", last_active="2026-04-30T00:00:00Z"),
             [_msg("x")],
         )
 
@@ -651,3 +675,144 @@ def test_chained_page_query_filter(tmp_path: Path):
 
     items, _ = chained.page(query="match-me", limit=10)
     assert [s.id for s in items] == ["keep"]
+
+
+# ------------------------------------------------------------------ #
+# ChainedSessionStore — authoritative-paging delegation                #
+# ------------------------------------------------------------------ #
+
+
+class _FakeAuthorityStore:
+    """Minimum SessionStore that opts into authoritative paging.
+
+    Returns hard-coded pages so we can verify that ChainedSessionStore
+    delegates paging to it (cursors, limit, ordering all come from
+    here) and merges other stores' rows ONLY into the returned page's
+    window — not into pages outside it.
+    """
+
+    prefers_authoritative_paging: bool = True
+
+    def __init__(self, sessions: list[Session]) -> None:
+        # Pre-sorted (last_active DESC, id DESC), like a real impl.
+        from fleet.track.store import _sort_key
+
+        self._sessions = sorted(sessions, key=_sort_key, reverse=True)
+
+    def list(self, **kwargs) -> list[Session]:
+        return list(self._sessions)
+
+    def page(self, *, limit: int, cursor=None, **_) -> tuple[list[Session], str | None]:
+        # Cursor here is just an integer index encoded as string.
+        idx = int(cursor) if cursor else 0
+        page = self._sessions[idx : idx + limit]
+        next_idx = idx + limit
+        next_cursor = str(next_idx) if next_idx < len(self._sessions) else None
+        return page, next_cursor
+
+    def get(self, id: str):
+        for s in self._sessions:
+            if s.id == id:
+                return s
+        return None
+
+    def events(self, id: str):
+        return iter(())
+
+    def own_events(self, id: str):
+        return iter(())
+
+    def create(self, *a, **kw):
+        raise NotImplementedError
+
+    def append(self, *a, **kw):
+        raise NotImplementedError
+
+    def delete(self, *a, **kw):
+        raise NotImplementedError
+
+
+def test_chained_delegates_paging_when_authority_present(tmp_path: Path):
+    """When a backing store advertises `prefers_authoritative_paging`,
+    ChainedSessionStore must hand paging to it and pass the cursor
+    straight through. Local rows that fall in the page's window
+    overlay; rows OUTSIDE the window must NOT show up (they belong to
+    other authority pages)."""
+    from fleet.track.store import ChainedSessionStore
+
+    # Authority owns 4 rows. We'll page in chunks of 2.
+    auth = _FakeAuthorityStore(
+        [
+            _session(id="auth-newest", last_active="2026-05-04T00:00:00Z"),
+            _session(id="auth-2", last_active="2026-05-03T00:00:00Z"),
+            _session(id="auth-3", last_active="2026-05-02T00:00:00Z"),
+            _session(id="auth-oldest", last_active="2026-05-01T00:00:00Z"),
+        ]
+    )
+    # Local stub has two rows: one inside page 0's window, one inside
+    # page 1's window. Each must show up only on the appropriate page.
+    local = _store(tmp_path)
+    local.create(
+        _session(id="local-in-page0", last_active="2026-05-03T12:00:00Z"), [_msg("x")]
+    )
+    local.create(
+        _session(id="local-in-page1", last_active="2026-05-01T12:00:00Z"), [_msg("x")]
+    )
+
+    chained = ChainedSessionStore(auth, local)
+
+    page0, cursor = chained.page(limit=2)
+    page0_ids = [s.id for s in page0]
+    # `local-in-page0` (la=05-03T12) sits between auth-newest (05-04) and
+    # auth-2 (05-03T00) — so it lands in page 0.
+    assert "local-in-page0" in page0_ids
+    assert "local-in-page1" not in page0_ids
+    assert cursor is not None  # authority emits a cursor; we pass it through
+
+    page1, cursor = chained.page(limit=2, cursor=cursor)
+    page1_ids = [s.id for s in page1]
+    # `local-in-page1` (la=05-01T12) sits between auth-3 (05-02) and
+    # auth-oldest (05-01T00) — page 1's window.
+    assert "local-in-page1" in page1_ids
+    assert "local-in-page0" not in page1_ids
+
+
+def test_chained_authority_cursor_is_passthrough(tmp_path: Path):
+    """The authority's cursors are returned verbatim — they're not
+    rewrapped or merged with local cursors. Round-trip a cursor and
+    confirm it walks the authority's pages unchanged."""
+    from fleet.track.store import ChainedSessionStore
+
+    auth = _FakeAuthorityStore(
+        [
+            _session(id=f"r{i}", last_active=f"2026-05-{i:02d}T00:00:00Z")
+            for i in range(1, 6)
+        ]
+    )
+    chained = ChainedSessionStore(auth, _store(tmp_path))
+
+    seen_ids: list[str] = []
+    cursor = None
+    for _ in range(10):  # safety bound
+        page, cursor = chained.page(limit=2, cursor=cursor)
+        seen_ids.extend(s.id for s in page)
+        if cursor is None:
+            break
+    # Walked all 5 rows in some order — but each appeared exactly once.
+    assert sorted(seen_ids) == ["r1", "r2", "r3", "r4", "r5"]
+
+
+def test_chained_local_only_uses_eager_merge(tmp_path: Path):
+    """Sanity: when no backing store opts into authoritative paging,
+    the legacy eager-merge path is used (existing tests already
+    cover correctness; here we just confirm the dispatch picks it)."""
+    from fleet.track.store import ChainedSessionStore
+
+    local_a = _store(tmp_path)
+    local_b = LocalSessionStore(TrackPaths.under(tmp_path), name="b")
+    local_a.create(_session(id="a"), [_msg("x")])
+    local_b.create(_session(id="b"), [_msg("x")])
+    chained = ChainedSessionStore(local_a, local_b)
+    page, _ = chained.page(limit=10)
+    # Both rows present; ordering by last_active DESC.
+    assert {s.id for s in page} == {"a", "b"}

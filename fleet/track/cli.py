@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -46,8 +44,12 @@ def enable() -> None:
         paths.config_file.write_text(json.dumps(config, indent=2))
 
     if "device_id" not in config:
-        import re, socket
-        hostname = re.sub(r"[^a-z0-9-]", "-", socket.gethostname().lower())[:20].strip("-")
+        import re
+        import socket
+
+        hostname = re.sub(r"[^a-z0-9-]", "-", socket.gethostname().lower())[:20].strip(
+            "-"
+        )
         config["device_id"] = f"{hostname}-{str(uuid.uuid4()).replace('-','')[:8]}"
 
     device_id = config["device_id"]
@@ -64,7 +66,9 @@ def enable() -> None:
         creds = load_credentials() or {}
         config["email"] = creds.get("email", "")
         config["team_name"] = creds.get("team_name", "")
-        import platform, socket
+        import platform
+        import socket
+
         config["hostname"] = socket.gethostname()
         config["platform"] = platform.system().lower()
         paths.config_file.write_text(json.dumps(config, indent=2))
@@ -76,7 +80,9 @@ def enable() -> None:
     sources = detect_sources()
     found = [s for s in sources if s.is_present()]
     if not found:
-        console.print("[yellow]No AI tool sessions found[/yellow] (~/.claude, ~/.cursor, ~/.codex)")
+        console.print(
+            "[yellow]No AI tool sessions found[/yellow] (~/.claude, ~/.cursor, ~/.codex)"
+        )
     else:
         for s in found:
             console.print(f"  [green]✓[/green] Found {s.name} at {s.root}")
@@ -93,7 +99,9 @@ def enable() -> None:
         console.print(f"[red]Service install failed:[/red] {e}")
         raise typer.Exit(1)
 
-    console.print("\n[bold green]✓ Tracking enabled.[/bold green] Syncing in background.")
+    console.print(
+        "\n[bold green]✓ Tracking enabled.[/bold green] Syncing in background."
+    )
     console.print("  Run [bold]flt track status[/bold] to check progress.")
 
 
@@ -128,8 +136,12 @@ def status() -> None:
         console.print("[yellow]Daemon running but no status yet.[/yellow]")
         return
 
-    state_color = {"idle": "green", "syncing": "yellow", "error": "red"}.get(s.state, "white")
-    console.print(f"[{state_color}]● {s.state.upper()}[/{state_color}]  pid={s.pid}  last sync={s.last_sync or 'never'}")
+    state_color = {"idle": "green", "syncing": "yellow", "error": "red"}.get(
+        s.state, "white"
+    )
+    console.print(
+        f"[{state_color}]● {s.state.upper()}[/{state_color}]  pid={s.pid}  last sync={s.last_sync or 'never'}"
+    )
 
     # Queue stats
     q = UploadQueue(paths)
@@ -140,7 +152,9 @@ def status() -> None:
     done = stats.get("done", 0)
     failed = stats.get("failed", 0)
 
-    console.print(f"  Queue: [yellow]{pending}[/yellow] pending  [cyan]{in_flight}[/cyan] uploading  [green]{done}[/green] done  [red]{failed}[/red] failed")
+    console.print(
+        f"  Queue: [yellow]{pending}[/yellow] pending  [cyan]{in_flight}[/cyan] uploading  [green]{done}[/green] done  [red]{failed}[/red] failed"
+    )
 
     # Sources table
     if s.sources:
@@ -154,7 +168,7 @@ def status() -> None:
         console.print(table)
 
     if s.errors:
-        console.print(f"\n[red]Errors:[/red]")
+        console.print("\n[red]Errors:[/red]")
         for err in s.errors[-3:]:
             console.print(f"  {err}")
 
@@ -176,7 +190,8 @@ def daemon(
 @app.command()
 def gc(
     max_age_hours: int = typer.Option(
-        24, "--max-age-hours",
+        24,
+        "--max-age-hours",
         help="Remove fleet-track checkout files older than this. 0 removes all.",
     ),
 ) -> None:
@@ -204,6 +219,7 @@ def logs() -> None:
         console.print("No log file found.")
         raise typer.Exit(1)
     import subprocess
+
     subprocess.run(["tail", "-f", str(log_path)])
 
 
@@ -252,17 +268,23 @@ def _resolve_session_store(source: str):
 
 @app.command(name="ls")
 def list_sessions(
-    tool: str = typer.Option(None, "--tool", "-t", help="Filter by tool (claude/codex/cursor/opencode)"),
+    tool: str = typer.Option(
+        None, "--tool", "-t", help="Filter by tool (claude/codex/cursor/opencode)"
+    ),
     cwd: str = typer.Option(None, "--cwd", help="Filter by working directory"),
-    since: str = typer.Option(None, "--since", help="Only sessions active since (ISO-8601 or natural)"),
+    since: str = typer.Option(
+        None, "--since", help="Only sessions active since (ISO-8601 or natural)"
+    ),
     limit: int = typer.Option(50, "--limit", "-n", help="Max rows per page (1..200)"),
     cursor: str = typer.Option(
-        None, "--cursor",
+        None,
+        "--cursor",
         help="Opaque cursor from a prior `next_cursor:` line. Drives paged scripting.",
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON for scripting"),
     source: str = typer.Option(
-        "auto", "--source",
+        "auto",
+        "--source",
         help="Where to read sessions from: auto (native+stub), native (~/.claude, ~/.codex), stub (LocalSessionStore), remote (theseus, not yet wired).",
     ),
 ) -> None:
@@ -298,7 +320,11 @@ def list_sessions(
         # Paged scripting flow — any caller who passed --cursor wants the
         # next_cursor surfaced; --json shape promises {items, next_cursor}.
         sessions, next_cursor = store.page(
-            tool=tool, cwd=cwd, since=since, limit=limit, cursor=cursor,
+            tool=tool,
+            cwd=cwd,
+            since=since,
+            limit=limit,
+            cursor=cursor,
         )
     else:
         # Interactive flow — keep the existing flat-list shape.
@@ -307,10 +333,15 @@ def list_sessions(
 
     if json_out:
         from dataclasses import asdict
-        console.print_json(json.dumps({
-            "items": [asdict(s) for s in sessions],
-            "next_cursor": next_cursor,
-        }))
+
+        console.print_json(
+            json.dumps(
+                {
+                    "items": [asdict(s) for s in sessions],
+                    "next_cursor": next_cursor,
+                }
+            )
+        )
         return
 
     if not sessions:
@@ -327,6 +358,7 @@ def list_sessions(
     table.add_column("From")
 
     from .picker import _human_when, _short_cwd
+
     for s in sessions:
         fork = (s.forked_from or "")[:8] if s.forked_from else ""
         table.add_row(
@@ -344,46 +376,59 @@ def list_sessions(
 
 @app.command()
 def resume(
-    session_id: str = typer.Argument(None, help="Session id (full or unique prefix). Omit to pick interactively."),
-    in_tool: str = typer.Option(None, "--in", help="Resume in this tool (default: same as source)"),
+    session_id: str = typer.Argument(
+        None, help="Session id (full or unique prefix). Omit to pick interactively."
+    ),
+    in_tool: str = typer.Option(
+        None, "--in", help="Resume in this tool (default: same as source)"
+    ),
     last: bool = typer.Option(False, "--last", help="Resume the most recent session"),
-    prompt: str = typer.Option(None, "--prompt", "-p", help="Initial prompt to send to the resumed CLI"),
+    prompt: str = typer.Option(
+        None, "--prompt", "-p", help="Initial prompt to send to the resumed CLI"
+    ),
     source: str = typer.Option(
-        "auto", "--source",
+        "auto",
+        "--source",
         help="Where to read sessions from: auto (native+stub), native, stub, remote (not wired).",
     ),
     compact: bool = typer.Option(
-        True, "--compact/--no-compact",
+        True,
+        "--compact/--no-compact",
         help="Project the source session into a context-fitting view. "
-             "Default on. --no-compact ships the full history; large sessions "
-             "will overflow the target model's context window.",
+        "Default on. --no-compact ships the full history; large sessions "
+        "will overflow the target model's context window.",
     ),
     target_tokens: int = typer.Option(
-        0, "--target-tokens",
+        0,
+        "--target-tokens",
         help="Target token budget for the cross-tool checkout. 0 picks a "
-             "sensible default for the target tool/model.",
+        "sensible default for the target tool/model.",
     ),
     target_model: str = typer.Option(
-        None, "--target-model",
+        None,
+        "--target-model",
         help="Hint the target model (e.g. claude-opus-4-7, gpt-5) so the "
-             "compactor budgets correctly. Auto-detected when possible.",
+        "compactor budgets correctly. Auto-detected when possible.",
     ),
     max_tool_output: int = typer.Option(
-        4_000, "--max-tool-output",
+        4_000,
+        "--max-tool-output",
         help="Per-tool-result output character cap. 0 disables truncation.",
     ),
     summarize: bool = typer.Option(
-        True, "--summarize/--no-summarize",
+        True,
+        "--summarize/--no-summarize",
         help="When events are dropped to fit budget, prepend a structured "
-             "summary of what was dropped. Default on.",
+        "summary of what was dropped. Default on.",
     ),
 ) -> None:
     """Resume a tracked session in a (possibly different) AI tool.
 
-    Without an id, opens an interactive fzf picker. With `--in`, the
-    session is converted to the target tool's format and dropped into a
-    quarantined `.fleet-checkouts/` namespace before invoking the
-    target's native resume command.
+    Without an id, opens an interactive Textual picker (search at top,
+    table below; pgdn/pgup to page). With `--in`, the session is
+    converted to the target tool's format and dropped into a quarantined
+    `.fleet-checkouts/` namespace before invoking the target's native
+    resume command.
     """
     store = _resolve_session_store(source)
 
@@ -405,45 +450,23 @@ def resume(
             raise typer.Exit(1)
     else:
         # Interactive picker — two stages: session, then target tool.
-        from .picker import (
-            FzfNotInstalled,
-            PageState,
-            installed_tools,
-            pick_session,
-            pick_tool,
+        # Both stages use Textual (`textual` package); no external `fzf`
+        # binary required. Page size auto-fits the terminal so the user
+        # never has to scroll within a page; every keystroke re-queries
+        # the store via `page(query=...)`.
+        from .picker import installed_tools
+        from .picker_textual import pick_session_textual, pick_tool_textual
+
+        target_session = pick_session_textual(
+            store,
+            header="type to search · pgdn next · pgup prev · ⏎ open · esc cancel",
         )
-        from .picker import _terminal_page_size
-        # Page size = terminal-readable height. fzf is `--disabled` so
-        # every keystroke re-queries server-side; user never sees a
-        # screen-full of pre-buffered rows they have to scroll. All
-        # backends (including chained `auto`) implement `page()` now,
-        # so the same path works regardless of `--source`.
-        page_limit = _terminal_page_size()
-        first_page, _ = store.page(limit=page_limit)
-        page_state = PageState(source=source, limit=page_limit)
-        try:
-            target_session = pick_session(
-                first_page,
-                header="type to search · → next page · ← prev",
-                page_state=page_state,
-            )
-        except FzfNotInstalled as e:
-            console.print(f"[red]{e}[/red]")
-            raise typer.Exit(1)
         if target_session is None:
             console.print("[dim]Cancelled.[/dim]")
             raise typer.Exit(0)
-        # If pick_session returned a synthetic Session (id-only, picked
-        # from a later page that wasn't in the initial buffer), resolve
-        # the full record via the store.
-        if target_session.tool == "?":
-            resolved = store.get(target_session.id)
-            if resolved is None:
-                console.print(
-                    f"[red]Picked session {target_session.id!r} not found in store.[/red]"
-                )
-                raise typer.Exit(1)
-            target_session = resolved
+        # The textual picker returns Sessions straight from `store.page()`,
+        # so they're already fully populated — no synthesize-and-resolve
+        # dance needed.
 
         # Stage 2: target tool. Skip the picker if the user already passed
         # `--in`, or if there's exactly one CLI installed (no choice to make).
@@ -458,24 +481,21 @@ def resume(
             if len(available) == 1:
                 in_tool = available[0]
             else:
-                try:
-                    chosen_tool = pick_tool(
-                        target_session.tool,
-                        available=available,
-                        header=f"Resume {target_session.id[:8]} in which tool?",
-                    )
-                except FzfNotInstalled as e:
-                    console.print(f"[red]{e}[/red]")
-                    raise typer.Exit(1)
+                chosen_tool = pick_tool_textual(
+                    target_session.tool,
+                    available=available,
+                    header=f"Resume {target_session.id[:8]} in which tool?",
+                )
                 if chosen_tool is None:
                     console.print("[dim]Cancelled.[/dim]")
                     raise typer.Exit(0)
                 in_tool = chosen_tool
 
     target_tool = in_tool or target_session.tool
+    cwd_hint = f" [dim]in {target_session.cwd}[/dim]" if target_session.cwd else ""
     console.print(
         f"[dim]Resuming[/dim] {target_session.id[:8]} "
-        f"[dim]({target_session.tool} → {target_tool})[/dim]"
+        f"[dim]({target_session.tool} → {target_tool})[/dim]{cwd_hint}"
     )
 
     # The actual resume + checkout creation is implemented in resumer.py
@@ -486,11 +506,12 @@ def resume(
         TruncationConfig,
         budget_for,
     )
-    from .resumer import resume_session
+    from .resumer import RepoNotLocalError, resume_session
 
     if compact:
         budget = (
-            TokenBudget(target=target_tokens) if target_tokens > 0
+            TokenBudget(target=target_tokens)
+            if target_tokens > 0
             else budget_for(target_tool, target_model)
         )
         compactor = TruncationCompactor(
@@ -516,6 +537,11 @@ def resume(
     except NotImplementedError as e:
         console.print(f"[red]Not yet supported:[/red] {e}")
         raise typer.Exit(2)
+    except RepoNotLocalError as e:
+        # Cross-machine session whose repo we can't find on this host.
+        # Multi-line message — print verbatim, no [red] wrapper.
+        console.print(str(e))
+        raise typer.Exit(3)
     except Exception as e:
         console.print(f"[red]Resume failed:[/red] {e}")
         raise typer.Exit(1)
