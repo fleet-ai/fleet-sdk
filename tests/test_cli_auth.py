@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import httpx
 
-import fleet.auth
 from fleet.cli import _mask_secret, _run_oversight
 
 
@@ -70,18 +69,12 @@ def test_run_oversight_uses_api_key_auth(monkeypatch):
     }
 
 
-def test_run_oversight_uses_stored_login_auth(monkeypatch):
+def test_run_oversight_skips_without_api_key(monkeypatch):
     _FakeOversightClient.request = None
     monkeypatch.delenv("FLEET_API_KEY", raising=False)
     monkeypatch.setenv("FLEET_BASE_URL", "https://api.example.com")
     monkeypatch.setattr(httpx, "Client", _FakeOversightClient)
-    monkeypatch.setattr(fleet.auth, "get_valid_token", lambda: ("jwt-token", "team-1"))
 
     _run_oversight("job-1")
 
-    assert _FakeOversightClient.request["headers"] == {
-        "accept": "application/json",
-        "Content-Type": "application/json",
-        "X-JWT-Token": "jwt-token",
-        "X-Team-ID": "team-1",
-    }
+    assert _FakeOversightClient.request is None

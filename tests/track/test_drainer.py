@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Tuple
 
 import httpx
 
@@ -13,8 +12,8 @@ from fleet.track.paths import TrackPaths
 from fleet.track.queue import UploadQueue
 
 
-def _auth() -> Optional[Tuple[str, str]]:
-    return ("jwt", "team")
+def _auth() -> str:
+    return "test-api-key"
 
 
 class FakePool:
@@ -23,7 +22,9 @@ class FakePool:
     def __init__(self):
         self.submissions: list[tuple[str, str, Path, str]] = []
 
-    def submit(self, rel_path: str, sha256: str, abs_path: Path, presigned_url: str) -> None:
+    def submit(
+        self, rel_path: str, sha256: str, abs_path: Path, presigned_url: str
+    ) -> None:
         self.submissions.append((rel_path, sha256, abs_path, presigned_url))
 
 
@@ -56,6 +57,7 @@ def test_drain_empty_queue(tmp_path: Path):
 def test_drain_submits_each_item_with_its_url(tmp_path: Path):
     def handler(req: httpx.Request) -> httpx.Response:
         import json as j
+
         body = j.loads(req.content)
         return httpx.Response(
             200,
@@ -121,6 +123,7 @@ def test_drain_respects_batch_size(tmp_path: Path):
 
     def handler(req: httpx.Request) -> httpx.Response:
         import json as j
+
         body = j.loads(req.content)
         return httpx.Response(
             200, json={"urls": {p: f"https://s3/{p}" for p in body["paths"]}}

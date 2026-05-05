@@ -4,8 +4,7 @@
 
 FleetTrack now has a usable v1 product path:
 
-- Browser/SSO login through `flt login`.
-- SDK auth refresh through Fleet/orchestrator.
+- API-key authentication through `FLEET_API_KEY`.
 - `flt track enable/status/daemon/logs/ls/resume/gc`.
 - Local source discovery for Claude, Codex, and Cursor.
 - Periodic full reconciliation into a SQLite upload queue.
@@ -64,8 +63,8 @@ The fourth product goal is a Fleet-native session corpus:
   unsupported source/target pairs.
 - Keep metadata indexing best-effort: file upload success must not be rolled
   back just because metadata upsert failed.
-- Make API-key behavior explicit for Track. Track should use `flt login` by
-  default unless an API key can be resolved to a concrete user/profile identity.
+- Keep API-key behavior explicit for Track. The key must resolve to a concrete
+  user/profile identity.
 
 ### Restore Safety
 

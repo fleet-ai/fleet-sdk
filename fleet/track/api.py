@@ -22,7 +22,7 @@ import os
 import platform
 import socket
 from dataclasses import asdict, is_dataclass
-from typing import Any, Callable, Mapping, Optional, Tuple
+from typing import Any, Callable, Mapping, Optional
 
 import httpx
 
@@ -34,8 +34,8 @@ DEFAULT_TIMEOUT = 30.0
 SERVER_UPLOAD_URL_BATCH_CAP = 100  # /v1/track/upload-urls returns 400 above this.
 
 
-# (access_token, team_id) — None when unauthenticated.
-AuthProvider = Callable[[], Optional[Tuple[str, str]]]
+# API key — None when unauthenticated.
+AuthProvider = Callable[[], Optional[str]]
 
 
 class TrackAPIError(Exception):
@@ -51,11 +51,9 @@ class TrackAPIError(Exception):
         self.detail = detail
 
 
-def _default_auth_provider() -> Optional[Tuple[str, str]]:
-    """Production auth: read from `~/.fleet/credentials.json`."""
-    from ..auth import get_valid_token
-
-    return get_valid_token()
+def _default_auth_provider() -> Optional[str]:
+    """Production auth: read from FLEET_API_KEY."""
+    return os.getenv("FLEET_API_KEY")
 
 
 def _default_base_url() -> str:
@@ -225,13 +223,11 @@ class TrackAPIClient:
     # ------------------------------------------------------------------ #
 
     def _headers(self, device_id: Optional[str] = None) -> dict[str, str]:
-        token_info = self._auth()
-        if not token_info:
-            raise TrackAPIError("Not authenticated — run `flt login`")
-        access_token, team_id = token_info
+        api_key = self._auth()
+        if not api_key:
+            raise TrackAPIError("Not authenticated — set FLEET_API_KEY")
         headers = {
-            "X-JWT-Token": access_token,
-            "X-Team-ID": team_id,
+            "Authorization": f"Bearer {api_key}",
         }
         if device_id:
             headers["X-Device-ID"] = device_id

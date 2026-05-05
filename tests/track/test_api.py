@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Optional, Tuple
+from typing import Optional
 
 import httpx
 import pytest
@@ -15,11 +15,11 @@ from fleet.track.api import (
 )
 
 
-def _auth() -> Optional[Tuple[str, str]]:
-    return ("jwt-abc", "team-1")
+def _auth() -> Optional[str]:
+    return "test-api-key"
 
 
-def _no_auth() -> Optional[Tuple[str, str]]:
+def _no_auth() -> Optional[str]:
     return None
 
 
@@ -45,8 +45,7 @@ def test_provision_sends_expected_payload_and_headers():
 
     assert out == {"device_id": "dev1", "team_id": "team-1", "user_id": "user-1"}
     assert captured["url"] == "http://test/v1/track/provision"
-    assert captured["headers"]["x-jwt-token"] == "jwt-abc"
-    assert captured["headers"]["x-team-id"] == "team-1"
+    assert captured["headers"]["authorization"] == "Bearer test-api-key"
     assert captured["body"]["device_id"] == "dev1"
     assert "hostname" in captured["body"]
     assert "platform" in captured["body"]
@@ -192,7 +191,7 @@ def test_download_session_content_uses_presigned_url_without_auth_headers():
     seen: list[tuple[str, str | None]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append((str(request.url), request.headers.get("x-jwt-token")))
+        seen.append((str(request.url), request.headers.get("authorization")))
         if request.url.path == "/v1/track/sessions/s1/content":
             return httpx.Response(200, json={"url": "https://s3.test/session"})
         if str(request.url) == "https://s3.test/session":
@@ -202,7 +201,7 @@ def test_download_session_content_uses_presigned_url_without_auth_headers():
     api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
     assert api.download_session_content("s1") == b'{"ok": true}\n'
     assert seen == [
-        ("http://test/v1/track/sessions/s1/content", "jwt-abc"),
+        ("http://test/v1/track/sessions/s1/content", "Bearer test-api-key"),
         ("https://s3.test/session", None),
     ]
 

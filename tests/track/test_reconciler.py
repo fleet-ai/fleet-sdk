@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional, Tuple
 
 import httpx
 
@@ -15,8 +14,8 @@ from fleet.track.queue import UploadQueue
 from fleet.track.reconciler import Reconciler
 
 
-def _auth() -> Optional[Tuple[str, str]]:
-    return ("jwt", "team")
+def _auth() -> str:
+    return "test-api-key"
 
 
 def _seed_file(home: Path, rel: str, content: str = "data") -> Path:
@@ -40,7 +39,12 @@ def _build_reconciler(tmp_path: Path, manifest_handler):
     f2 = _seed_file(tmp_path, ".claude/projects/x/b.jsonl", '{"b":2}\n')
     tree = MerkleTree(cache, file_iter=[f1, f2])
 
-    return Reconciler(queue=queue, cache=cache, tree=tree, api=api), paths, queue, [f1, f2]
+    return (
+        Reconciler(queue=queue, cache=cache, tree=tree, api=api),
+        paths,
+        queue,
+        [f1, f2],
+    )
 
 
 def test_reconcile_first_run_enqueues_everything(tmp_path: Path):

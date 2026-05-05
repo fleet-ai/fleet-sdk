@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
-from typing import Optional, Tuple
 
 import httpx
 
@@ -16,8 +15,8 @@ from fleet.track.paths import TrackPaths
 from fleet.track.queue import UploadQueue
 
 
-def _auth() -> Optional[Tuple[str, str]]:
-    return ("jwt", "team")
+def _auth() -> str:
+    return "test-api-key"
 
 
 class RecordingTransport:

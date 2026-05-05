@@ -44,10 +44,10 @@ fleet-track-sessions/
     raw/.codex/sessions/...
 ```
 
-Authentication is user-scoped. `flt login` obtains browser/SSO credentials, and
-the SDK refreshes them through Fleet/orchestrator instead of talking to Supabase
-directly. The orchestrator remains the control plane; session bytes go directly
-to S3 through presigned URLs.
+Authentication uses `FLEET_API_KEY`. Track requires an API key that resolves to
+a concrete Fleet profile so orchestrator can isolate uploaded sessions by
+`team_id`, `user_id`, and `device_id`. The orchestrator remains the control
+plane; session bytes go directly to S3 through presigned URLs.
 
 ## Commands
 

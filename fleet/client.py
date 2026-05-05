@@ -146,7 +146,9 @@ def _to_dict(obj: Any) -> Any:
 
     # Generic object with __dict__
     if hasattr(obj, "__dict__"):
-        return {k: _to_dict(v) for k, v in obj.__dict__.items() if not k.startswith("_")}
+        return {
+            k: _to_dict(v) for k, v in obj.__dict__.items() if not k.startswith("_")
+        }
 
     # Fallback - try to convert, or return string representation
     try:
@@ -220,7 +222,9 @@ class Session:
         self._client = client
         self._message_count = 0
         self._logged_count = 0  # Track how many messages from history have been logged
-        self._config_sent = False  # Only send config/model/task_key/instance_id on first log
+        self._config_sent = (
+            False  # Only send config/model/task_key/instance_id on first log
+        )
 
     def log(self, history: List[Any], response: Any) -> "SessionIngestResponse":
         """Log an LLM call to the session.
@@ -243,7 +247,7 @@ class Session:
         from .models import SessionIngestResponse
 
         # Collect new history messages since last call
-        new_history = history[self._logged_count:]
+        new_history = history[self._logged_count :]
 
         # Update tracked count to include the response we're about to send
         # This prevents the response from being sent again as "new history" in the next call
@@ -421,9 +425,9 @@ class SyncEnv(EnvironmentBase):
             base_url = f"{self.urls.root.rstrip('/')}/raw"
         elif self._manager_url_override and self._manager_url_override != "local://":
             # URL mode: strip /api/v1/env suffix to get root URL
-            base_url = self._manager_url_override.rstrip('/')
-            if base_url.endswith('/api/v1/env'):
-                base_url = base_url[:-len('/api/v1/env')]
+            base_url = self._manager_url_override.rstrip("/")
+            if base_url.endswith("/api/v1/env"):
+                base_url = base_url[: -len("/api/v1/env")]
         else:
             raise ValueError("No API URL configured for this environment")
         return self.instance.api(name, base_url)
@@ -456,18 +460,16 @@ class SyncEnv(EnvironmentBase):
 
     def heartbeat(self) -> HeartbeatResponse:
         """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
-        
+
         Returns:
             HeartbeatResponse containing heartbeat status and deadline information
         """
         body = {}
         if self.heartbeat_region:
             body["region"] = self.heartbeat_region
-        
+
         response = self._load_client.request(
-            "POST", 
-            f"/v1/env/instances/{self.instance_id}/heartbeat",
-            json=body
+            "POST", f"/v1/env/instances/{self.instance_id}/heartbeat", json=body
         )
         return HeartbeatResponse(**response.json())
 
@@ -527,8 +529,6 @@ class Fleet:
         httpx_client: Optional[httpx.Client] = None,
         max_retries: int = DEFAULT_MAX_RETRIES,
         timeout: float = DEFAULT_TIMEOUT,
-        jwt: Optional[str] = None,
-        team_id: Optional[str] = None,
     ):
         if api_key is None:
             api_key = os.getenv("FLEET_API_KEY")
@@ -539,8 +539,6 @@ class Fleet:
             api_key=api_key,
             base_url=base_url,
             httpx_client=self._httpx_client,
-            jwt=jwt,
-            team_id=team_id,
         )
 
     def list_envs(self) -> List[EnvironmentModel]:
@@ -623,7 +621,11 @@ class Fleet:
         return self.make(env_key=f"{task.env_id}:{task.version}")
 
     def instances(
-        self, status: Optional[str] = None, region: Optional[str] = None, run_id: Optional[str] = None, profile_id: Optional[str] = None
+        self,
+        status: Optional[str] = None,
+        region: Optional[str] = None,
+        run_id: Optional[str] = None,
+        profile_id: Optional[str] = None,
     ) -> List[SyncEnv]:
         params = {}
         if status:
@@ -661,7 +663,9 @@ class Fleet:
             return self._create_local_instance(instance_id)
 
         # Localhost/direct URL mode - string starting with http:// or https://
-        elif isinstance(instance_id, str) and instance_id.startswith(("http://", "https://")):
+        elif isinstance(instance_id, str) and instance_id.startswith(
+            ("http://", "https://")
+        ):
             return self._create_url_instance(instance_id)
 
         # Remote mode - existing behavior
@@ -750,7 +754,9 @@ class Fleet:
 
         instance_client = InstanceClient(url="local://", httpx_client=None)
         instance_client._resources = []  # Mark as loaded
-        instance_client._memory_anchors = {}  # Store anchor connections for in-memory DBs
+        instance_client._memory_anchors = (
+            {}
+        )  # Store anchor connections for in-memory DBs
 
         # Store creation parameters for local SQLiteResources
         # This allows db() to create new instances each time (matching HTTP mode behavior)
@@ -771,10 +777,10 @@ class Fleet:
                 label=f"Local: {path}",
             )
             instance_client._resources_state[ResourceType.db.value][name] = {
-                'type': 'local',
-                'resource_model': resource_model,
-                'db_path': normalized_path,
-                'is_memory': is_memory
+                "type": "local",
+                "resource_model": resource_model,
+                "db_path": normalized_path,
+                "is_memory": is_memory,
             }
 
         # Create a minimal environment for local mode
@@ -813,41 +819,47 @@ class Fleet:
 
     def close(self, instance_id: str) -> InstanceResponse:
         """Close (delete) a specific instance by ID.
-        
+
         Args:
             instance_id: The instance ID to close
-            
+
         Returns:
             InstanceResponse containing the deleted instance details
         """
         return _delete_instance(self.client, instance_id)
 
-    def heartbeat(self, instance_id: str, region: Optional[str] = None) -> HeartbeatResponse:
+    def heartbeat(
+        self, instance_id: str, region: Optional[str] = None
+    ) -> HeartbeatResponse:
         """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
-        
+
         Args:
             instance_id: The instance ID to send heartbeat for
             region: Optional region override for cross-region heartbeats
-            
+
         Returns:
             HeartbeatResponse containing heartbeat status and deadline information
         """
         return _send_heartbeat(self.client, instance_id, region)
 
-    def close_all(self, run_id: Optional[str] = None, profile_id: Optional[str] = None) -> List[InstanceResponse]:
+    def close_all(
+        self, run_id: Optional[str] = None, profile_id: Optional[str] = None
+    ) -> List[InstanceResponse]:
         """Close (delete) instances using the batch delete endpoint.
-        
+
         Args:
             run_id: Optional run ID to filter instances by
             profile_id: Optional profile ID to filter instances by (use "self" for your own profile)
-            
+
         Returns:
             List[InstanceResponse] containing the deleted instances
-            
+
         Note:
             At least one of run_id or profile_id must be provided.
         """
-        return _delete_instances_batch(self.client, run_id=run_id, profile_id=profile_id)
+        return _delete_instances_batch(
+            self.client, run_id=run_id, profile_id=profile_id
+        )
 
     @staticmethod
     def execute_verifier_local(
@@ -914,11 +926,11 @@ class Fleet:
         self, profile_id: Optional[str] = None, status: Optional[str] = "active"
     ) -> List[Run]:
         """List all runs (groups of instances by run_id) with aggregated statistics.
-        
+
         Args:
             profile_id: Optional profile ID to filter runs by (use "self" for your own profile)
             status: Filter by run status - "active" (default), "inactive", or "all"
-            
+
         Returns:
             List[Run] containing run information with instance counts and timestamps
         """
@@ -927,7 +939,7 @@ class Fleet:
             params["profile_id"] = profile_id
         if status:
             params["active"] = status
-            
+
         response = self.client.request("GET", "/v1/env/runs", params=params)
         return [Run(**run_data) for run_data in response.json()]
 
@@ -977,13 +989,13 @@ class Fleet:
 
         # Try to find verifier_id in multiple locations
         verifier_id = task_json.get("verifier_id")
-        
+
         # Check nested verifier object for verifier_id
         if not verifier_id and "verifier" in task_json:
             verifier_obj = task_json["verifier"]
             if isinstance(verifier_obj, dict):
                 verifier_id = verifier_obj.get("verifier_id")
-        
+
         if (
             not verifier_id
             and "metadata" in task_json
@@ -1000,7 +1012,9 @@ class Fleet:
         # Extract verifier_runtime_version from metadata if present
         verifier_runtime_version = None
         if "metadata" in task_json and isinstance(task_json["metadata"], dict):
-            verifier_runtime_version = task_json["metadata"].get("verifier_runtime_version")
+            verifier_runtime_version = task_json["metadata"].get(
+                "verifier_runtime_version"
+            )
 
         try:
             if verifier_id and verifier_code:
@@ -1035,7 +1049,9 @@ class Fleet:
             verifier_sha=verifier_sha,  # Set verifier_sha
             verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
             metadata=task_json.get("metadata", {}),  # Default empty metadata
-            output_json_schema=task_json.get("output_json_schema"),  # JSON schema for output
+            output_json_schema=task_json.get(
+                "output_json_schema"
+            ),  # JSON schema for output
         )
         return task
 
@@ -1190,11 +1206,11 @@ class Fleet:
             verifier_id = task_response.verifier_id
             if not verifier_id and task_response.verifier:
                 verifier_id = task_response.verifier.verifier_id
-            
+
             verifier_sha = None
             if task_response.verifier:
                 verifier_sha = task_response.verifier.sha256
-            
+
             # Extract verifier_runtime_version from metadata if present
             verifier_runtime_version = None
             metadata = task_response.metadata or {}
@@ -1207,8 +1223,12 @@ class Fleet:
                 env_id=task_response.environment_id,  # Map environment_id -> env_id
                 created_at=task_response.created_at,
                 version=task_response.version,
-                data_id=getattr(task_response, "data_id", None),  # Get data_id if available
-                data_version=getattr(task_response, "data_version", None),  # Get data_version if available
+                data_id=getattr(
+                    task_response, "data_id", None
+                ),  # Get data_id if available
+                data_version=getattr(
+                    task_response, "data_version", None
+                ),  # Get data_version if available
                 env_variables=task_response.env_variables or {},
                 verifier_func=verifier_func,  # Set verifier code
                 verifier=verifier,  # Use created verifier or None
@@ -1216,18 +1236,20 @@ class Fleet:
                 verifier_sha=verifier_sha,  # Set verifier_sha
                 verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
                 metadata=metadata,
-                output_json_schema=getattr(task_response, "output_json_schema", None),  # Get output_json_schema if available
+                output_json_schema=getattr(
+                    task_response, "output_json_schema", None
+                ),  # Get output_json_schema if available
             )
             tasks.append(task)
 
         # Apply client-side filtering for version if specified
         if version is not None:
             tasks = [task for task in tasks if task.version == version]
-        
+
         # Apply client-side filtering for data_id if specified
         if data_id is not None:
             tasks = [task for task in tasks if task.data_id == data_id]
-        
+
         # Apply client-side filtering for data_version if specified
         if data_version is not None:
             tasks = [task for task in tasks if task.data_version == data_version]
@@ -1375,7 +1397,9 @@ class Fleet:
         Returns:
             TaskResponse containing the updated task details
         """
-        payload = TaskUpdateRequest(prompt=prompt, verifier_code=verifier_code, metadata=metadata)
+        payload = TaskUpdateRequest(
+            prompt=prompt, verifier_code=verifier_code, metadata=metadata
+        )
         response = self.client.request(
             "PUT", f"/v1/tasks/{task_key}", json=payload.model_dump(exclude_none=True)
         )
@@ -1403,9 +1427,7 @@ class Fleet:
         if team_id is not None:
             params["team_id"] = team_id
 
-        response = self.client.request(
-            "GET", f"/v1/tasks/{task_key}", params=params
-        )
+        response = self.client.request("GET", f"/v1/tasks/{task_key}", params=params)
         return TaskResponse(**response.json())
 
     # Jobs API methods
@@ -1533,9 +1555,7 @@ class Fleet:
         Returns:
             SessionTranscriptResponse containing task, instance, verifier result, and messages
         """
-        response = self.client.request(
-            "GET", f"/v1/sessions/{session_id}/transcript"
-        )
+        response = self.client.request("GET", f"/v1/sessions/{session_id}/transcript")
         return SessionTranscriptResponse(**response.json())
 
     def _ingest(
@@ -1692,7 +1712,7 @@ class Fleet:
                 task_key="my_task",
                 started_at=datetime.now().isoformat()
             )
-            
+
             # Append messages as they happen
             fleet.append_message(session.session_id, {"role": "user", "content": "Hello"})
             fleet.append_message(session.session_id, {"role": "assistant", "content": "Hi!"})
@@ -1739,10 +1759,10 @@ class Fleet:
         Example:
             # Append user message
             fleet.append_message(session_id, {"role": "user", "content": "What's 2+2?"})
-            
+
             # Append assistant response
             fleet.append_message(session_id, {"role": "assistant", "content": "4"})
-            
+
             # Complete the session
             fleet.append_message(
                 session_id,
@@ -1777,10 +1797,10 @@ class Fleet:
             SessionIngestResponse with final state
         """
         from datetime import datetime as dt
-        
+
         if ended_at is None:
             ended_at = dt.now().isoformat()
-        
+
         if final_message:
             messages = [final_message]
         else:
@@ -1794,7 +1814,12 @@ class Fleet:
         )
 
     def _create_verifier_from_data(
-        self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str, verifier_runtime_version: Optional[str] = None
+        self,
+        verifier_id: str,
+        verifier_key: str,
+        verifier_code: str,
+        verifier_sha: str,
+        verifier_runtime_version: Optional[str] = None,
     ) -> "SyncVerifierFunction":
         """Create an AsyncVerifierFunction from verifier data.
 
@@ -1852,16 +1877,16 @@ def _delete_instance(client: SyncWrapper, instance_id: str) -> InstanceResponse:
     return InstanceResponse(**response.json())
 
 
-def _send_heartbeat(client: SyncWrapper, instance_id: str, region: Optional[str] = None) -> HeartbeatResponse:
+def _send_heartbeat(
+    client: SyncWrapper, instance_id: str, region: Optional[str] = None
+) -> HeartbeatResponse:
     """Send heartbeat to keep instance alive."""
     body = {}
     if region:
         body["region"] = region
-    
+
     response = client.request(
-        "POST",
-        f"/v1/env/instances/{instance_id}/heartbeat",
-        json=body
+        "POST", f"/v1/env/instances/{instance_id}/heartbeat", json=body
     )
     return HeartbeatResponse(**response.json())
 
@@ -1875,10 +1900,10 @@ def _delete_instances_batch(
         params["run_id"] = run_id
     if profile_id:
         params["profile_id"] = profile_id
-    
+
     if not params:
         raise ValueError("At least one of run_id or profile_id must be provided")
-    
+
     response = client.request("DELETE", "/v1/env/instances/batch", params=params)
     return [InstanceResponse(**instance_data) for instance_data in response.json()]
 
