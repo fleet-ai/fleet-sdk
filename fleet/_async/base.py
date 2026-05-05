@@ -2,11 +2,10 @@ import httpx
 from typing import Dict, Any, Optional
 import json
 import logging
-import time
 import uuid
 
 from ..models import InstanceResponse
-from ..config import GLOBAL_BASE_URL
+from .._auth_headers import AuthenticatedWrapperMixin
 from .exceptions import (
     FleetAPIError,
     FleetAuthenticationError,
@@ -22,12 +21,6 @@ from .exceptions import (
     FleetPermissionError,
 )
 
-# Import version
-try:
-    from .. import __version__
-except ImportError:
-    __version__ = "0.2.124"
-
 logger = logging.getLogger(__name__)
 
 
@@ -37,7 +30,9 @@ class EnvironmentBase(InstanceResponse):
         return f"{self.urls.manager.api}"
 
 
-class BaseWrapper:
+class BaseWrapper(AuthenticatedWrapperMixin):
+    _authentication_error_cls = FleetAuthenticationError
+
     def __init__(
         self,
         *,
@@ -46,50 +41,12 @@ class BaseWrapper:
         jwt: Optional[str] = None,
         team_id: Optional[str] = None,
     ):
-        # Pin the auth mode at construction time. Falling back from
-        # "intended JWT" to api_key at request time produces
-        # `Authorization: Bearer None` when api_key is unset, which
-        # masks the real config error.
-        if jwt and team_id:
-            self._auth_mode = "jwt"
-        elif api_key:
-            self._auth_mode = "api_key"
-        else:
-            raise ValueError("Provide api_key or both jwt and team_id")
-        self.api_key = api_key
-        self.jwt = jwt
-        self.team_id = team_id
-        if base_url is None:
-            base_url = GLOBAL_BASE_URL
-        self.base_url = base_url
-
-    def get_headers(self, request_id: Optional[str] = None) -> Dict[str, str]:
-        headers: Dict[str, str] = {
-            "X-Fleet-SDK-Language": "Python",
-            "X-Fleet-SDK-Version": __version__,
-        }
-        if self._auth_mode == "jwt":
-            if not self.jwt or not self.team_id:
-                raise FleetAuthenticationError(
-                    "JWT auth was selected at init but jwt/team_id are no longer set"
-                )
-            headers["X-JWT-Token"] = self.jwt
-            headers["X-Team-ID"] = self.team_id
-        else:  # "api_key"
-            if not self.api_key:
-                raise FleetAuthenticationError(
-                    "API-key auth was selected at init but api_key is no longer set"
-                )
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        # Add request ID for idempotency (persists across retries)
-        if request_id:
-            headers["X-Request-ID"] = request_id
-
-        # Add timestamp for all requests
-        headers["X-Request-Timestamp"] = str(int(time.time() * 1000))
-
-        return headers
+        self._init_auth(
+            api_key=api_key,
+            base_url=base_url,
+            jwt=jwt,
+            team_id=team_id,
+        )
 
 
 class AsyncWrapper(BaseWrapper):

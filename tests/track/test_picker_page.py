@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -42,8 +41,14 @@ def stub_store(tmp_path: Path):
     return store, paths
 
 
-def _state_for(paths: TrackPaths, *, current_index: int = 0,
-               cursors=None, limit: int = 2, query: str = "") -> dict:
+def _state_for(
+    paths: TrackPaths,
+    *,
+    current_index: int = 0,
+    cursors=None,
+    limit: int = 2,
+    query: str = "",
+) -> dict:
     return {
         "source": "stub",
         "tool": None,
@@ -82,8 +87,9 @@ def _patch_resolver(monkeypatch, request, stub_store):
 
 def test_emit_first_resets_index_to_zero(stub_store, tmp_path: Path):
     _store, paths = stub_store
-    state = _state_for(paths, current_index=2,
-                       cursors=[None, "cursor1", "cursor2"], limit=2)
+    state = _state_for(
+        paths, current_index=2, cursors=[None, "cursor1", "cursor2"], limit=2
+    )
     lines, new_state = _picker_page._emit_page(state, "first")
     assert new_state["current_index"] == 0
     assert len(lines) == 2  # first page = 2 rows
@@ -102,9 +108,10 @@ def test_emit_next_advances_one_page(stub_store, tmp_path: Path):
     assert lines[1].startswith("s3")
 
 
-def test_emit_next_at_last_page_is_noop(stub_store, tmp_path: Path):
+def test_emit_next_at_last_page_reuses_current_page(stub_store, tmp_path: Path):
     """Walking past the last page must keep `current_index` and
-    `cursors` unchanged so left-arrow still goes back correctly."""
+    `cursors` unchanged so left-arrow still goes back correctly, while
+    returning the already-fetched current page for fzf reload."""
     store, paths = stub_store
     # Walk forward until we run out, then try one more `next`.
     cursor = None
@@ -116,24 +123,25 @@ def test_emit_next_at_last_page_is_noop(stub_store, tmp_path: Path):
         cursors.append(next_cursor)
         cursor = next_cursor
     final_idx = len(cursors) - 1
-    state = _state_for(paths, current_index=final_idx,
-                       cursors=cursors, limit=2)
+    state = _state_for(paths, current_index=final_idx, cursors=cursors, limit=2)
 
     lines, new_state = _picker_page._emit_page(state, "next")
     assert new_state["current_index"] == final_idx  # unchanged
-    assert new_state["cursors"] == cursors          # unchanged
-    assert lines == []
+    assert new_state["cursors"] == cursors  # unchanged
+    assert len(lines) == 1
+    assert lines[0].startswith("s0")
 
 
 def test_emit_prev_decrements_index(stub_store, tmp_path: Path):
     _store, paths = stub_store
-    state = _state_for(paths, current_index=2,
-                       cursors=[None, "cursorA", "cursorB"], limit=2)
+    state = _state_for(
+        paths, current_index=2, cursors=[None, "cursorA", "cursorB"], limit=2
+    )
     # The cursors stored in state would be real strings; the helper
     # passes them straight to store.page. Replace them with real ones.
     store, _paths = stub_store
-    _, c1 = store.page(limit=2, cursor=None)        # cursor for page 1
-    _, c2 = store.page(limit=2, cursor=c1)          # cursor for page 2
+    _, c1 = store.page(limit=2, cursor=None)  # cursor for page 1
+    _, c2 = store.page(limit=2, cursor=c1)  # cursor for page 2
     state["cursors"] = [None, c1, c2]
 
     lines, new_state = _picker_page._emit_page(state, "prev")
@@ -161,8 +169,9 @@ def test_emit_query_resets_to_page_zero(stub_store, tmp_path: Path):
     """`--direction query` always returns page 0 of the new filtered
     set, regardless of where the user was paginated to before."""
     _store, paths = stub_store
-    state = _state_for(paths, current_index=2,
-                       cursors=[None, "x", "y"], limit=2, query="")
+    state = _state_for(
+        paths, current_index=2, cursors=[None, "x", "y"], limit=2, query=""
+    )
     lines, new_state = _picker_page._emit_page(state, "first")
     assert new_state["current_index"] == 0
     # cursors stack must reset (old cursors were for unfiltered set).
@@ -174,18 +183,27 @@ def test_main_query_filters_results(stub_store, tmp_path: Path, capsys):
     store, paths = stub_store
     # Add a session that only matches a specific search term.
     from fleet.track.unified import UserMessage
+
     store.create(
-        Session(id="needle", tool="claude",
-                last_active="2026-05-01T00:00:00Z",
-                metadata={"title": "match-me-only"}),
+        Session(
+            id="needle",
+            tool="claude",
+            last_active="2026-05-01T00:00:00Z",
+            metadata={"title": "match-me-only"},
+        ),
         [UserMessage(source="claude", text="x")],
     )
     state_path = _write_state(tmp_path, _state_for(paths, limit=10))
-    _picker_page.main([
-        "--state-file", str(state_path),
-        "--direction", "query",
-        "--query", "match-me-only",
-    ])
+    _picker_page.main(
+        [
+            "--state-file",
+            str(state_path),
+            "--direction",
+            "query",
+            "--query",
+            "match-me-only",
+        ]
+    )
     out = capsys.readouterr().out.strip().splitlines()
     # Only the seeded session should appear.
     assert any(line.startswith("needle") for line in out)
@@ -202,13 +220,19 @@ def test_main_query_empty_clears_filter(stub_store, tmp_path: Path, capsys):
     _store, paths = stub_store
     # Pre-seed with an active query.
     state_path = _write_state(
-        tmp_path, _state_for(paths, limit=10, query="something-restrictive"),
+        tmp_path,
+        _state_for(paths, limit=10, query="something-restrictive"),
     )
-    _picker_page.main([
-        "--state-file", str(state_path),
-        "--direction", "query",
-        "--query", "",
-    ])
+    _picker_page.main(
+        [
+            "--state-file",
+            str(state_path),
+            "--direction",
+            "query",
+            "--query",
+            "",
+        ]
+    )
     out = capsys.readouterr().out.strip().splitlines()
     # All sessions back.
     assert len(out) == 7
@@ -225,9 +249,14 @@ def test_main_writes_lines_and_persists_state(stub_store, tmp_path: Path, capsys
     _store, paths = stub_store
     state_path = _write_state(tmp_path, _state_for(paths, limit=2))
 
-    rc = _picker_page.main([
-        "--state-file", str(state_path), "--direction", "next",
-    ])
+    rc = _picker_page.main(
+        [
+            "--state-file",
+            str(state_path),
+            "--direction",
+            "next",
+        ]
+    )
     assert rc == 0
 
     captured = capsys.readouterr()
@@ -243,12 +272,17 @@ def test_main_first_returns_to_page_zero(stub_store, tmp_path: Path, capsys):
     _store, paths = stub_store
     # Pre-seed advanced state.
     state_path = _write_state(
-        tmp_path, _state_for(paths, current_index=3,
-                             cursors=[None, "x", "y", "z"], limit=2),
+        tmp_path,
+        _state_for(paths, current_index=3, cursors=[None, "x", "y", "z"], limit=2),
     )
-    rc = _picker_page.main([
-        "--state-file", str(state_path), "--direction", "first",
-    ])
+    rc = _picker_page.main(
+        [
+            "--state-file",
+            str(state_path),
+            "--direction",
+            "first",
+        ]
+    )
     assert rc == 0
     new_state = json.loads(state_path.read_text())
     assert new_state["current_index"] == 0
@@ -267,12 +301,23 @@ def test_main_at_boundary_re_emits_current_page(stub_store, tmp_path: Path, caps
         cursors.append(next_cursor)
         cursor = next_cursor
 
-    state_path = _write_state(tmp_path, _state_for(
-        paths, current_index=len(cursors) - 1, cursors=cursors, limit=2,
-    ))
-    _picker_page.main([
-        "--state-file", str(state_path), "--direction", "next",
-    ])
+    state_path = _write_state(
+        tmp_path,
+        _state_for(
+            paths,
+            current_index=len(cursors) - 1,
+            cursors=cursors,
+            limit=2,
+        ),
+    )
+    _picker_page.main(
+        [
+            "--state-file",
+            str(state_path),
+            "--direction",
+            "next",
+        ]
+    )
     out = capsys.readouterr().out.strip().splitlines()
     # Some output (the re-emitted current page) — never empty.
     assert len(out) >= 1
@@ -303,11 +348,13 @@ def test_main_emitted_lines_match_format_line(stub_store, tmp_path: Path, capsys
 
 def test_shell_quote_handles_spaces():
     from fleet.track.picker import _shell_quote
+
     assert _shell_quote("/path with spaces/x") == "'/path with spaces/x'"
 
 
 def test_shell_quote_handles_embedded_quotes():
     from fleet.track.picker import _shell_quote
+
     quoted = _shell_quote("it's tricky")
     # Should round-trip through a shell — single-quote escape pattern.
     assert "'\\''" in quoted
@@ -315,4 +362,5 @@ def test_shell_quote_handles_embedded_quotes():
 
 def test_shell_quote_empty_is_empty_string_literal():
     from fleet.track.picker import _shell_quote
+
     assert _shell_quote("") == "''"

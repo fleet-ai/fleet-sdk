@@ -52,6 +52,7 @@ def _resolve_store(source: str):
     # store-resolution so behavior is consistent with the rest of `flt
     # track` (auto chains, native filters, etc.).
     from .cli import _resolve_session_store
+
     return _resolve_session_store(source)
 
 
@@ -93,9 +94,9 @@ def _emit_page(
             new_idx = idx + 1
         else:
             # Need the current page's next_cursor before we can advance.
-            _, next_cursor = _fetch(state, cursors[idx])
+            current_items, next_cursor = _fetch(state, cursors[idx])
             if next_cursor is None:
-                return [], state  # already at last page
+                return [_format_line(s) for s in current_items], state
             cursors.append(next_cursor)
             new_idx = idx + 1
     elif direction == "prev":
@@ -153,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
             new_state.get("cursors", [None])[new_state.get("current_index", 0)],
         )
         from .picker import _format_line
+
         lines = [_format_line(s) for s in items]
 
     sys.stdout.write("\n".join(lines))
