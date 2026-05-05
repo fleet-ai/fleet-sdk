@@ -28,7 +28,7 @@ def test_enable_persists_generated_device_id_before_provision_retry(
             raise TrackAPIError("network down")
 
     monkeypatch.setattr(cli.TrackPaths, "default", lambda: paths)
-    monkeypatch.setattr("fleet.auth.get_valid_token", lambda: ("jwt", "team-1"))
+    monkeypatch.setenv("FLEET_API_KEY", "test-api-key")
     monkeypatch.setattr(cli, "TrackAPIClient", FailingTrackAPIClient)
     monkeypatch.setattr(socket, "gethostname", lambda: "Dev Laptop")
     monkeypatch.setattr(

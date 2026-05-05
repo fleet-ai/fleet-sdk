@@ -832,7 +832,7 @@ def _remote_api(handler):
             transport=httpx.MockTransport(handler),
             base_url="http://test",
         ),
-        auth_provider=lambda: ("jwt", "team"),
+        auth_provider=lambda: "test-api-key",
     )
 
 

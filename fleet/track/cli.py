@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from ..auth import load_credentials
 from .api import TrackAPIClient, TrackAPIError
 from .daemon import main as daemon_main
 from .install import install, is_installed, uninstall
@@ -31,13 +31,12 @@ def _write_config(paths: TrackPaths, config: dict) -> None:
 @app.command()
 def enable() -> None:
     """Scan this machine for AI sessions and start syncing."""
-    from ..auth import get_valid_token
-
     paths = TrackPaths.default()
 
-    token = get_valid_token()
-    if not token:
-        console.print("[red]Not authenticated.[/red] Run [bold]flt login[/bold] first.")
+    if not os.getenv("FLEET_API_KEY"):
+        console.print(
+            "[red]Not authenticated.[/red] Set [bold]FLEET_API_KEY[/bold] first."
+        )
         raise typer.Exit(1)
 
     # Load or create machine ID
@@ -66,11 +65,6 @@ def enable() -> None:
         result = api.provision(device_id)
         config["team_id"] = result.get("team_id", "")
         config["user_id"] = result.get("user_id", "")
-        # Pull email + team_name from stored credentials so the daemon can
-        # embed them in manifest.json for device → user association.
-        creds = load_credentials() or {}
-        config["email"] = creds.get("email", "")
-        config["team_name"] = creds.get("team_name", "")
         import platform
         import socket
 

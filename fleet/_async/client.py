@@ -141,7 +141,9 @@ def _to_dict(obj: Any) -> Any:
 
     # Generic object with __dict__
     if hasattr(obj, "__dict__"):
-        return {k: _to_dict(v) for k, v in obj.__dict__.items() if not k.startswith("_")}
+        return {
+            k: _to_dict(v) for k, v in obj.__dict__.items() if not k.startswith("_")
+        }
 
     # Fallback - try to convert, or return string representation
     try:
@@ -149,6 +151,7 @@ def _to_dict(obj: Any) -> Any:
         return obj
     except (TypeError, ValueError):
         return str(obj)
+
 
 from .instance import (
     AsyncInstanceClient,
@@ -218,7 +221,9 @@ class AsyncSession:
         self._client = client
         self._message_count = 0
         self._logged_count = 0  # Track how many messages from history have been logged
-        self._config_sent = False  # Only send config/model/task_key/instance_id on first log
+        self._config_sent = (
+            False  # Only send config/model/task_key/instance_id on first log
+        )
 
     async def log(self, history: List[Any], response: Any) -> SessionIngestResponse:
         """Log an LLM call to the session.
@@ -239,7 +244,7 @@ class AsyncSession:
             SessionIngestResponse with updated message count
         """
         # Collect new history messages since last call
-        new_history = history[self._logged_count:]
+        new_history = history[self._logged_count :]
 
         # Update tracked count to include the response we're about to send
         # This prevents the response from being sent again as "new history" in the next call
@@ -409,9 +414,9 @@ class AsyncEnv(EnvironmentBase):
             base_url = f"{self.urls.root.rstrip('/')}/raw"
         elif self._manager_url_override and self._manager_url_override != "local://":
             # URL mode: strip /api/v1/env suffix to get root URL
-            base_url = self._manager_url_override.rstrip('/')
-            if base_url.endswith('/api/v1/env'):
-                base_url = base_url[:-len('/api/v1/env')]
+            base_url = self._manager_url_override.rstrip("/")
+            if base_url.endswith("/api/v1/env"):
+                base_url = base_url[: -len("/api/v1/env")]
         else:
             raise ValueError("No API URL configured for this environment")
         return self.instance.api(name, base_url)
@@ -444,18 +449,16 @@ class AsyncEnv(EnvironmentBase):
 
     async def heartbeat(self) -> HeartbeatResponse:
         """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
-        
+
         Returns:
             HeartbeatResponse containing heartbeat status and deadline information
         """
         body = {}
         if self.heartbeat_region:
             body["region"] = self.heartbeat_region
-        
+
         response = await self._load_client.request(
-            "POST", 
-            f"/v1/env/instances/{self.instance_id}/heartbeat",
-            json=body
+            "POST", f"/v1/env/instances/{self.instance_id}/heartbeat", json=body
         )
         return HeartbeatResponse(**response.json())
 
@@ -515,8 +518,6 @@ class AsyncFleet:
         httpx_client: Optional[httpx.AsyncClient] = None,
         max_retries: int = DEFAULT_MAX_RETRIES,
         timeout: float = DEFAULT_TIMEOUT,
-        jwt: Optional[str] = None,
-        team_id: Optional[str] = None,
     ):
         if api_key is None:
             api_key = os.getenv("FLEET_API_KEY")
@@ -527,8 +528,6 @@ class AsyncFleet:
             api_key=api_key,
             base_url=base_url,
             httpx_client=self._httpx_client,
-            jwt=jwt,
-            team_id=team_id,
         )
 
     async def list_envs(self) -> List[EnvironmentModel]:
@@ -611,7 +610,11 @@ class AsyncFleet:
         return await self.make(env_key=f"{task.env_id}:{task.version}")
 
     async def instances(
-        self, status: Optional[str] = None, region: Optional[str] = None, run_id: Optional[str] = None, profile_id: Optional[str] = None
+        self,
+        status: Optional[str] = None,
+        region: Optional[str] = None,
+        run_id: Optional[str] = None,
+        profile_id: Optional[str] = None,
     ) -> List[AsyncEnv]:
         params = {}
         if status:
@@ -649,12 +652,16 @@ class AsyncFleet:
             return self._create_local_instance(instance_id)
 
         # Localhost/direct URL mode - string starting with http:// or https://
-        elif isinstance(instance_id, str) and instance_id.startswith(("http://", "https://")):
+        elif isinstance(instance_id, str) and instance_id.startswith(
+            ("http://", "https://")
+        ):
             return self._create_url_instance(instance_id)
 
         # Remote mode - existing behavior
         else:
-            response = await self.client.request("GET", f"/v1/env/instances/{instance_id}")
+            response = await self.client.request(
+                "GET", f"/v1/env/instances/{instance_id}"
+            )
             instance = AsyncEnv(client=self.client, **response.json())
             return instance
 
@@ -667,7 +674,9 @@ class AsyncFleet:
         Returns:
             AsyncEnv: Environment instance configured for URL mode
         """
-        instance_client = AsyncInstanceClient(url=base_url, httpx_client=self._httpx_client)
+        instance_client = AsyncInstanceClient(
+            url=base_url, httpx_client=self._httpx_client
+        )
 
         # Create a minimal environment for URL mode
         env = AsyncEnv(
@@ -737,7 +746,9 @@ class AsyncFleet:
 
         instance_client = AsyncInstanceClient(url="local://", httpx_client=None)
         instance_client._resources = []  # Mark as loaded
-        instance_client._memory_anchors = {}  # Store anchor connections for in-memory DBs
+        instance_client._memory_anchors = (
+            {}
+        )  # Store anchor connections for in-memory DBs
 
         # Store creation parameters for local AsyncSQLiteResources
         # This allows db() to create new instances each time (matching HTTP mode behavior)
@@ -758,10 +769,10 @@ class AsyncFleet:
                 label=f"Local: {path}",
             )
             instance_client._resources_state[ResourceType.db.value][name] = {
-                'type': 'local',
-                'resource_model': resource_model,
-                'db_path': normalized_path,
-                'is_memory': is_memory
+                "type": "local",
+                "resource_model": resource_model,
+                "db_path": normalized_path,
+                "is_memory": is_memory,
             }
 
         # Create a minimal environment for local mode
@@ -801,41 +812,47 @@ class AsyncFleet:
 
     async def close(self, instance_id: str) -> InstanceResponse:
         """Close (delete) a specific instance by ID.
-        
+
         Args:
             instance_id: The instance ID to close
-            
+
         Returns:
             InstanceResponse containing the deleted instance details
         """
         return await _delete_instance(self.client, instance_id)
 
-    async def heartbeat(self, instance_id: str, region: Optional[str] = None) -> HeartbeatResponse:
+    async def heartbeat(
+        self, instance_id: str, region: Optional[str] = None
+    ) -> HeartbeatResponse:
         """Send heartbeat to keep instance alive (if heartbeat monitoring is enabled).
-        
+
         Args:
             instance_id: The instance ID to send heartbeat for
             region: Optional region override for cross-region heartbeats
-            
+
         Returns:
             HeartbeatResponse containing heartbeat status and deadline information
         """
         return await _send_heartbeat(self.client, instance_id, region)
 
-    async def close_all(self, run_id: Optional[str] = None, profile_id: Optional[str] = None) -> List[InstanceResponse]:
+    async def close_all(
+        self, run_id: Optional[str] = None, profile_id: Optional[str] = None
+    ) -> List[InstanceResponse]:
         """Close (delete) instances using the batch delete endpoint.
-        
+
         Args:
             run_id: Optional run ID to filter instances by
             profile_id: Optional profile ID to filter instances by (use "self" for your own profile)
-            
+
         Returns:
             List[InstanceResponse] containing the deleted instances
-            
+
         Note:
             At least one of run_id or profile_id must be provided.
         """
-        return await _delete_instances_batch(self.client, run_id=run_id, profile_id=profile_id)
+        return await _delete_instances_batch(
+            self.client, run_id=run_id, profile_id=profile_id
+        )
 
     @staticmethod
     async def execute_verifier_local(
@@ -908,11 +925,11 @@ class AsyncFleet:
         self, profile_id: Optional[str] = None, status: Optional[str] = "active"
     ) -> List[Run]:
         """List all runs (groups of instances by run_id) with aggregated statistics.
-        
+
         Args:
             profile_id: Optional profile ID to filter runs by (use "self" for your own profile)
             status: Filter by run status - "active" (default), "inactive", or "all"
-            
+
         Returns:
             List[Run] containing run information with instance counts and timestamps
         """
@@ -921,7 +938,7 @@ class AsyncFleet:
             params["profile_id"] = profile_id
         if status:
             params["active"] = status
-            
+
         response = await self.client.request("GET", "/v1/env/runs", params=params)
         return [Run(**run_data) for run_data in response.json()]
 
@@ -971,13 +988,13 @@ class AsyncFleet:
 
         # Try to find verifier_id in multiple locations
         verifier_id = task_json.get("verifier_id")
-        
+
         # Check nested verifier object for verifier_id
         if not verifier_id and "verifier" in task_json:
             verifier_obj = task_json["verifier"]
             if isinstance(verifier_obj, dict):
                 verifier_id = verifier_obj.get("verifier_id")
-        
+
         if (
             not verifier_id
             and "metadata" in task_json
@@ -994,7 +1011,9 @@ class AsyncFleet:
         # Extract verifier_runtime_version from metadata if present
         verifier_runtime_version = None
         if "metadata" in task_json and isinstance(task_json["metadata"], dict):
-            verifier_runtime_version = task_json["metadata"].get("verifier_runtime_version")
+            verifier_runtime_version = task_json["metadata"].get(
+                "verifier_runtime_version"
+            )
 
         try:
             if verifier_id and verifier_code:
@@ -1029,7 +1048,9 @@ class AsyncFleet:
             verifier_sha=verifier_sha,  # Set verifier_sha
             verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
             metadata=task_json.get("metadata", {}),  # Default empty metadata
-            output_json_schema=task_json.get("output_json_schema"),  # JSON schema for output
+            output_json_schema=task_json.get(
+                "output_json_schema"
+            ),  # JSON schema for output
         )
         return task
 
@@ -1177,11 +1198,11 @@ class AsyncFleet:
             verifier_id = task_response.verifier_id
             if not verifier_id and task_response.verifier:
                 verifier_id = task_response.verifier.verifier_id
-            
+
             verifier_sha = None
             if task_response.verifier:
                 verifier_sha = task_response.verifier.sha256
-            
+
             # Extract verifier_runtime_version from metadata if present
             verifier_runtime_version = None
             metadata = task_response.metadata or {}
@@ -1194,8 +1215,12 @@ class AsyncFleet:
                 env_id=task_response.environment_id,  # Map environment_id -> env_id
                 created_at=task_response.created_at,
                 version=task_response.version,
-                data_id=getattr(task_response, "data_id", None),  # Get data_id if available
-                data_version=getattr(task_response, "data_version", None),  # Get data_version if available
+                data_id=getattr(
+                    task_response, "data_id", None
+                ),  # Get data_id if available
+                data_version=getattr(
+                    task_response, "data_version", None
+                ),  # Get data_version if available
                 env_variables=task_response.env_variables or {},
                 verifier_func=verifier_func,  # Set verifier code
                 verifier=verifier,  # Use created verifier or None
@@ -1203,18 +1228,20 @@ class AsyncFleet:
                 verifier_sha=verifier_sha,  # Set verifier_sha
                 verifier_runtime_version=verifier_runtime_version,  # Set verifier_runtime_version
                 metadata=metadata,
-                output_json_schema=getattr(task_response, "output_json_schema", None),  # Get output_json_schema if available
+                output_json_schema=getattr(
+                    task_response, "output_json_schema", None
+                ),  # Get output_json_schema if available
             )
             tasks.append(task)
 
         # Apply client-side filtering for version if specified
         if version is not None:
             tasks = [task for task in tasks if task.version == version]
-        
+
         # Apply client-side filtering for data_id if specified
         if data_id is not None:
             tasks = [task for task in tasks if task.data_id == data_id]
-        
+
         # Apply client-side filtering for data_version if specified
         if data_version is not None:
             tasks = [task for task in tasks if task.data_version == data_version]
@@ -1370,7 +1397,9 @@ class AsyncFleet:
         Returns:
             TaskResponse containing the updated task details
         """
-        payload = TaskUpdateRequest(prompt=prompt, verifier_code=verifier_code, metadata=metadata)
+        payload = TaskUpdateRequest(
+            prompt=prompt, verifier_code=verifier_code, metadata=metadata
+        )
         response = await self.client.request(
             "PUT", f"/v1/tasks/{task_key}", json=payload.model_dump(exclude_none=True)
         )
@@ -1417,7 +1446,9 @@ class AsyncFleet:
         response = await self.client.request("GET", f"/v1/sessions/job/{job_id}")
         return JobSessionsResponse(**response.json())
 
-    async def get_session_transcript(self, session_id: str) -> SessionTranscriptResponse:
+    async def get_session_transcript(
+        self, session_id: str
+    ) -> SessionTranscriptResponse:
         """Get the transcript for a specific session.
 
         Args:
@@ -1585,7 +1616,7 @@ class AsyncFleet:
                 task_key="my_task",
                 started_at=datetime.now().isoformat()
             )
-            
+
             # Append messages as they happen
             await fleet.append_message(session.session_id, {"role": "user", "content": "Hello"})
             await fleet.append_message(session.session_id, {"role": "assistant", "content": "Hi!"})
@@ -1632,10 +1663,10 @@ class AsyncFleet:
         Example:
             # Append user message
             await fleet.append_message(session_id, {"role": "user", "content": "What's 2+2?"})
-            
+
             # Append assistant response
             await fleet.append_message(session_id, {"role": "assistant", "content": "4"})
-            
+
             # Complete the session
             await fleet.append_message(
                 session_id,
@@ -1670,10 +1701,10 @@ class AsyncFleet:
             SessionIngestResponse with final state
         """
         from datetime import datetime as dt
-        
+
         if ended_at is None:
             ended_at = dt.now().isoformat()
-        
+
         if final_message:
             messages = [final_message]
         else:
@@ -1687,7 +1718,12 @@ class AsyncFleet:
         )
 
     async def _create_verifier_from_data(
-        self, verifier_id: str, verifier_key: str, verifier_code: str, verifier_sha: str, verifier_runtime_version: Optional[str] = None
+        self,
+        verifier_id: str,
+        verifier_key: str,
+        verifier_code: str,
+        verifier_sha: str,
+        verifier_runtime_version: Optional[str] = None,
     ) -> "AsyncVerifierFunction":
         """Create an AsyncVerifierFunction from verifier data.
 
@@ -1744,16 +1780,16 @@ async def _delete_instance(client: AsyncWrapper, instance_id: str) -> InstanceRe
     return InstanceResponse(**response.json())
 
 
-async def _send_heartbeat(client: AsyncWrapper, instance_id: str, region: Optional[str] = None) -> HeartbeatResponse:
+async def _send_heartbeat(
+    client: AsyncWrapper, instance_id: str, region: Optional[str] = None
+) -> HeartbeatResponse:
     """Send heartbeat to keep instance alive."""
     body = {}
     if region:
         body["region"] = region
-    
+
     response = await client.request(
-        "POST",
-        f"/v1/env/instances/{instance_id}/heartbeat",
-        json=body
+        "POST", f"/v1/env/instances/{instance_id}/heartbeat", json=body
     )
     return HeartbeatResponse(**response.json())
 
@@ -1767,10 +1803,10 @@ async def _delete_instances_batch(
         params["run_id"] = run_id
     if profile_id:
         params["profile_id"] = profile_id
-    
+
     if not params:
         raise ValueError("At least one of run_id or profile_id must be provided")
-    
+
     response = await client.request("DELETE", "/v1/env/instances/batch", params=params)
     return [InstanceResponse(**instance_data) for instance_data in response.json()]
 

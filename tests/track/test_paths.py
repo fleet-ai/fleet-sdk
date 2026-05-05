@@ -22,7 +22,6 @@ def test_under_roots_everything_at_given_dir(tmp_path: Path):
     assert paths.pid_file == tmp_path / ".fleet" / "track" / "daemon.pid"
     assert paths.log_file == tmp_path / ".fleet" / "track" / "daemon.log"
     assert paths.config_file == tmp_path / ".fleet" / "track" / "config.json"
-    assert paths.credentials_file == tmp_path / ".fleet" / "credentials.json"
 
 
 def test_under_does_not_create_directories(tmp_path: Path):
