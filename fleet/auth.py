@@ -10,13 +10,10 @@ from typing import Optional, Tuple
 
 import httpx
 
-from ._supabase import (
-    SUPABASE_ANON_KEY,
-    SUPABASE_URL,
-    is_configured as _supabase_configured,
-)
+from .config import GLOBAL_BASE_URL
 
 CREDENTIALS_FILE = Path.home() / ".fleet" / "credentials.json"
+AUTH_REFRESH_PATH = "/v1/auth/refresh"
 
 # Refresh token 60 seconds before expiry to avoid race conditions
 _REFRESH_BUFFER_SECS = 60
@@ -79,24 +76,33 @@ def is_token_expired(access_token: str) -> bool:
         return True
 
 
+def _auth_refresh_base_url() -> str:
+    return (
+        os.environ.get("FLEET_AUTH_BASE_URL")
+        or os.environ.get("FLEET_BASE_URL")
+        or os.environ.get("FLEET_TRACK_BASE_URL")
+        or GLOBAL_BASE_URL
+    ).rstrip("/")
+
+
 def refresh_access_token(refresh_token: str) -> dict:
-    """Exchange a Supabase refresh token for a new session."""
-    if not _supabase_configured():
-        raise RuntimeError(
-            "Supabase credentials are not configured. Set SUPABASE_URL and "
-            "SUPABASE_ANON_KEY env vars, or run `flt login` again."
-        )
+    """Exchange a stored browser-login refresh token through Fleet."""
+    # The SDK intentionally does not call the identity provider directly.
+    # Fleet/orchestrator owns the provider exchange and returns SDK-shaped
+    # credentials.
     response = httpx.post(
-        f"{SUPABASE_URL}/auth/v1/token?grant_type=refresh_token",
+        f"{_auth_refresh_base_url()}{AUTH_REFRESH_PATH}",
         headers={
-            "apikey": SUPABASE_ANON_KEY,
             "Content-Type": "application/json",
         },
         json={"refresh_token": refresh_token},
         timeout=10.0,
     )
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+    if not data.get("access_token"):
+        raise RuntimeError("Fleet auth refresh response did not include access_token")
+    return data
 
 
 def get_valid_token() -> Optional[Tuple[str, str]]:
