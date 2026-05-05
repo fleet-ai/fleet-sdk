@@ -97,6 +97,7 @@ def test_run_once_reconciles_uploads_file_and_manifest(tmp_path: Path):
     manifest = json.loads(transport.calls[-1][1])
     assert manifest["device_id"] == "dev1"
     assert manifest["files"] == {rel_path: result.local_map[rel_path]}
+    assert daemon._status.bytes_uploaded_session == len(transport.calls[0][1])
 
     upload_url_paths = [body["paths"] for _, body in api_requests]
     assert upload_url_paths == [[rel_path], ["manifest.json"]]

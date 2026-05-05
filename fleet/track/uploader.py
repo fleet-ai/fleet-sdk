@@ -91,9 +91,19 @@ def _read_safe(path: Path) -> Optional[bytes]:
 
 def upload_one(path: Path, presigned_url: str, transport: Transport) -> bool:
     """Scrub and upload a single file. Returns True on success."""
+    ok, _bytes_uploaded = _upload_one_with_size(path, presigned_url, transport)
+    return ok
+
+
+def _upload_one_with_size(
+    path: Path,
+    presigned_url: str,
+    transport: Transport,
+) -> tuple[bool, int]:
+    """Upload one file and return whether it succeeded plus uploaded bytes."""
     data = _read_safe(path)
     if data is None:
-        return False
+        return False, 0
 
     scrubbed = scrub_bytes(data)
 
@@ -101,11 +111,11 @@ def upload_one(path: Path, presigned_url: str, transport: Transport) -> bool:
         status = transport.put(presigned_url, scrubbed)
         if status not in (200, 204):
             log.warning("upload %s → HTTP %s", path.name, status)
-            return False
-        return True
+            return False, 0
+        return True, len(scrubbed)
     except httpx.RequestError as e:
         log.warning("upload %s network error: %s", path.name, e)
-        return False
+        return False, 0
 
 
 # ------------------------------------------------------------------ #
@@ -121,24 +131,38 @@ class UploadPool:
         on_done: Callable[[str, str], None],
         on_failed: Callable[[str, str, str], None],
         transport: Optional[Transport] = None,
+        on_uploaded_bytes: Optional[Callable[[str, int], None]] = None,
     ) -> None:
         self._on_done = on_done
         self._on_failed = on_failed
+        self._on_uploaded_bytes = on_uploaded_bytes
         self._transport: Transport = transport or HttpxTransport()
-        self._pool = ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="track-upload")
+        self._pool = ThreadPoolExecutor(
+            max_workers=WORKERS, thread_name_prefix="track-upload"
+        )
         self._in_flight: dict[str, Future] = {}
         self._lock = threading.Lock()
 
-    def submit(self, rel_path: str, sha256: str, abs_path: Path, presigned_url: str) -> None:
+    def submit(
+        self, rel_path: str, sha256: str, abs_path: Path, presigned_url: str
+    ) -> None:
         future = self._pool.submit(self._run, rel_path, sha256, abs_path, presigned_url)
         with self._lock:
             self._in_flight[rel_path] = future
 
-    def _run(self, rel_path: str, sha256: str, abs_path: Path, presigned_url: str) -> None:
+    def _run(
+        self, rel_path: str, sha256: str, abs_path: Path, presigned_url: str
+    ) -> None:
         try:
-            ok = upload_one(abs_path, presigned_url, self._transport)
+            ok, bytes_uploaded = _upload_one_with_size(
+                abs_path,
+                presigned_url,
+                self._transport,
+            )
             if ok:
                 log.debug("uploaded %s", rel_path)
+                if self._on_uploaded_bytes is not None:
+                    self._on_uploaded_bytes(rel_path, bytes_uploaded)
                 self._on_done(rel_path, sha256)
             else:
                 self._on_failed(rel_path, sha256, "upload returned failure")

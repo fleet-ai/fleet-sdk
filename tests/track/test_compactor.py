@@ -178,6 +178,23 @@ def test_compactor_keeps_everything_when_under_budget():
     assert all("session summary" not in getattr(e, "text", "") for e in out)
 
 
+def test_compactor_does_not_reserve_summary_overhead_when_everything_fits():
+    events = [
+        SessionStart(source="claude", id="s"),
+        UserMessage(source="claude", text="q"),
+        AssistantMessage(source="claude", text="a"),
+    ]
+
+    c = TruncationCompactor(
+        budget=TokenBudget(target=300, margin=1.0),
+        token_estimator=lambda _ev: 100,
+    )
+
+    out = c.compact(events)
+
+    assert out == events
+
+
 def test_compactor_drops_oldest_when_over_budget():
     """A tight budget should keep tail events, drop early ones, prepend a summary."""
     events: list = [SessionStart(source="claude", id="s")]
@@ -199,7 +216,7 @@ def test_compactor_drops_oldest_when_over_budget():
 
 def test_compactor_keeps_contiguous_recent_suffix_when_middle_event_is_oversized():
     events = [
-        UserMessage(source="claude", text="older small"),
+        *[UserMessage(source="claude", text=f"older small {i}") for i in range(10)],
         UserMessage(source="claude", text="oversized"),
         UserMessage(source="claude", text="newer small"),
     ]

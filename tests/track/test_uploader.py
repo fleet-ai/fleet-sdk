@@ -26,7 +26,9 @@ from fleet.track.uploader import (
 class RecordingTransport:
     """Records every put() call. Test analog to HttpxTransport."""
 
-    def __init__(self, status_for_url: Optional[dict] = None, raise_on_url: Optional[str] = None) -> None:
+    def __init__(
+        self, status_for_url: Optional[dict] = None, raise_on_url: Optional[str] = None
+    ) -> None:
         self.calls: list[tuple[str, bytes]] = []
         self._statuses = status_for_url or {}
         self._raise_on = raise_on_url

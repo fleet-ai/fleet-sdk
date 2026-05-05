@@ -162,6 +162,7 @@ class Daemon:
                 on_done=self._on_upload_done,
                 on_failed=self._on_upload_failed,
                 transport=self._upload_transport,
+                on_uploaded_bytes=self._on_uploaded_bytes,
             )
             self._drainer = QueueDrainer(
                 paths=self._paths,
@@ -210,6 +211,7 @@ class Daemon:
             on_done=self._on_upload_done,
             on_failed=self._on_upload_failed,
             transport=self._upload_transport,
+            on_uploaded_bytes=self._on_uploaded_bytes,
         )
         self._drainer = QueueDrainer(
             paths=self._paths,
@@ -372,6 +374,10 @@ class Daemon:
     def _on_upload_failed(self, rel_path: str, sha256: str, error: str) -> None:
         self._queue.mark_failed(rel_path, sha256, error)
         log.warning("upload failed %s: %s", rel_path, error)
+
+    def _on_uploaded_bytes(self, _rel_path: str, bytes_uploaded: int) -> None:
+        self._bytes_uploaded += bytes_uploaded
+        self._status.bytes_uploaded_session = self._bytes_uploaded
 
     # ------------------------------------------------------------------ #
     # Metadata index                                                       #

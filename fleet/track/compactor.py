@@ -423,9 +423,10 @@ class TruncationCompactor:
             )
             return head
 
-        # Walk body from the end, accumulating tokens.
-        kept_pairs_reversed: list[tuple[int, Event]] = []
-        used = head_tokens
+        body_tokens = sum(self._estimate(e) for e in body)
+        if head_tokens + body_tokens <= budget:
+            return head + body
+
         # Reserve for: (a) the summary message we'll prepend if we
         # actually drop anything (~1500 tokens for the prose), (b) the
         # downstream cross-source synthesis SessionStart prepend
@@ -433,7 +434,10 @@ class TruncationCompactor:
         # estimator can't see. Bias generously — overflows kill resume,
         # under-fills are free.
         OVERHEAD_RESERVE = 2_500 if self.cfg.summarize_dropped else 1_000
-        used += OVERHEAD_RESERVE
+        used = head_tokens + OVERHEAD_RESERVE
+
+        # Walk body from the end, accumulating tokens.
+        kept_pairs_reversed: list[tuple[int, Event]] = []
 
         for idx in range(len(body) - 1, -1, -1):
             ev = body[idx]
