@@ -15,6 +15,7 @@ import platform
 import shutil
 import subprocess
 import sys
+from html import escape
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +23,8 @@ from .paths import TrackPaths
 
 PLIST_LABEL = "io.fleet.track"
 SYSTEMD_SERVICE = "fleet-track"
+DAEMON_ENV_KEYS = ("FLEET_API_KEY", "FLEET_TRACK_BASE_URL")
+PRIVATE_FILE_MODE = 0o600
 
 
 def flt_executable() -> str:
@@ -79,12 +82,11 @@ def is_installed() -> bool:
 
 def render_launchd_plist(paths: TrackPaths, flt_path: str, env_path: str = "/usr/local/bin:/usr/bin:/bin") -> str:
     """Return the plist XML body. Pure: no filesystem side-effects."""
-    extra_env = ""
-    if os.environ.get("FLEET_TRACK_BASE_URL"):
-        extra_env = (
-            f"<key>FLEET_TRACK_BASE_URL</key>"
-            f"<string>{os.environ['FLEET_TRACK_BASE_URL']}</string>"
-        )
+    extra_env = "\n".join(
+        f"        <key>{key}</key>\n        <string>{escape(value)}</string>"
+        for key in DAEMON_ENV_KEYS
+        if (value := os.environ.get(key))
+    )
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -120,9 +122,11 @@ def render_launchd_plist(paths: TrackPaths, flt_path: str, env_path: str = "/usr
 
 def render_systemd_unit(paths: TrackPaths, flt_path: str, env_path: str = "/usr/local/bin:/usr/bin:/bin") -> str:
     """Return the systemd service unit body. Pure: no filesystem side-effects."""
-    extra_env = ""
-    if os.environ.get("FLEET_TRACK_BASE_URL"):
-        extra_env = f"Environment=FLEET_TRACK_BASE_URL={os.environ['FLEET_TRACK_BASE_URL']}"
+    extra_env = "\n".join(
+        f'Environment="{key}={_escape_systemd_env_value(value)}"'
+        for key in DAEMON_ENV_KEYS
+        if (value := os.environ.get(key))
+    )
     return f"""[Unit]
 Description=Fleet track daemon — AI session sync
 After=network-online.target
@@ -140,6 +144,28 @@ Environment=PATH={env_path}
 [Install]
 WantedBy=default.target
 """
+
+
+def _escape_systemd_env_value(value: str) -> str:
+    """Escape a value for a quoted systemd Environment= assignment."""
+    if "\n" in value or "\r" in value:
+        raise ValueError("Daemon environment values cannot contain newlines")
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+
+
+def _write_private_text(path: Path, body: str) -> None:
+    """Write a service file without leaving secrets world-readable."""
+    if path.exists():
+        path.chmod(PRIVATE_FILE_MODE)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, PRIVATE_FILE_MODE)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            handle.write(body)
+    finally:
+        if fd != -1:
+            os.close(fd)
+    path.chmod(PRIVATE_FILE_MODE)
 
 
 # ------------------------------------------------------------------ #
@@ -160,7 +186,7 @@ def _install_launchd(paths: TrackPaths) -> None:
     )
     plist_path = _launchd_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
-    plist_path.write_text(body)
+    _write_private_text(plist_path, body)
 
     subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
     subprocess.run(["launchctl", "load", str(plist_path)], check=True)
@@ -191,7 +217,7 @@ def _install_systemd(paths: TrackPaths) -> None:
     )
     service_path = _systemd_service_path()
     service_path.parent.mkdir(parents=True, exist_ok=True)
-    service_path.write_text(body)
+    _write_private_text(service_path, body)
 
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     subprocess.run(["systemctl", "--user", "enable", "--now", SYSTEMD_SERVICE], check=True)
