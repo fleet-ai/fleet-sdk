@@ -197,7 +197,7 @@ def test_compactor_drops_oldest_when_over_budget():
     assert len(out) < len(events)
 
 
-def test_compactor_skips_oversized_tail_event_and_keeps_smaller_older_events():
+def test_compactor_keeps_contiguous_recent_suffix_when_middle_event_is_oversized():
     events = [
         UserMessage(source="claude", text="older small"),
         UserMessage(source="claude", text="oversized"),
@@ -215,7 +215,7 @@ def test_compactor_skips_oversized_tail_event_and_keeps_smaller_older_events():
 
     out = c.compact(events)
 
-    assert [e.text for e in out] == ["older small", "newer small"]
+    assert [e.text for e in out] == ["newer small"]
 
 
 def test_compactor_summary_can_be_disabled():

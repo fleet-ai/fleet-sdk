@@ -439,7 +439,7 @@ class TruncationCompactor:
             ev = body[idx]
             cost = self._estimate(ev)
             if used + cost > budget:
-                continue
+                break
             kept_pairs_reversed.append((idx, ev))
             used += cost
 
