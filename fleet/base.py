@@ -2,11 +2,10 @@ import httpx
 from typing import Dict, Any, Optional
 import json
 import logging
-import time
 import uuid
 
 from .models import InstanceResponse
-from .config import GLOBAL_BASE_URL
+from ._auth_headers import AuthenticatedWrapperMixin
 from .exceptions import (
     FleetAPIError,
     FleetAuthenticationError,
@@ -23,12 +22,6 @@ from .exceptions import (
     FleetConflictError,
 )
 
-# Import version
-try:
-    from . import __version__
-except ImportError:
-    __version__ = "0.2.124"
-
 logger = logging.getLogger(__name__)
 
 
@@ -38,30 +31,23 @@ class EnvironmentBase(InstanceResponse):
         return f"{self.urls.manager.api}"
 
 
-class BaseWrapper:
-    def __init__(self, *, api_key: Optional[str], base_url: Optional[str]):
-        if api_key is None:
-            raise ValueError("api_key is required")
-        self.api_key = api_key
-        if base_url is None:
-            base_url = GLOBAL_BASE_URL
-        self.base_url = base_url
+class BaseWrapper(AuthenticatedWrapperMixin):
+    _authentication_error_cls = FleetAuthenticationError
 
-    def get_headers(self, request_id: Optional[str] = None) -> Dict[str, str]:
-        headers: Dict[str, str] = {
-            "X-Fleet-SDK-Language": "Python",
-            "X-Fleet-SDK-Version": __version__,
-        }
-        headers["Authorization"] = f"Bearer {self.api_key}"
-
-        # Add request ID for idempotency (persists across retries)
-        if request_id:
-            headers["X-Request-ID"] = request_id
-
-        # Add timestamp for all requests
-        headers["X-Request-Timestamp"] = str(int(time.time() * 1000))
-
-        return headers
+    def __init__(
+        self,
+        *,
+        api_key: Optional[str],
+        base_url: Optional[str],
+        jwt: Optional[str] = None,
+        team_id: Optional[str] = None,
+    ):
+        self._init_auth(
+            api_key=api_key,
+            base_url=base_url,
+            jwt=jwt,
+            team_id=team_id,
+        )
 
 
 class SyncWrapper(BaseWrapper):
