@@ -50,7 +50,7 @@ def enable() -> None:
         hostname = re.sub(r"[^a-z0-9-]", "-", socket.gethostname().lower())[:20].strip(
             "-"
         )
-        config["device_id"] = f"{hostname}-{str(uuid.uuid4()).replace('-','')[:8]}"
+        config["device_id"] = f"{hostname}-{str(uuid.uuid4()).replace('-', '')[:8]}"
 
     device_id = config["device_id"]
 
@@ -237,12 +237,13 @@ def _resolve_session_store(source: str):
         AND anything explicitly ingested into the stub.
       - `native`: only the read-only view of `~/.claude` / `~/.codex`.
       - `stub`: only the LocalSessionStore (the dev stub).
-      - `remote`: future RemoteSessionStore (not yet wired).
+      - `remote`: orchestrator-backed metadata index.
     """
     from .store import (
         ChainedSessionStore,
         LocalSessionStore,
         NativeFilesSessionStore,
+        RemoteSessionStore,
     )
 
     paths = TrackPaths.default()
@@ -251,11 +252,7 @@ def _resolve_session_store(source: str):
     if source == "native":
         return NativeFilesSessionStore()
     if source == "remote":
-        raise typer.BadParameter(
-            "--source remote isn't wired yet. The contract is reserved for "
-            "the future RemoteSessionStore (theseus). Use --source auto, "
-            "native, or stub."
-        )
+        return RemoteSessionStore()
     if source == "auto":
         # LocalSessionStore first so explicitly-ingested rows shadow native
         # ones with the same id (e.g. forks re-stored after resume).
@@ -285,7 +282,7 @@ def list_sessions(
     source: str = typer.Option(
         "auto",
         "--source",
-        help="Where to read sessions from: auto (native+stub), native (~/.claude, ~/.codex), stub (LocalSessionStore), remote (theseus, not yet wired).",
+        help="Where to read sessions from: auto (native+stub), native (~/.claude, ~/.codex), stub (LocalSessionStore), remote (orchestrator).",
     ),
 ) -> None:
     """List sessions across all tracked AI tools.
@@ -389,7 +386,7 @@ def resume(
     source: str = typer.Option(
         "auto",
         "--source",
-        help="Where to read sessions from: auto (native+stub), native, stub, remote (not wired).",
+        help="Where to read sessions from: auto (native+stub), native, stub, remote.",
     ),
     compact: bool = typer.Option(
         True,

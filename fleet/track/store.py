@@ -407,16 +407,18 @@ class SessionStore(Protocol):
 class LocalStorePaths:
     """Filesystem layout under the store root.
 
-        <root>/
-          index.jsonl          # one Session record per line, append-only
-          sessions/
-            <id>.jsonl         # one Event-as-JSON per line
+    <root>/
+      index.jsonl          # one Session record per line, append-only
+      sessions/
+        <id>.jsonl         # one Event-as-JSON per line
     """
 
     root: Path
 
     @classmethod
-    def under(cls, paths: TrackPaths, *, name: str = "local-store") -> "LocalStorePaths":
+    def under(
+        cls, paths: TrackPaths, *, name: str = "local-store"
+    ) -> "LocalStorePaths":
         return cls(root=paths.track_dir / name)
 
     @property
@@ -461,7 +463,11 @@ class LocalSessionStore:
         # the default limit"; callers wanting more should use `page()`.
         page_limit = limit if limit is not None else DEFAULT_PAGE_LIMIT
         items, _ = self.page(
-            tool=tool, cwd=cwd, since=since, query=query, limit=page_limit,
+            tool=tool,
+            cwd=cwd,
+            since=since,
+            query=query,
+            limit=page_limit,
         )
         return items
 
@@ -652,7 +658,9 @@ class LocalSessionStore:
 
     def _atomic_write_jsonl(self, path: Path, rows: Iterable[dict]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}-", suffix=".tmp")
+        fd, tmp = tempfile.mkstemp(
+            dir=path.parent, prefix=f".{path.name}-", suffix=".tmp"
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 for row in rows:
@@ -694,7 +702,9 @@ class LocalSessionStore:
                     log.debug("local store: skip invalid event in %s: %s", id, e)
                     continue
 
-    def _build_chain_from_external(self, leaf: Session, lookup) -> list[tuple[Session, Optional[int]]]:
+    def _build_chain_from_external(
+        self, leaf: Session, lookup
+    ) -> list[tuple[Session, Optional[int]]]:
         """Variant of `_build_chain` that resolves parents via a caller-provided
         `lookup(session_id) → Session | None` instead of `self.get`. Used by
         ChainedSessionStore so cross-store fork chains resolve correctly."""
@@ -729,6 +739,127 @@ class LocalSessionStore:
         max_events = None (replay all).
         """
         return self._build_chain_from_external(leaf, self.get)
+
+
+# ------------------------------------------------------------------ #
+# RemoteSessionStore                                                   #
+# ------------------------------------------------------------------ #
+
+
+class RemoteSessionStore:
+    """Read-only SessionStore backed by orchestrator's metadata index.
+
+    The daemon writes bytes through the v1 S3-direct sync path and then
+    registers metadata through `/v1/track/sessions/{id}`. This store reads that
+    metadata and fetches native bytes through orchestrator-issued presigned S3
+    URLs when a caller needs events for resume.
+    """
+
+    prefers_authoritative_paging: bool = True
+
+    def __init__(self, api=None) -> None:
+        if api is None:
+            from .api import TrackAPIClient
+
+            api = TrackAPIClient()
+        self._api = api
+
+    def list(
+        self,
+        *,
+        tool: Optional[str] = None,
+        cwd: Optional[str] = None,
+        since: Optional[str] = None,
+        query: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> list[Session]:
+        page_limit = limit if limit is not None else DEFAULT_PAGE_LIMIT
+        items, _ = self.page(
+            tool=tool,
+            cwd=cwd,
+            since=since,
+            query=query,
+            limit=page_limit,
+        )
+        return items
+
+    def page(
+        self,
+        *,
+        tool: Optional[str] = None,
+        cwd: Optional[str] = None,
+        since: Optional[str] = None,
+        query: Optional[str] = None,
+        limit: int = DEFAULT_PAGE_LIMIT,
+        cursor: Optional[str] = None,
+    ) -> tuple[list[Session], Optional[str]]:
+        data = self._api.list_sessions(
+            tool=tool,
+            cwd=cwd,
+            since=since,
+            query=query,
+            limit=_clamp_limit(limit),
+            cursor=cursor,
+        )
+        items = [_session_from_api(row) for row in data.get("items", [])]
+        return items, data.get("next_cursor")
+
+    def get(self, id: str) -> Optional[Session]:
+        try:
+            return _session_from_api(self._api.get_session(id))
+        except Exception as e:
+            if getattr(e, "status_code", None) == 404:
+                return None
+            raise
+
+    def events(self, id: str) -> Iterator[Event]:
+        leaf = self.get(id)
+        if leaf is None:
+            raise KeyError(id)
+
+        chain = _build_chain(leaf, self.get)
+        for node, max_events in chain:
+            yielded = 0
+            for ev in self.own_events(node.id):
+                if max_events is not None and yielded >= max_events:
+                    break
+                yield ev
+                yielded += 1
+
+    def own_events(self, id: str) -> Iterator[Event]:
+        session = self.get(id)
+        if session is None:
+            raise KeyError(id)
+
+        raw = self._api.download_session_content(session.id)
+        suffix = ".jsonl" if session.tool in {"claude", "codex"} else ""
+        with tempfile.NamedTemporaryFile(suffix=suffix) as f:
+            f.write(raw)
+            f.flush()
+            path = Path(f.name)
+            if session.tool == "claude":
+                from .sources import ClaudeSource
+
+                yield from ClaudeSource().parse(path)
+            elif session.tool == "codex":
+                from .sources import CodexSource
+
+                yield from CodexSource().parse(path)
+            else:
+                raise NotImplementedError(
+                    f"Remote event replay for {session.tool!r} sessions is not supported yet"
+                )
+
+    def create(self, session: Session, events: Iterable[Event]) -> Session:
+        raise NotImplementedError(
+            "RemoteSessionStore is read-only; the daemon writes remote metadata"
+        )
+
+    def append(self, id: str, events: Iterable[Event]) -> int:
+        raise NotImplementedError("RemoteSessionStore is read-only")
+
+    def delete(self, id: str) -> bool:
+        raise NotImplementedError("RemoteSessionStore is read-only")
 
 
 # ------------------------------------------------------------------ #
@@ -770,7 +901,11 @@ class NativeFilesSessionStore:
         # and filter semantics are identical.
         page_limit = limit if limit is not None else DEFAULT_PAGE_LIMIT
         items, _ = self.page(
-            tool=tool, cwd=cwd, since=since, query=query, limit=page_limit,
+            tool=tool,
+            cwd=cwd,
+            since=since,
+            query=query,
+            limit=page_limit,
         )
         return items
 
@@ -877,6 +1012,7 @@ class NativeFilesSessionStore:
     def _sources_with_session_builders(self):
         """Each tuple is (source_instance, fn(path)→Session|None)."""
         from .sources import ClaudeSource, CodexSource
+
         return [
             (ClaudeSource(home=self._home), self._build_claude_session),
             (CodexSource(home=self._home), self._build_codex_session),
@@ -888,7 +1024,9 @@ class NativeFilesSessionStore:
         if not _looks_like_uuid(sid):
             return None
         return _build_session_from_path(
-            tool="claude", id=sid, path=path,
+            tool="claude",
+            id=sid,
+            path=path,
             cwd=_decode_claude_cwd(path),
         )
 
@@ -907,11 +1045,15 @@ class NativeFilesSessionStore:
         # parse the first line only to keep listing fast.
         cwd = _read_codex_cwd(path)
         return _build_session_from_path(
-            tool="codex", id=candidate, path=path, cwd=cwd,
+            tool="codex",
+            id=candidate,
+            path=path,
+            cwd=cwd,
         )
 
     def _path_for(self, session: Session) -> Optional["Path"]:  # noqa: F821
         from .sources import ClaudeSource, CodexSource
+
         if session.tool == "claude":
             for p in ClaudeSource(home=self._home).iter_files():
                 if p.stem == session.id:
@@ -1004,8 +1146,12 @@ class ChainedSessionStore:
             if getattr(store, "prefers_authoritative_paging", False):
                 return self._authoritative_page(
                     auth_idx=i,
-                    tool=tool, cwd=cwd, since=since,
-                    query=query, limit=limit, cursor=cursor,
+                    tool=tool,
+                    cwd=cwd,
+                    since=since,
+                    query=query,
+                    limit=limit,
+                    cursor=cursor,
                 )
 
         # Strategy 2: legacy eager-merge.
@@ -1014,17 +1160,26 @@ class ChainedSessionStore:
         rows: list[Session] = []
         for store in self._stores:
             try:
-                store_rows = list(store.list(
-                    tool=tool, cwd=cwd, since=since, query=query,
-                    limit=_CHAINED_BUFFER_CAP,
-                ))
+                store_rows = list(
+                    store.list(
+                        tool=tool,
+                        cwd=cwd,
+                        since=since,
+                        query=query,
+                        limit=_CHAINED_BUFFER_CAP,
+                    )
+                )
             except TypeError:
                 # Backwards-compat: a backing store that hasn't grown the
                 # `query` kwarg yet — fall back to filtering ourselves.
-                store_rows = list(store.list(
-                    tool=tool, cwd=cwd, since=since,
-                    limit=_CHAINED_BUFFER_CAP,
-                ))
+                store_rows = list(
+                    store.list(
+                        tool=tool,
+                        cwd=cwd,
+                        since=since,
+                        limit=_CHAINED_BUFFER_CAP,
+                    )
+                )
                 if query:
                     store_rows = [s for s in store_rows if _matches_query(s, query)]
             for s in store_rows:
@@ -1061,8 +1216,12 @@ class ChainedSessionStore:
         rows from the other backends into the same window."""
         auth = self._stores[auth_idx]
         auth_page, next_cursor = auth.page(
-            tool=tool, cwd=cwd, since=since, query=query,
-            limit=limit, cursor=cursor,
+            tool=tool,
+            cwd=cwd,
+            since=since,
+            query=query,
+            limit=limit,
+            cursor=cursor,
         )
         if not auth_page:
             return auth_page, next_cursor
@@ -1083,15 +1242,24 @@ class ChainedSessionStore:
             if j == auth_idx:
                 continue
             try:
-                rows = list(store.list(
-                    tool=tool, cwd=cwd, since=since, query=query,
-                    limit=_CHAINED_BUFFER_CAP,
-                ))
+                rows = list(
+                    store.list(
+                        tool=tool,
+                        cwd=cwd,
+                        since=since,
+                        query=query,
+                        limit=_CHAINED_BUFFER_CAP,
+                    )
+                )
             except TypeError:
-                rows = list(store.list(
-                    tool=tool, cwd=cwd, since=since,
-                    limit=_CHAINED_BUFFER_CAP,
-                ))
+                rows = list(
+                    store.list(
+                        tool=tool,
+                        cwd=cwd,
+                        since=since,
+                        limit=_CHAINED_BUFFER_CAP,
+                    )
+                )
                 if query:
                     rows = [s for s in rows if _matches_query(s, query)]
             for s in rows:
@@ -1108,7 +1276,8 @@ class ChainedSessionStore:
         # row wins because it's the source of truth for ids it knows.
         merged = sorted(
             list(auth_page) + local_in_window,
-            key=_sort_key, reverse=True,
+            key=_sort_key,
+            reverse=True,
         )
         # Trim to the requested limit so we don't return more than asked.
         merged = merged[:limit]
@@ -1219,18 +1388,97 @@ class ChainedSessionStore:
         return out
 
 
+def _build_chain(
+    leaf: Session,
+    lookup,
+) -> list[tuple[Session, Optional[int]]]:
+    """Build a fork chain root → leaf using `lookup(session_id)`."""
+    chain: list[Session] = []
+    seen: set[str] = set()
+    cur: Optional[Session] = leaf
+    while cur is not None:
+        if cur.id in seen:
+            log.warning("session lineage cycle at %s; truncating", cur.id)
+            break
+        seen.add(cur.id)
+        chain.append(cur)
+        if cur.forked_from is None:
+            break
+        cur = lookup(cur.forked_from)
+
+    chain.reverse()
+    out: list[tuple[Session, Optional[int]]] = []
+    for i, node in enumerate(chain):
+        if i + 1 < len(chain):
+            out.append((node, chain[i + 1].fork_point))
+        else:
+            out.append((node, None))
+    return out
+
+
+def _session_from_api(row: dict) -> Session:
+    """Map orchestrator SessionMetadata JSON to the SDK dataclass."""
+    known = {f.name for f in Session.__dataclass_fields__.values()}
+    cleaned = {k: v for k, v in row.items() if k in known}
+    if "origin_device" not in cleaned and row.get("device_id"):
+        cleaned["origin_device"] = row["device_id"]
+    return Session(**cleaned)
+
+
 # ------------------------------------------------------------------ #
 # Native-files helpers                                                 #
 # ------------------------------------------------------------------ #
 
 
 _UUID_RE = None
+
+
 def _looks_like_uuid(s: str) -> bool:
     global _UUID_RE
     if _UUID_RE is None:
         import re as _re
-        _UUID_RE = _re.compile(r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$")
+
+        _UUID_RE = _re.compile(
+            r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$"
+        )
     return bool(_UUID_RE.match(s))
+
+
+def session_from_native_path(path, *, home: Optional[Path] = None) -> Optional[Session]:
+    """Return a cheap Session metadata record for a native session file.
+
+    This is the daemon's bridge from the v1 file syncer to the orchestrator
+    metadata index. It deliberately supports only source formats whose session
+    id and parser semantics are implemented locally.
+    """
+    path = Path(path)
+    home = home or Path.home()
+    try:
+        rel = path.relative_to(home)
+    except ValueError:
+        return None
+    if _looks_like_fleet_checkout(path):
+        return None
+
+    parts = rel.parts
+    native = NativeFilesSessionStore(home=home)
+    if len(parts) >= 3 and parts[0] == ".claude" and parts[1] == "projects":
+        if path.suffix != ".jsonl":
+            return None
+        return native._build_claude_session(path)
+    if (
+        len(parts) >= 3
+        and parts[0] == ".codex"
+        and parts[1]
+        in {
+            "sessions",
+            "archived_sessions",
+        }
+    ):
+        if path.suffix != ".jsonl":
+            return None
+        return native._build_codex_session(path)
+    return None
 
 
 def _decode_claude_cwd(path) -> Optional[str]:
@@ -1312,7 +1560,9 @@ def _read_codex_cwd(path) -> Optional[str]:
     return cwd if isinstance(cwd, str) else None
 
 
-def _build_session_from_path(*, tool: str, id: str, path, cwd: Optional[str]) -> Session:
+def _build_session_from_path(
+    *, tool: str, id: str, path, cwd: Optional[str]
+) -> Session:
     """Cheap Session record from a path's stat. event_count is approximated
     by line count (avoids parsing); fine for picker display.
 
@@ -1325,8 +1575,12 @@ def _build_session_from_path(*, tool: str, id: str, path, cwd: Optional[str]) ->
     from .repos import capture_repo
 
     stat = path.stat()
-    last_active = _dt.datetime.fromtimestamp(stat.st_mtime, tz=_dt.timezone.utc).isoformat()
-    started_at = _dt.datetime.fromtimestamp(stat.st_ctime, tz=_dt.timezone.utc).isoformat()
+    last_active = _dt.datetime.fromtimestamp(
+        stat.st_mtime, tz=_dt.timezone.utc
+    ).isoformat()
+    started_at = _dt.datetime.fromtimestamp(
+        stat.st_ctime, tz=_dt.timezone.utc
+    ).isoformat()
     # Line count is a fast approximation of event_count.
     line_count = 0
     try:
@@ -1349,8 +1603,11 @@ def _build_session_from_path(*, tool: str, id: str, path, cwd: Optional[str]) ->
     origin_device = _read_local_device_id()
 
     return Session(
-        id=id, tool=tool, cwd=cwd,
-        started_at=started_at, last_active=last_active,
+        id=id,
+        tool=tool,
+        cwd=cwd,
+        started_at=started_at,
+        last_active=last_active,
         event_count=line_count,
         origin_device=origin_device,
         metadata=metadata,

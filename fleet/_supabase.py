@@ -1,5 +1,6 @@
-# Placeholder values are replaced at build time by the publish workflow.
-# For local development, set SUPABASE_URL and SUPABASE_ANON_KEY env vars.
+# Supabase refresh is a temporary compatibility path for browser-login
+# credentials. Values must come from the runtime environment; do not bake them
+# into published distributions.
 import os
 
 _PLACEHOLDER_URL = "%%SUPABASE_URL%%"

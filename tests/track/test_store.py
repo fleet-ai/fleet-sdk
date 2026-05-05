@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 
 from fleet.track.paths import TrackPaths
@@ -816,3 +817,92 @@ def test_chained_local_only_uses_eager_merge(tmp_path: Path):
     page, _ = chained.page(limit=10)
     # Both rows present; ordering by last_active DESC.
     assert {s.id for s in page} == {"a", "b"}
+
+
+# ------------------------------------------------------------------ #
+# RemoteSessionStore                                                   #
+# ------------------------------------------------------------------ #
+
+
+def _remote_api(handler):
+    from fleet.track.api import TrackAPIClient
+
+    return TrackAPIClient(
+        client=httpx.Client(
+            transport=httpx.MockTransport(handler),
+            base_url="http://test",
+        ),
+        auth_provider=lambda: ("jwt", "team"),
+    )
+
+
+def test_remote_store_pages_with_query_and_origin_device():
+    from fleet.track.store import RemoteSessionStore
+
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["params"] = dict(req.url.params)
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "s1",
+                        "tool": "claude",
+                        "cwd": "/repo",
+                        "last_active": "2026-05-05T00:00:00Z",
+                        "event_count": 7,
+                        "device_id": "laptop-abc12345",
+                        "metadata": {"title": "FleetTrack"},
+                    }
+                ],
+                "next_cursor": "next",
+            },
+        )
+
+    store = RemoteSessionStore(api=_remote_api(handler))
+    items, cursor = store.page(query="fleet", limit=10)
+
+    assert captured["params"]["query"] == "fleet"
+    assert captured["params"]["limit"] == "10"
+    assert cursor == "next"
+    assert items[0].origin_device == "laptop-abc12345"
+    assert items[0].metadata["title"] == "FleetTrack"
+
+
+def test_remote_store_fetches_content_and_parses_events():
+    from fleet.track.store import RemoteSessionStore
+
+    sid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    native = (
+        '{"type":"session_meta","timestamp":"2026-05-05T00:00:00Z",'
+        '"payload":{"cwd":"/repo","cli_version":"1.0"}}\n'
+        '{"type":"response_item","timestamp":"2026-05-05T00:00:01Z",'
+        '"payload":{"type":"message","role":"user",'
+        '"content":[{"type":"input_text","text":"hello"}]}}\n'
+    ).encode()
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == f"/v1/track/sessions/{sid}":
+            return httpx.Response(
+                200,
+                json={
+                    "id": sid,
+                    "tool": "codex",
+                    "cwd": "/repo",
+                    "last_active": "2026-05-05T00:00:01Z",
+                    "event_count": 2,
+                },
+            )
+        if req.url.path == f"/v1/track/sessions/{sid}/content":
+            return httpx.Response(200, json={"url": "https://s3.test/session"})
+        if str(req.url) == "https://s3.test/session":
+            return httpx.Response(200, content=native)
+        raise AssertionError(f"unexpected request: {req.method} {req.url}")
+
+    store = RemoteSessionStore(api=_remote_api(handler))
+    events = list(store.events(sid))
+
+    assert [e.type for e in events] == ["session_start", "user_message"]
+    assert events[1].text == "hello"

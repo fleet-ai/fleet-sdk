@@ -76,8 +76,12 @@ def test_estimate_event_tokens_includes_tool_input():
         ToolCall(source="claude", tool_call_id="t", name="Bash", input={})
     )
     big_input = estimate_event_tokens(
-        ToolCall(source="claude", tool_call_id="t", name="Bash",
-                  input={"command": "x" * 4000})
+        ToolCall(
+            source="claude",
+            tool_call_id="t",
+            name="Bash",
+            input={"command": "x" * 4000},
+        )
     )
     assert big_input > bare
 
@@ -115,9 +119,13 @@ def test_compactor_drop_flags_independent():
     ]
     c = TruncationCompactor(
         budget=_generous_budget(),
-        cfg=TruncationConfig(drop_lifecycle=False, drop_attachments=False,
-                              drop_reasoning=False, drop_opaque=False,
-                              drop_token_usage=False),
+        cfg=TruncationConfig(
+            drop_lifecycle=False,
+            drop_attachments=False,
+            drop_reasoning=False,
+            drop_opaque=False,
+            drop_token_usage=False,
+        ),
     )
     out = c.compact(events)
     assert len(out) == 2  # nothing dropped
@@ -189,6 +197,27 @@ def test_compactor_drops_oldest_when_over_budget():
     assert len(out) < len(events)
 
 
+def test_compactor_skips_oversized_tail_event_and_keeps_smaller_older_events():
+    events = [
+        UserMessage(source="claude", text="older small"),
+        UserMessage(source="claude", text="oversized"),
+        UserMessage(source="claude", text="newer small"),
+    ]
+
+    def estimate(ev):
+        return 300 if getattr(ev, "text", "") == "oversized" else 100
+
+    c = TruncationCompactor(
+        budget=TokenBudget(target=1_200, margin=1.0),
+        cfg=TruncationConfig(summarize_dropped=False),
+        token_estimator=estimate,
+    )
+
+    out = c.compact(events)
+
+    assert [e.text for e in out] == ["older small", "newer small"]
+
+
 def test_compactor_summary_can_be_disabled():
     events: list = []
     for i in range(20):
@@ -207,10 +236,17 @@ def test_compactor_summary_includes_dropped_metadata():
     events: list = []
     for i in range(10):
         events.append(UserMessage(source="claude", text=f"q{i}"))
-        events.append(ToolCall(source="claude", tool_call_id=f"t{i}", name="Bash",
-                                input={"command": "x" * 200}))
-        events.append(ToolResult(source="claude", tool_call_id=f"t{i}",
-                                  output="y" * 200))
+        events.append(
+            ToolCall(
+                source="claude",
+                tool_call_id=f"t{i}",
+                name="Bash",
+                input={"command": "x" * 200},
+            )
+        )
+        events.append(
+            ToolResult(source="claude", tool_call_id=f"t{i}", output="y" * 200)
+        )
         events.append(AssistantMessage(source="claude", text=f"a{i}"))
 
     # Tight budget so we drop a bunch of turns.

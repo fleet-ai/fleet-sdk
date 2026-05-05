@@ -3,8 +3,8 @@
 This package handles three things:
 
   1. **Sync** local AI session files (claude, codex, cursor, opencode)
-     to a backing store (LocalSessionStore today; RemoteSessionStore
-     against theseus eventually).
+     to a backing store (LocalSessionStore locally; RemoteSessionStore
+     against orchestrator).
   2. **Convert** between session formats via a unified Event model so
      a session written by one CLI can be resumed in another.
   3. **Resume** sessions — same-tool (passes through to the native CLI)
@@ -51,6 +51,7 @@ from .store import (
     ChainedSessionStore,
     LocalSessionStore,
     NativeFilesSessionStore,
+    RemoteSessionStore,
     Session,
     SessionStore,
 )
@@ -79,25 +80,50 @@ __all__ = [
     "TrackPaths",
     # Unified format
     "Event",
-    "SessionStart", "SessionEnd",
-    "TurnStart", "TurnEnd",
-    "UserMessage", "AssistantMessage", "AssistantReasoning",
-    "ToolCall", "ToolResult", "ToolSpec",
-    "TokenUsage", "FileEdit",
-    "Operator", "Attachment", "Lifecycle", "OpaqueEvent",
+    "SessionStart",
+    "SessionEnd",
+    "TurnStart",
+    "TurnEnd",
+    "UserMessage",
+    "AssistantMessage",
+    "AssistantReasoning",
+    "ToolCall",
+    "ToolResult",
+    "ToolSpec",
+    "TokenUsage",
+    "FileEdit",
+    "Operator",
+    "Attachment",
+    "Lifecycle",
+    "OpaqueEvent",
     # Sources
-    "Source", "SourceSummary",
-    "ClaudeSource", "CodexSource", "CursorSource",
+    "Source",
+    "SourceSummary",
+    "ClaudeSource",
+    "CodexSource",
+    "CursorSource",
     "default_sources",
     # Sessions
-    "Session", "SessionStore",
-    "LocalSessionStore", "NativeFilesSessionStore", "ChainedSessionStore",
+    "Session",
+    "SessionStore",
+    "LocalSessionStore",
+    "NativeFilesSessionStore",
+    "RemoteSessionStore",
+    "ChainedSessionStore",
     # Compaction
-    "Compactor", "TruncationCompactor", "TruncationConfig",
-    "TokenBudget", "KNOWN_MODELS", "budget_for",
-    "estimate_tokens", "estimate_event_tokens",
+    "Compactor",
+    "TruncationCompactor",
+    "TruncationConfig",
+    "TokenBudget",
+    "KNOWN_MODELS",
+    "budget_for",
+    "estimate_tokens",
+    "estimate_event_tokens",
     # Resume + conversion
-    "resume_session", "CheckoutInfo", "SUPPORTED_TOOLS",
-    "convert", "ConversionResult",
+    "resume_session",
+    "CheckoutInfo",
+    "SUPPORTED_TOOLS",
+    "convert",
+    "ConversionResult",
     "gc_checkouts",
 ]

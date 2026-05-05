@@ -31,6 +31,7 @@ from .compactor import Compactor, TruncationCompactor, budget_for
 from .converter import _encode_claude_cwd
 from .paths import TrackPaths
 from .sources import ClaudeSource, CodexSource
+from .sources.base import with_synth_meta
 from .store import Session, SessionStore
 from .unified import Event, SessionStart
 
@@ -112,7 +113,9 @@ def resume_session(
     # we map repo_url → a local checkout via the registry/scan.
     target_cwd_local = _resolve_local_cwd(session)
     if target_cwd_local is None:
-        repo_url = (session.metadata or {}).get("repo_url") if session.metadata else None
+        repo_url = (
+            (session.metadata or {}).get("repo_url") if session.metadata else None
+        )
         if repo_url:
             raise RepoNotLocalError(
                 f"Session was created in {repo_url!r} but no local checkout "
@@ -136,11 +139,14 @@ def resume_session(
     # the cross-source synthesizer's wrapper overhead varies by target.
     if compactor is None:
         from .compactor import estimate_tokens
+
         target_source = _source_for(target_tool, home=paths.home)
 
         def _emission_tokens(evs: list[Event]) -> int:
             try:
-                return estimate_tokens(target_source.serialize(evs).decode("utf-8", errors="replace"))
+                return estimate_tokens(
+                    target_source.serialize(evs).decode("utf-8", errors="replace")
+                )
             except Exception:
                 # If serialization fails for any reason, treat it as
                 # over-budget so the compactor keeps trimming.
@@ -152,8 +158,11 @@ def resume_session(
         )
 
     checkout = _create_checkout(
-        store=store, session=session, target_tool=target_tool,
-        paths=paths, compactor=compactor,
+        store=store,
+        session=session,
+        target_tool=target_tool,
+        paths=paths,
+        compactor=compactor,
     )
     # The checkout file lives under the resolved-target-cwd's project dir
     # (see `_checkout_path`); launch the CLI from there so its project
@@ -209,7 +218,8 @@ def _create_checkout(
         events = list(compactor.compact(events))
         log.info(
             "checkout compaction: %d → %d events (%.1f%% reduction)",
-            before, len(events),
+            before,
+            len(events),
             100.0 * (1 - len(events) / max(1, before)),
         )
 
@@ -233,13 +243,16 @@ def _create_checkout(
         # reproduce the lineage.
 
     # Use the existing per-source serializer with synth metadata pre-baked.
-    annotated = [_with_synth_meta(
-        ev,
-        session_id=ephemeral_id,
-        cwd=target_cwd,
-        version=session.metadata.get("version", "0.0.0-fleet-checkout"),
-        git_branch=session.metadata.get("git_branch", ""),
-    ) for ev in events]
+    annotated = [
+        with_synth_meta(
+            ev,
+            session_id=ephemeral_id,
+            cwd=target_cwd,
+            version=session.metadata.get("version", "0.0.0-fleet-checkout"),
+            git_branch=session.metadata.get("git_branch", ""),
+        )
+        for ev in events
+    ]
 
     target_source = _source_for(target_tool, home=paths.home)
     target_bytes = target_source.serialize(annotated)
@@ -263,10 +276,17 @@ def _create_checkout(
     if target_tool == "claude":
         # Claude's reader is permissive about extra row types; emit
         # the header as a comment-style `system` row so it's ignored.
-        body = (json.dumps({"_fleet_meta": header,
-                             "type": "system",
-                             "content": "fleet-track checkout"}, separators=(",", ":"))
-                + "\n").encode("utf-8")
+        body = (
+            json.dumps(
+                {
+                    "_fleet_meta": header,
+                    "type": "system",
+                    "content": "fleet-track checkout",
+                },
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode("utf-8")
     elif target_tool == "codex":
         # codex's session_meta MUST be the first row; we can't put a
         # custom header above it without breaking resume. Embed the
@@ -279,7 +299,11 @@ def _create_checkout(
 
     log.info(
         "checkout created tool=%s ephemeral_id=%s forked_from=%s fork_point=%d path=%s",
-        target_tool, ephemeral_id, session.id, fork_point, out_path,
+        target_tool,
+        ephemeral_id,
+        session.id,
+        fork_point,
+        out_path,
     )
 
     return CheckoutInfo(
@@ -306,11 +330,13 @@ def _checkout_path(target_tool: str, cwd: str, ephemeral_id: str, home: Path) ->
         return home / ".claude" / "projects" / encoded / f"{ephemeral_id}.jsonl"
     if target_tool == "codex":
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
         ts = now.strftime("%Y-%m-%dT%H-%M-%S")
         date = now.strftime("%Y/%m/%d")
-        return (home / ".codex" / "sessions" / date
-                / f"rollout-{ts}-{ephemeral_id}.jsonl")
+        return (
+            home / ".codex" / "sessions" / date / f"rollout-{ts}-{ephemeral_id}.jsonl"
+        )
     raise ValueError(f"Unknown target tool: {target_tool}")
 
 
@@ -320,15 +346,6 @@ def _source_for(tool: str, *, home: Path):
     if tool == "codex":
         return CodexSource(home=home)
     raise ValueError(f"Unknown tool: {tool}")
-
-
-def _with_synth_meta(ev, **synth):
-    """Embed `_synth` metadata into an event's `raw` so the cross-source
-    serializer can produce coherent rows. (Same logic as
-    converter._with_synth_meta but local so we don't import a private name.)"""
-    raw = dict(ev.raw) if ev.raw else {}
-    raw["_synth"] = dict(synth)
-    return ev.model_copy(update={"raw": raw})
 
 
 def _resolve_cwd(cwd: str) -> str:
@@ -491,4 +508,5 @@ def _is_fleet_checkout(path: Path) -> bool:
 
 def _seconds_now() -> float:
     import time
+
     return time.time()

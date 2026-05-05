@@ -22,12 +22,14 @@ from typing import Any, ClassVar, Iterable, Iterator, Optional
 # This is the *client*-side guard. The server enforces a strictly larger
 # blocklist (see orchestrator/public_api/track.py); the client list is
 # best-effort to skip uploads that the server would reject anyway.
-DEFAULT_EXCLUDE_PATTERNS: frozenset[str] = frozenset({
-    "session-env",          # Claude Code env vars
-    "auth.json",            # Codex credentials
-    "config.toml",          # Codex config
-    "shell_snapshots",      # Codex shell env
-})
+DEFAULT_EXCLUDE_PATTERNS: frozenset[str] = frozenset(
+    {
+        "session-env",  # Claude Code env vars
+        "auth.json",  # Codex credentials
+        "config.toml",  # Codex config
+        "shell_snapshots",  # Codex shell env
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -202,3 +204,10 @@ def has_substantive_raw(raw: Any) -> bool:
     if not raw:
         return False
     return any(k not in _RAW_SYNTHETIC_KEYS for k in raw.keys())
+
+
+def with_synth_meta(ev: Any, **synth: Any) -> Any:
+    """Return a copy of an event with serializer synthesis metadata attached."""
+    raw = dict(ev.raw) if ev.raw else {}
+    raw["_synth"] = dict(synth)
+    return ev.model_copy(update={"raw": raw})

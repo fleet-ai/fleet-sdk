@@ -1,9 +1,15 @@
 """Theseus track API client.
 
-Three endpoints:
+Upload endpoints:
   POST /v1/track/provision     → register machine, get S3 prefix
   GET  /v1/track/manifest      → fetch remote Merkle state
   POST /v1/track/upload-urls   → get presigned S3 PUT URLs for a list of paths
+
+Metadata endpoints:
+  POST /v1/track/sessions/{id}         → upsert one session metadata row
+  GET  /v1/track/sessions              → list/search remote sessions
+  GET  /v1/track/sessions/{id}         → fetch one session metadata row
+  GET  /v1/track/sessions/{id}/content → get a presigned S3 GET URL
 
 Tests inject an `httpx.Client` built on `httpx.MockTransport` plus a fake
 auth provider, so no network and no creds file ever touch a unit test.
@@ -15,7 +21,8 @@ import logging
 import os
 import platform
 import socket
-from typing import Callable, Optional, Tuple
+from dataclasses import asdict, is_dataclass
+from typing import Any, Callable, Mapping, Optional, Tuple
 
 import httpx
 
@@ -32,7 +39,16 @@ AuthProvider = Callable[[], Optional[Tuple[str, str]]]
 
 
 class TrackAPIError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: Optional[int] = None,
+        detail: Any = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.detail = detail
 
 
 def _default_auth_provider() -> Optional[Tuple[str, str]]:
@@ -126,6 +142,84 @@ class TrackAPIClient:
             urls.update(resp.json().get("urls", {}))
         return urls
 
+    def upsert_session(
+        self,
+        *,
+        device_id: str,
+        path: str,
+        session: Any,
+    ) -> None:
+        """Register metadata for a session file already uploaded to S3.
+
+        `path` is the source file path relative to the tracked home. The
+        orchestrator owns translation from that relative path to the final S3
+        key, so the SDK never has to construct team/user/device storage paths.
+        """
+        resp = self._client.post(
+            f"/v1/track/sessions/{_session_id(session)}",
+            json={
+                "device_id": device_id,
+                "path": path,
+                "session": _session_payload(session),
+            },
+            headers=self._headers(),
+        )
+        _raise(resp)
+
+    def list_sessions(
+        self,
+        *,
+        tool: Optional[str] = None,
+        cwd: Optional[str] = None,
+        since: Optional[str] = None,
+        query: Optional[str] = None,
+        limit: int = 50,
+        cursor: Optional[str] = None,
+    ) -> dict:
+        params = _clean_params(
+            {
+                "tool": tool,
+                "cwd": cwd,
+                "since": since,
+                "query": query,
+                "limit": limit,
+                "cursor": cursor,
+            }
+        )
+        resp = self._client.get(
+            "/v1/track/sessions",
+            params=params,
+            headers=self._headers(),
+        )
+        _raise(resp)
+        return resp.json()
+
+    def get_session(self, session_id: str) -> dict:
+        resp = self._client.get(
+            f"/v1/track/sessions/{session_id}",
+            headers=self._headers(),
+        )
+        _raise(resp)
+        return resp.json()
+
+    def get_session_content_url(self, session_id: str) -> str:
+        resp = self._client.get(
+            f"/v1/track/sessions/{session_id}/content",
+            headers=self._headers(),
+        )
+        _raise(resp)
+        url = resp.json().get("url")
+        if not url:
+            raise TrackAPIError("Session content response did not include a URL")
+        return str(url)
+
+    def download_session_content(self, session_id: str) -> bytes:
+        """Fetch native session bytes via the orchestrator-issued S3 URL."""
+        url = self.get_session_content_url(session_id)
+        resp = self._client.get(url)
+        _raise(resp)
+        return resp.content
+
     # ------------------------------------------------------------------ #
     # Internals                                                            #
     # ------------------------------------------------------------------ #
@@ -150,4 +244,30 @@ def _raise(resp: httpx.Response) -> None:
             detail = resp.json().get("detail", resp.text)
         except Exception:
             detail = resp.text
-        raise TrackAPIError(f"HTTP {resp.status_code}: {detail}")
+        raise TrackAPIError(
+            f"HTTP {resp.status_code}: {detail}",
+            status_code=resp.status_code,
+            detail=detail,
+        )
+
+
+def _clean_params(params: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in params.items() if v is not None}
+
+
+def _session_payload(session: Any) -> dict[str, Any]:
+    if is_dataclass(session):
+        return asdict(session)
+    if isinstance(session, Mapping):
+        return dict(session)
+    raise TypeError(f"Unsupported session payload type: {type(session)!r}")
+
+
+def _session_id(session: Any) -> str:
+    if isinstance(session, Mapping):
+        sid = session.get("id")
+    else:
+        sid = getattr(session, "id", None)
+    if not sid:
+        raise ValueError("session.id is required")
+    return str(sid)

@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
-from .sources.base import Source
+from .sources.base import Source, with_synth_meta
 from .unified import Event, SessionStart
 
 log = logging.getLogger("fleet.track.converter")
@@ -88,10 +88,16 @@ def convert(
     # Annotate each event's raw with a `_synth` meta block so the
     # target serializer's cross-source synthesizer can read coherent
     # session-wide values out of every row.
-    annotated = [_with_synth_meta(e, session_id=new_session_id,
-                                  cwd=cwd, version=version,
-                                  git_branch=git_branch)
-                 for e in events]
+    annotated = [
+        with_synth_meta(
+            e,
+            session_id=new_session_id,
+            cwd=cwd,
+            version=version,
+            git_branch=git_branch,
+        )
+        for e in events
+    ]
 
     out_bytes = to_source.serialize(annotated)
     suggested = _suggested_path_for(to_source, home, new_session_id, cwd)
@@ -139,17 +145,6 @@ def _first_git_branch(events: Iterable[Event]) -> Optional[str]:
     return None
 
 
-def _with_synth_meta(ev: Event, **synth) -> Event:
-    """Return a new event with `_synth` metadata embedded in `raw`.
-
-    Pydantic frozen events are immutable; we use model_copy with a
-    deep-merged raw dict.
-    """
-    raw = dict(ev.raw) if ev.raw else {}
-    raw["_synth"] = dict(synth)
-    return ev.model_copy(update={"raw": raw})
-
-
 def _encode_claude_cwd(cwd: str) -> str:
     """Convert `/Users/foo/.config` → `-Users-foo--config`.
 
@@ -159,15 +154,29 @@ def _encode_claude_cwd(cwd: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "-", cwd)
 
 
-def _suggested_path_for(to_source: Source, home: Path, session_id: str, cwd: str) -> Path:
+def _suggested_path_for(
+    to_source: Source, home: Path, session_id: str, cwd: str
+) -> Path:
     """Where the converted file should live so the target CLI's resume command finds it."""
     name = to_source.name
     if name == "claude":
-        return home / ".claude" / "projects" / _encode_claude_cwd(cwd) / f"{session_id}.jsonl"
+        return (
+            home
+            / ".claude"
+            / "projects"
+            / _encode_claude_cwd(cwd)
+            / f"{session_id}.jsonl"
+        )
     if name == "codex":
         # codex layout: ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl
         now = _dt.datetime.now(_dt.timezone.utc)
         ts = now.strftime("%Y-%m-%dT%H-%M-%S")
         date_path = now.strftime("%Y/%m/%d")
-        return home / ".codex" / "sessions" / date_path / f"rollout-{ts}-{session_id}.jsonl"
+        return (
+            home
+            / ".codex"
+            / "sessions"
+            / date_path
+            / f"rollout-{ts}-{session_id}.jsonl"
+        )
     raise ValueError(f"Unknown target source: {name}")

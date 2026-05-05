@@ -3,13 +3,18 @@
 import base64
 import json
 import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional, Tuple
 
 import httpx
 
-from ._supabase import SUPABASE_ANON_KEY, SUPABASE_URL, is_configured as _supabase_configured
+from ._supabase import (
+    SUPABASE_ANON_KEY,
+    SUPABASE_URL,
+    is_configured as _supabase_configured,
+)
 
 CREDENTIALS_FILE = Path.home() / ".fleet" / "credentials.json"
 
@@ -20,9 +25,29 @@ _REFRESH_BUFFER_SECS = 60
 def save_credentials(data: dict) -> None:
     """Write credentials to ~/.fleet/credentials.json with restricted permissions."""
     CREDENTIALS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(CREDENTIALS_FILE, "w") as f:
-        json.dump(data, f, indent=2)
-    os.chmod(CREDENTIALS_FILE, 0o600)
+    fd, tmp = tempfile.mkstemp(
+        dir=CREDENTIALS_FILE.parent,
+        prefix=f".{CREDENTIALS_FILE.name}-",
+        suffix=".tmp",
+        text=True,
+    )
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, CREDENTIALS_FILE)
+        os.chmod(CREDENTIALS_FILE, 0o600)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def load_credentials() -> Optional[dict]:
@@ -59,8 +84,7 @@ def refresh_access_token(refresh_token: str) -> dict:
     if not _supabase_configured():
         raise RuntimeError(
             "Supabase credentials are not configured. Set SUPABASE_URL and "
-            "SUPABASE_ANON_KEY env vars, or use a published wheel where the "
-            "publish workflow injects them."
+            "SUPABASE_ANON_KEY env vars, or run `flt login` again."
         )
     response = httpx.post(
         f"{SUPABASE_URL}/auth/v1/token?grant_type=refresh_token",

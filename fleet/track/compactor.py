@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
 
 from .unified import (
@@ -69,6 +69,7 @@ def _try_tiktoken_encoder():
     """
     try:
         import tiktoken
+
         return tiktoken.get_encoding("cl100k_base")
     except (ImportError, Exception):
         return None
@@ -180,9 +181,9 @@ KNOWN_MODELS: dict[str, int] = {
 # Default budget per target tool when the model isn't known.
 # Conservative — we'd rather drop a few turns than overflow.
 DEFAULT_TOOL_BUDGETS: dict[str, int] = {
-    "claude": 180_000,    # safe under 200K (most models); 1M-window Opus has more headroom
-    "codex": 200_000,     # safe under 256K (gpt-5)
-    "cursor": 100_000,    # conservative; cursor exposes various models
+    "claude": 180_000,  # safe under 200K (most models); 1M-window Opus has more headroom
+    "codex": 200_000,  # safe under 256K (gpt-5)
+    "cursor": 100_000,  # conservative; cursor exposes various models
     "opencode": 100_000,  # conservative
 }
 
@@ -304,7 +305,10 @@ class TruncationCompactor:
         return result
 
     def _refine_against_emission(
-        self, candidate: list[Event], *, original: list[Event],
+        self,
+        candidate: list[Event],
+        *,
+        original: list[Event],
     ) -> list[Event]:
         """If the actual emission exceeds budget, drop more events
         from the start of the body until it fits or we hit the pass
@@ -325,7 +329,9 @@ class TruncationCompactor:
                 if pass_num > 0:
                     log.info(
                         "compactor refinement: settled at %d tokens (budget %d) after %d pass(es)",
-                        actual, budget, pass_num,
+                        actual,
+                        budget,
+                        pass_num,
                     )
                 return candidate
 
@@ -337,9 +343,12 @@ class TruncationCompactor:
                     body_start += 1
                 else:
                     break
-            if (body_start < len(candidate)
-                    and getattr(candidate[body_start], "synthesized", False)
-                    and "session summary" in getattr(candidate[body_start], "text", "").lower()):
+            if (
+                body_start < len(candidate)
+                and getattr(candidate[body_start], "synthesized", False)
+                and "session summary"
+                in getattr(candidate[body_start], "text", "").lower()
+            ):
                 body_start += 1
 
             body = candidate[body_start:]
@@ -352,7 +361,8 @@ class TruncationCompactor:
 
         log.warning(
             "compactor: budget %d not reachable after %d passes; returning best effort",
-            budget, self._max_refinement_passes,
+            budget,
+            self._max_refinement_passes,
         )
         return candidate
 
@@ -406,12 +416,15 @@ class TruncationCompactor:
         if head_tokens >= budget:
             # Pathological: SessionStart alone is over budget. Emit it
             # anyway; nothing meaningful to keep otherwise.
-            log.warning("compactor: SessionStart alone exceeds budget (%d > %d)",
-                        head_tokens, budget)
+            log.warning(
+                "compactor: SessionStart alone exceeds budget (%d > %d)",
+                head_tokens,
+                budget,
+            )
             return head
 
         # Walk body from the end, accumulating tokens.
-        kept_reversed: list[Event] = []
+        kept_pairs_reversed: list[tuple[int, Event]] = []
         used = head_tokens
         # Reserve for: (a) the summary message we'll prepend if we
         # actually drop anything (~1500 tokens for the prose), (b) the
@@ -422,15 +435,18 @@ class TruncationCompactor:
         OVERHEAD_RESERVE = 2_500 if self.cfg.summarize_dropped else 1_000
         used += OVERHEAD_RESERVE
 
-        for ev in reversed(body):
+        for idx in range(len(body) - 1, -1, -1):
+            ev = body[idx]
             cost = self._estimate(ev)
             if used + cost > budget:
-                break
-            kept_reversed.append(ev)
+                continue
+            kept_pairs_reversed.append((idx, ev))
             used += cost
 
-        kept = list(reversed(kept_reversed))
-        n_dropped = len(body) - len(kept)
+        kept_indices = {idx for idx, _ in kept_pairs_reversed}
+        kept = [ev for idx, ev in enumerate(body) if idx in kept_indices]
+        dropped = [ev for idx, ev in enumerate(body) if idx not in kept_indices]
+        n_dropped = len(dropped)
 
         if n_dropped == 0:
             # Everything fit — no summary needed.
@@ -438,11 +454,13 @@ class TruncationCompactor:
 
         log.info(
             "compactor: dropped %d events to fit budget (%d → %d tokens, target %d)",
-            n_dropped, sum(self._estimate(e) for e in events), used, budget,
+            n_dropped,
+            sum(self._estimate(e) for e in events),
+            used,
+            budget,
         )
 
         if self.cfg.summarize_dropped:
-            dropped = body[:n_dropped]
             summary = _build_summary_message(dropped, n_kept_events=len(kept))
             return head + [summary] + kept
 

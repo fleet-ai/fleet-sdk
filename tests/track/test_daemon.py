@@ -46,6 +46,7 @@ def test_run_once_reconciles_uploads_file_and_manifest(tmp_path: Path):
     )
 
     api_requests: list[tuple[str, dict]] = []
+    metadata_upserts: list[dict] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.method == "GET" and req.url.path.endswith("/v1/track/manifest"):
@@ -57,6 +58,9 @@ def test_run_once_reconciles_uploads_file_and_manifest(tmp_path: Path):
                 200,
                 json={"urls": {p: f"https://s3.test/{p}" for p in body["paths"]}},
             )
+        if req.method == "POST" and "/v1/track/sessions/" in req.url.path:
+            metadata_upserts.append(json.loads(req.content))
+            return httpx.Response(204)
         raise AssertionError(f"unexpected request: {req.method} {req.url}")
 
     api = TrackAPIClient(
@@ -96,6 +100,48 @@ def test_run_once_reconciles_uploads_file_and_manifest(tmp_path: Path):
 
     upload_url_paths = [body["paths"] for _, body in api_requests]
     assert upload_url_paths == [[rel_path], ["manifest.json"]]
+    assert len(metadata_upserts) == 1
+    upsert = metadata_upserts[0]
+    assert upsert["device_id"] == "dev1"
+    assert upsert["path"] == rel_path
+    assert upsert["session"]["id"] == "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    assert upsert["session"]["tool"] == "codex"
+    assert upsert["session"]["cwd"] == "/tmp"
+    assert upsert["session"]["event_count"] == 1
+    assert upsert["session"]["metadata"]["origin_cwd"] == "/tmp"
+
+    queue.close()
+    cache.close()
+
+
+def test_upload_done_uses_callback_digest_instead_of_stale_cache(tmp_path: Path):
+    paths = TrackPaths.under(tmp_path)
+    paths.ensure_track_dir()
+    queue = UploadQueue(paths)
+    cache = HashCache(paths)
+    tree = MerkleTree(cache, file_iter=[])
+    daemon = Daemon(paths, queue=queue, cache=cache, tree=tree)
+
+    rel_path = ".codex/sessions/2026/05/05/rollout-session.jsonl"
+    cache._conn.execute(
+        """
+        INSERT OR REPLACE INTO file_hashes (path, mtime, size, sha256, last_seen)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (rel_path, 0.0, 0, "stale-digest", 0),
+    )
+    cache._conn.commit()
+    metadata_calls: list[tuple[str, str]] = []
+
+    def record_metadata(path: str, digest: str) -> None:
+        metadata_calls.append((path, digest))
+
+    daemon._upsert_session_metadata = record_metadata  # type: ignore[method-assign]
+
+    daemon._on_upload_done(rel_path, "fresh-digest")
+
+    assert daemon._confirmed_map[rel_path] == "fresh-digest"
+    assert metadata_calls == [(rel_path, "fresh-digest")]
 
     queue.close()
     cache.close()

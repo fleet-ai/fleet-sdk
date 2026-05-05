@@ -38,6 +38,7 @@ from .status import (
     write_pid,
     write_status,
 )
+from .store import session_from_native_path
 from .uploader import HttpxTransport, Transport, UploadPool
 
 if TYPE_CHECKING:
@@ -133,6 +134,10 @@ class Daemon:
         self._confirmed_map: dict[str, str] = {}
         self._confirmed_lock = threading.Lock()
         self._manifest_dirty = False  # set when confirmed_map gains new entries
+        # path -> sha256 for rows this process has successfully registered
+        # in the orchestrator metadata index.
+        self._metadata_indexed: dict[str, str] = {}
+        self._metadata_lock = threading.Lock()
 
     # ------------------------------------------------------------------ #
     # Public entry points                                                  #
@@ -277,9 +282,14 @@ class Daemon:
             return
 
         # Seed confirmed_map from S3 — these are files we know are safely stored.
+        confirmed_existing: dict[str, str] = {}
         with self._confirmed_lock:
             for path, digest in result.remote_map.items():
                 self._confirmed_map.setdefault(path, digest)
+                if result.local_map.get(path) == digest:
+                    confirmed_existing[path] = digest
+
+        self._upsert_metadata_for_paths(confirmed_existing)
 
         self._status.files_total = len(result.local_map)
         self._status.last_sync = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -354,15 +364,54 @@ class Daemon:
         self._queue.mark_done(rel_path, sha256)
         self._status.files_synced += 1
         # Record this file as confirmed on S3 using the hash we originally computed.
-        digest = self._cache.get_stored_digest(rel_path)
-        if digest:
-            with self._confirmed_lock:
-                self._confirmed_map[rel_path] = digest
-            self._manifest_dirty = True
+        with self._confirmed_lock:
+            self._confirmed_map[rel_path] = sha256
+        self._manifest_dirty = True
+        self._upsert_session_metadata(rel_path, sha256)
 
     def _on_upload_failed(self, rel_path: str, sha256: str, error: str) -> None:
         self._queue.mark_failed(rel_path, sha256, error)
         log.warning("upload failed %s: %s", rel_path, error)
+
+    # ------------------------------------------------------------------ #
+    # Metadata index                                                       #
+    # ------------------------------------------------------------------ #
+
+    def _upsert_metadata_for_paths(self, file_map: dict[str, str]) -> None:
+        for rel_path, digest in file_map.items():
+            self._upsert_session_metadata(rel_path, digest)
+
+    def _upsert_session_metadata(self, rel_path: str, sha256: str) -> None:
+        """Best-effort metadata index update for a confirmed S3 object.
+
+        The v1 syncer's correctness still comes from S3 bytes + manifest. The
+        metadata index is a read-side accelerator for listing/resume, so a
+        transient failure here should be retried on a later reconcile rather
+        than marking the file upload failed.
+        """
+        if rel_path == "manifest.json":
+            return
+        with self._metadata_lock:
+            if self._metadata_indexed.get(rel_path) == sha256:
+                return
+
+        abs_path = self._paths.home / rel_path
+        session = session_from_native_path(abs_path, home=self._paths.home)
+        if session is None:
+            return
+
+        try:
+            self._api.upsert_session(
+                device_id=self._device_id,
+                path=rel_path,
+                session=session,
+            )
+        except Exception as e:
+            log.warning("metadata upsert failed %s: %s", rel_path, e)
+            return
+
+        with self._metadata_lock:
+            self._metadata_indexed[rel_path] = sha256
 
     # ------------------------------------------------------------------ #
     # Status                                                               #
