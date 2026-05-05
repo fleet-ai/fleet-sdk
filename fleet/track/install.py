@@ -15,6 +15,7 @@ import platform
 import shutil
 import subprocess
 import sys
+from html import escape
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +23,7 @@ from .paths import TrackPaths
 
 PLIST_LABEL = "io.fleet.track"
 SYSTEMD_SERVICE = "fleet-track"
+DAEMON_ENV_KEYS = ("FLEET_API_KEY", "FLEET_TRACK_BASE_URL")
 
 
 def flt_executable() -> str:
@@ -79,12 +81,11 @@ def is_installed() -> bool:
 
 def render_launchd_plist(paths: TrackPaths, flt_path: str, env_path: str = "/usr/local/bin:/usr/bin:/bin") -> str:
     """Return the plist XML body. Pure: no filesystem side-effects."""
-    extra_env = ""
-    if os.environ.get("FLEET_TRACK_BASE_URL"):
-        extra_env = (
-            f"<key>FLEET_TRACK_BASE_URL</key>"
-            f"<string>{os.environ['FLEET_TRACK_BASE_URL']}</string>"
-        )
+    extra_env = "\n".join(
+        f"        <key>{key}</key>\n        <string>{escape(value)}</string>"
+        for key in DAEMON_ENV_KEYS
+        if (value := os.environ.get(key))
+    )
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -120,9 +121,11 @@ def render_launchd_plist(paths: TrackPaths, flt_path: str, env_path: str = "/usr
 
 def render_systemd_unit(paths: TrackPaths, flt_path: str, env_path: str = "/usr/local/bin:/usr/bin:/bin") -> str:
     """Return the systemd service unit body. Pure: no filesystem side-effects."""
-    extra_env = ""
-    if os.environ.get("FLEET_TRACK_BASE_URL"):
-        extra_env = f"Environment=FLEET_TRACK_BASE_URL={os.environ['FLEET_TRACK_BASE_URL']}"
+    extra_env = "\n".join(
+        f"Environment={key}={value}"
+        for key in DAEMON_ENV_KEYS
+        if (value := os.environ.get(key))
+    )
     return f"""[Unit]
 Description=Fleet track daemon — AI session sync
 After=network-online.target
