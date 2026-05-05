@@ -30,16 +30,19 @@ def save_credentials(data: dict) -> None:
     )
     try:
         os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w") as f:
+        f = os.fdopen(fd, "w")
+        fd = -1
+        with f:
             json.dump(data, f, indent=2)
             f.write("\n")
         os.replace(tmp, CREDENTIALS_FILE)
         os.chmod(CREDENTIALS_FILE, 0o600)
     except Exception:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
+        if fd != -1:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         try:
             os.unlink(tmp)
         except OSError:

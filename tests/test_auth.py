@@ -26,6 +26,24 @@ def test_save_credentials_writes_private_file(tmp_path, monkeypatch):
     assert stat.S_IMODE(credentials_file.stat().st_mode) == 0o600
 
 
+def test_save_credentials_cleans_temp_file_on_write_error(tmp_path, monkeypatch):
+    credentials_file = tmp_path / "credentials.json"
+    monkeypatch.setattr(auth, "CREDENTIALS_FILE", credentials_file)
+
+    def fail_dump(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(auth.json, "dump", fail_dump)
+
+    try:
+        auth.save_credentials({"access_token": "token"})
+    except RuntimeError:
+        pass
+
+    assert not credentials_file.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_refresh_access_token_calls_fleet_auth_endpoint(monkeypatch):
     calls = {}
 
