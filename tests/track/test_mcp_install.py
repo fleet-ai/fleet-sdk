@@ -119,6 +119,26 @@ def test_json_uninstall_is_noop_when_absent(client, tmp_path, monkeypatch):
     assert uninstall_for(client).action == "skipped"
 
 
+@pytest.mark.parametrize("client", ["claude-code", "claude-desktop"])
+def test_json_install_does_not_escape_non_ascii(client, tmp_path, monkeypatch):
+    """Configs typically contain em-dashes, bullets, etc. — they must round-trip
+    unchanged. Python's default `ensure_ascii=True` would mangle them."""
+    paths = _patch_paths(monkeypatch, tmp_path)
+    paths[client].write_text(
+        '{"prompt": "use — these • characters █░"}',
+        encoding="utf-8",
+    )
+
+    install_for(client, spec=SPEC)
+
+    text = paths[client].read_text(encoding="utf-8")
+    assert "—" in text
+    assert "•" in text
+    assert "█" in text
+    assert "░" in text
+    assert "\\u2014" not in text  # em-dash, must NOT be ASCII-escaped
+
+
 # ------------------------------------------------------------------ #
 # TOML writer (Codex)                                                 #
 # ------------------------------------------------------------------ #
