@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import gzip
 from typing import Optional
 
 import httpx
@@ -167,6 +168,9 @@ def test_upsert_session_posts_relative_path_and_session_payload():
             "event_count": 3,
             "metadata": {"title": "demo"},
         },
+        content_codec="gzip",
+        raw_bytes=1000,
+        stored_bytes=200,
     )
 
     assert captured["url"] == (
@@ -175,6 +179,35 @@ def test_upsert_session_posts_relative_path_and_session_payload():
     assert captured["body"]["device_id"] == "dev1"
     assert captured["body"]["path"].startswith(".codex/sessions/")
     assert captured["body"]["session"]["tool"] == "codex"
+    assert captured["body"]["content_codec"] == "gzip"
+    assert captured["body"]["raw_bytes"] == 1000
+    assert captured["body"]["stored_bytes"] == 200
+
+
+def test_upsert_session_can_omit_content_metadata():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(204)
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    api.upsert_session(
+        device_id="dev1",
+        path=".codex/sessions/rollout-2026-05-05T00-00-00-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl",
+        session={
+            "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "tool": "codex",
+            "cwd": "/tmp/project",
+            "event_count": 3,
+        },
+        include_content_metadata=False,
+    )
+
+    assert captured["body"]["device_id"] == "dev1"
+    assert "content_codec" not in captured["body"]
+    assert "raw_bytes" not in captured["body"]
+    assert "stored_bytes" not in captured["body"]
 
 
 def test_list_sessions_sends_filters_and_returns_json():
@@ -251,6 +284,54 @@ def test_search_sessions_raw_posts_turbopuffer_body_and_returns_json():
     assert out["items"][0]["id"] == "s1"
 
 
+def test_search_sessions_posts_structured_body_and_returns_json():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"items": [], "next_cursor": None})
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    out = api.search_sessions(
+        {
+            "query": "schema failure",
+            "filters": {"tool": "codex"},
+            "time": {"field": "last_active", "since": "7d"},
+            "limit": 5,
+        }
+    )
+
+    assert captured["url"] == "http://test/v1/track/sessions/search"
+    assert captured["body"]["filters"] == {"tool": "codex"}
+    assert out["items"] == []
+
+
+def test_aggregate_sessions_posts_body_and_returns_json():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "backend": "postgres",
+                "groups": [{"key": {"tool": "codex"}, "count": 2}],
+                "row_count": 2,
+                "total_groups": 1,
+                "truncated": False,
+            },
+        )
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    out = api.aggregate_sessions({"group_by": ["tool"], "metrics": ["count"]})
+
+    assert captured["url"] == "http://test/v1/track/sessions/aggregate"
+    assert captured["body"]["group_by"] == ["tool"]
+    assert out["groups"][0]["count"] == 2
+
+
 def test_download_session_content_uses_presigned_url_without_auth_headers():
     seen: list[tuple[str, str | None]] = []
 
@@ -268,6 +349,23 @@ def test_download_session_content_uses_presigned_url_without_auth_headers():
         ("http://test/v1/track/sessions/s1/content", "Bearer test-api-key"),
         ("https://s3.test/session", None),
     ]
+
+
+def test_download_session_content_decompresses_gzip_content():
+    compressed = gzip.compress(b'{"ok": true}\n')
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/track/sessions/s1/content":
+            return httpx.Response(
+                200,
+                json={"url": "https://s3.test/session", "content_codec": "gzip"},
+            )
+        if str(request.url) == "https://s3.test/session":
+            return httpx.Response(200, content=compressed)
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    assert api.download_session_content("s1") == b'{"ok": true}\n'
 
 
 def test_unauthenticated_raises_track_api_error():

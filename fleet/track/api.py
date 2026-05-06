@@ -22,6 +22,7 @@ import logging
 import os
 import platform
 import socket
+import gzip
 from dataclasses import asdict, is_dataclass
 from typing import Any, Callable, Mapping, Optional, Tuple, Union
 
@@ -152,6 +153,10 @@ class TrackAPIClient:
         device_id: str,
         path: str,
         session: Any,
+        content_codec: str = "raw",
+        raw_bytes: Optional[int] = None,
+        stored_bytes: Optional[int] = None,
+        include_content_metadata: bool = True,
     ) -> None:
         """Register metadata for a session file already uploaded to S3.
 
@@ -159,13 +164,22 @@ class TrackAPIClient:
         orchestrator owns translation from that relative path to the final S3
         key, so the SDK never has to construct team/user/device storage paths.
         """
+        body = {
+            "device_id": device_id,
+            "path": path,
+            "session": _session_payload(session),
+        }
+        if include_content_metadata:
+            body.update(
+                {
+                    "content_codec": content_codec,
+                    "raw_bytes": raw_bytes,
+                    "stored_bytes": stored_bytes,
+                }
+            )
         resp = self._client.post(
             f"/v1/track/sessions/{_session_id(session)}",
-            json={
-                "device_id": device_id,
-                "path": path,
-                "session": _session_payload(session),
-            },
+            json=body,
             headers=self._headers(),
         )
         _raise(resp)
@@ -198,16 +212,40 @@ class TrackAPIClient:
         _raise(resp)
         return resp.json()
 
+    def _post_session_search(self, body: Mapping[str, Any]) -> dict:
+        resp = self._client.post(
+            "/v1/track/sessions/search",
+            json=dict(body),
+            headers=self._headers(),
+        )
+        _raise(resp)
+        return resp.json()
+
     def search_sessions_raw(self, body: Mapping[str, Any]) -> dict:
-        """Run agent-facing raw Turbopuffer-shaped session search.
+        """Run legacy/debug raw Turbopuffer-shaped session search.
 
         The body is forwarded to orchestrator's
         `POST /v1/track/sessions/search`. Orchestrator owns auth, team-scope
         wrapping, server-side embeddings for `query`, and hydration back to
-        Fleet session metadata.
+        Fleet session metadata. New CLI/MCP code should use `search_sessions`
+        with structured filters instead.
         """
+        return self._post_session_search(body)
+
+    def search_sessions(self, body: Mapping[str, Any]) -> dict:
+        """Run structured session search.
+
+        This posts the stable Fleet search shape to the same orchestrator route
+        as the legacy raw Turbopuffer body. Prefer this for agents and CLI use:
+        filters are objects, `time` is shared with aggregate queries, and the
+        server compiles the request to Turbopuffer.
+        """
+        return self._post_session_search(body)
+
+    def aggregate_sessions(self, body: Mapping[str, Any]) -> dict:
+        """Run structured Postgres aggregates over session metadata."""
         resp = self._client.post(
-            "/v1/track/sessions/search",
+            "/v1/track/sessions/aggregate",
             json=dict(body),
             headers=self._headers(),
         )
@@ -222,23 +260,32 @@ class TrackAPIClient:
         _raise(resp)
         return resp.json()
 
-    def get_session_content_url(self, session_id: str) -> str:
+    def get_session_content_info(self, session_id: str) -> dict:
         resp = self._client.get(
             f"/v1/track/sessions/{session_id}/content",
             headers=self._headers(),
         )
         _raise(resp)
-        url = resp.json().get("url")
+        data = resp.json()
+        url = data.get("url")
         if not url:
             raise TrackAPIError("Session content response did not include a URL")
-        return str(url)
+        data["url"] = str(url)
+        data.setdefault("content_codec", "raw")
+        return data
+
+    def get_session_content_url(self, session_id: str) -> str:
+        return str(self.get_session_content_info(session_id)["url"])
 
     def download_session_content(self, session_id: str) -> bytes:
         """Fetch native session bytes via the orchestrator-issued S3 URL."""
-        url = self.get_session_content_url(session_id)
-        resp = self._client.get(url)
+        info = self.get_session_content_info(session_id)
+        resp = self._client.get(info["url"])
         _raise(resp)
-        return resp.content
+        content = resp.content
+        if info.get("content_codec") == "gzip":
+            return gzip.decompress(content)
+        return content
 
     # ------------------------------------------------------------------ #
     # Internals                                                            #

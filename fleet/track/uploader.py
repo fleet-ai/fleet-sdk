@@ -10,8 +10,11 @@ purpose-built `RecordingTransport`.
 
 from __future__ import annotations
 
+import gzip
 import logging
+import os
 import threading
+from dataclasses import dataclass
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, Optional, Protocol
@@ -26,6 +29,15 @@ WORKERS = 8
 # Per-phase timeouts: connect/read can be short, write is generous for
 # large JSONL files on slow connections.
 DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=300.0, pool=10.0)
+SUPPORTED_CONTENT_CODECS = {"raw", "gzip"}
+
+
+@dataclass(frozen=True)
+class UploadPayload:
+    content: bytes
+    content_codec: str
+    raw_bytes: int
+    stored_bytes: int
 
 
 # ------------------------------------------------------------------ #
@@ -89,10 +101,76 @@ def _read_safe(path: Path) -> Optional[bytes]:
     return data
 
 
+def upload_content_codec() -> str:
+    """Return the configured S3 storage codec for session uploads.
+
+    Defaults to raw for safe rollout. Set FLEET_TRACK_UPLOAD_CODEC=gzip or
+    FLEET_TRACK_COMPRESS_UPLOADS=1 to store scrubbed session JSONL compressed
+    in S3. Downloads use orchestrator metadata to decode transparently.
+    """
+    explicit = os.getenv("FLEET_TRACK_UPLOAD_CODEC")
+    if explicit:
+        codec = explicit.strip().lower()
+    elif os.getenv("FLEET_TRACK_COMPRESS_UPLOADS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        codec = "gzip"
+    else:
+        codec = "raw"
+    if codec not in SUPPORTED_CONTENT_CODECS:
+        log.warning("unsupported track upload codec %r; falling back to raw", codec)
+        return "raw"
+    return codec
+
+
+def prepare_upload_payload(path: Path) -> Optional[UploadPayload]:
+    """Read, scrub, and encode a file exactly as it will be stored in S3."""
+    data = _read_safe(path)
+    if data is None:
+        return None
+
+    scrubbed = scrub_bytes(data)
+    codec = upload_content_codec()
+    if codec == "gzip":
+        content = gzip.compress(scrubbed, compresslevel=6)
+    else:
+        content = scrubbed
+    return UploadPayload(
+        content=content,
+        content_codec=codec,
+        raw_bytes=len(scrubbed),
+        stored_bytes=len(content),
+    )
+
+
 def upload_one(path: Path, presigned_url: str, transport: Transport) -> bool:
     """Scrub and upload a single file. Returns True on success."""
     ok, _bytes_uploaded = _upload_one_with_size(path, presigned_url, transport)
     return ok
+
+
+def _upload_one_with_payload(
+    path: Path,
+    presigned_url: str,
+    transport: Transport,
+) -> tuple[bool, Optional[UploadPayload]]:
+    """Upload one file and return whether it succeeded plus exact stored payload."""
+    payload = prepare_upload_payload(path)
+    if payload is None:
+        return False, None
+
+    try:
+        status = transport.put(presigned_url, payload.content)
+        if status not in (200, 204):
+            log.warning("upload %s → HTTP %s", path.name, status)
+            return False, None
+        return True, payload
+    except httpx.RequestError as e:
+        log.warning("upload %s network error: %s", path.name, e)
+        return False, None
 
 
 def _upload_one_with_size(
@@ -101,21 +179,8 @@ def _upload_one_with_size(
     transport: Transport,
 ) -> tuple[bool, int]:
     """Upload one file and return whether it succeeded plus uploaded bytes."""
-    data = _read_safe(path)
-    if data is None:
-        return False, 0
-
-    scrubbed = scrub_bytes(data)
-
-    try:
-        status = transport.put(presigned_url, scrubbed)
-        if status not in (200, 204):
-            log.warning("upload %s → HTTP %s", path.name, status)
-            return False, 0
-        return True, len(scrubbed)
-    except httpx.RequestError as e:
-        log.warning("upload %s network error: %s", path.name, e)
-        return False, 0
+    ok, payload = _upload_one_with_payload(path, presigned_url, transport)
+    return ok, payload.stored_bytes if payload is not None else 0
 
 
 # ------------------------------------------------------------------ #
@@ -128,7 +193,7 @@ class UploadPool:
 
     def __init__(
         self,
-        on_done: Callable[[str, str], None],
+        on_done: Callable[[str, str, UploadPayload], None],
         on_failed: Callable[[str, str, str], None],
         transport: Optional[Transport] = None,
         on_uploaded_bytes: Optional[Callable[[str, int], None]] = None,
@@ -154,7 +219,7 @@ class UploadPool:
         self, rel_path: str, sha256: str, abs_path: Path, presigned_url: str
     ) -> None:
         try:
-            ok, bytes_uploaded = _upload_one_with_size(
+            ok, payload = _upload_one_with_payload(
                 abs_path,
                 presigned_url,
                 self._transport,
@@ -162,8 +227,8 @@ class UploadPool:
             if ok:
                 log.debug("uploaded %s", rel_path)
                 if self._on_uploaded_bytes is not None:
-                    self._on_uploaded_bytes(rel_path, bytes_uploaded)
-                self._on_done(rel_path, sha256)
+                    self._on_uploaded_bytes(rel_path, payload.stored_bytes)
+                self._on_done(rel_path, sha256, payload)
             else:
                 self._on_failed(rel_path, sha256, "upload returned failure")
         except Exception as e:

@@ -13,6 +13,7 @@ from fleet.track.daemon import Daemon
 from fleet.track.merkle import HashCache, MerkleTree
 from fleet.track.paths import TrackPaths
 from fleet.track.queue import UploadQueue
+from fleet.track.uploader import UploadPayload
 
 
 def _auth() -> str:
@@ -109,6 +110,9 @@ def test_run_once_reconciles_uploads_file_and_manifest(tmp_path: Path):
     assert upsert["session"]["cwd"] == "/tmp"
     assert upsert["session"]["event_count"] == 1
     assert upsert["session"]["metadata"]["origin_cwd"] == "/tmp"
+    assert upsert["content_codec"] == "raw"
+    assert upsert["raw_bytes"] == len(transport.calls[0][1])
+    assert upsert["stored_bytes"] == len(transport.calls[0][1])
 
     queue.close()
     cache.close()
@@ -210,7 +214,12 @@ def test_upload_done_ignores_legacy_cursor_paths(tmp_path: Path):
     daemon._confirmed_map[rel_path] = "old-digest"
     metadata_calls: list[tuple[str, str]] = []
 
-    def record_metadata(path: str, digest: str) -> None:
+    def record_metadata(
+        path: str,
+        digest: str,
+        *,
+        upload_payload: UploadPayload | None = None,
+    ) -> None:
         metadata_calls.append((path, digest))
 
     daemon._upsert_session_metadata = record_metadata  # type: ignore[method-assign]
@@ -245,7 +254,12 @@ def test_upload_done_uses_callback_digest_instead_of_stale_cache(tmp_path: Path)
     cache._conn.commit()
     metadata_calls: list[tuple[str, str]] = []
 
-    def record_metadata(path: str, digest: str) -> None:
+    def record_metadata(
+        path: str,
+        digest: str,
+        *,
+        upload_payload: UploadPayload | None = None,
+    ) -> None:
         metadata_calls.append((path, digest))
 
     daemon._upsert_session_metadata = record_metadata  # type: ignore[method-assign]
@@ -254,6 +268,102 @@ def test_upload_done_uses_callback_digest_instead_of_stale_cache(tmp_path: Path)
 
     assert daemon._confirmed_map[rel_path] == "fresh-digest"
     assert metadata_calls == [(rel_path, "fresh-digest")]
+
+    queue.close()
+    cache.close()
+
+
+def test_upload_done_upserts_exact_uploaded_payload_metadata(tmp_path: Path):
+    paths = TrackPaths.under(tmp_path)
+    paths.ensure_track_dir()
+
+    rel_path = (
+        ".codex/sessions/"
+        "rollout-2026-05-05T00-00-00-cccccccc-cccc-cccc-cccc-cccccccccccc.jsonl"
+    )
+    session_file = tmp_path / rel_path
+    session_file.parent.mkdir(parents=True)
+    session_file.write_text(
+        '{"type":"session_meta","payload":{"id":"s3","cwd":"/tmp"}}\n'
+    )
+
+    metadata_upserts: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and "/v1/track/sessions/" in req.url.path:
+            metadata_upserts.append(json.loads(req.content))
+            return httpx.Response(204)
+        raise AssertionError(f"unexpected request: {req.method} {req.url}")
+
+    api = TrackAPIClient(
+        client=httpx.Client(
+            transport=httpx.MockTransport(handler), base_url="http://test"
+        ),
+        auth_provider=_auth,
+    )
+    queue = UploadQueue(paths)
+    cache = HashCache(paths)
+    tree = MerkleTree(cache, file_iter=[session_file])
+    daemon = Daemon(paths, queue=queue, cache=cache, tree=tree, api=api)
+    payload = UploadPayload(
+        content=b"compressed",
+        content_codec="gzip",
+        raw_bytes=1000,
+        stored_bytes=10,
+    )
+
+    daemon._on_upload_done(rel_path, "fresh-digest", payload)
+
+    assert len(metadata_upserts) == 1
+    upsert = metadata_upserts[0]
+    assert upsert["content_codec"] == "gzip"
+    assert upsert["raw_bytes"] == 1000
+    assert upsert["stored_bytes"] == 10
+
+    queue.close()
+    cache.close()
+
+
+def test_confirmed_existing_metadata_upsert_omits_content_metadata(tmp_path: Path):
+    paths = TrackPaths.under(tmp_path)
+    paths.ensure_track_dir()
+
+    rel_path = (
+        ".codex/sessions/"
+        "rollout-2026-05-05T00-00-00-dddddddd-dddd-dddd-dddd-dddddddddddd.jsonl"
+    )
+    session_file = tmp_path / rel_path
+    session_file.parent.mkdir(parents=True)
+    session_file.write_text(
+        '{"type":"session_meta","payload":{"id":"s4","cwd":"/tmp"}}\n'
+    )
+
+    metadata_upserts: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and "/v1/track/sessions/" in req.url.path:
+            metadata_upserts.append(json.loads(req.content))
+            return httpx.Response(204)
+        raise AssertionError(f"unexpected request: {req.method} {req.url}")
+
+    api = TrackAPIClient(
+        client=httpx.Client(
+            transport=httpx.MockTransport(handler), base_url="http://test"
+        ),
+        auth_provider=_auth,
+    )
+    queue = UploadQueue(paths)
+    cache = HashCache(paths)
+    tree = MerkleTree(cache, file_iter=[session_file])
+    daemon = Daemon(paths, queue=queue, cache=cache, tree=tree, api=api)
+
+    daemon._upsert_metadata_for_paths({rel_path: "existing-digest"})
+
+    assert len(metadata_upserts) == 1
+    upsert = metadata_upserts[0]
+    assert "content_codec" not in upsert
+    assert "raw_bytes" not in upsert
+    assert "stored_bytes" not in upsert
 
     queue.close()
     cache.close()
