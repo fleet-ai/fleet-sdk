@@ -305,8 +305,8 @@ class Daemon:
     def _apply_reconcile_result(self, result: "ReconcileResult") -> None:
         # Seed confirmed_map from S3 — these are files we know are safely stored.
         # Pruned paths are legacy manifest entries that are no longer part of
-        # default sync (currently Cursor); mark the manifest dirty so the next
-        # upload stops advertising them.
+        # default sync; mark the manifest dirty so the next upload stops
+        # advertising them.
         confirmed_existing: dict[str, str] = {}
         with self._confirmed_lock:
             if result.pruned_paths:

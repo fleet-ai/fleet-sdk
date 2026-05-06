@@ -8,8 +8,12 @@ resuming them locally or across tools.
 The SDK scans:
 
 - `~/.claude/projects/**/*.jsonl`
+- `~/Library/Application Support/Claude/local-agent-mode-sessions/**/local_*/.claude/projects/**/*.jsonl`
+- `~/Library/Application Support/Claude-3p/local-agent-mode-sessions/**/local_*/.claude/projects/**/*.jsonl`
 - `~/.codex/sessions/**/*.jsonl`
 - `~/.codex/archived_sessions/**/*.jsonl`
+- `~/.cursor/projects/**/agent-transcripts/**/*.jsonl`
+- `~/.cursor/projects/**/agent-transcripts/**/*.txt`
 
 The v1 syncer uses full reconciliation as the sync trigger. On startup, and then
 every 10 minutes, it scans local session files, diffs them against the remote
@@ -40,12 +44,15 @@ fleet-track-sessions/
   {team_id}/{user_id}/{device_id}/
     manifest.json
     raw/.claude/projects/...
+    raw/Library/Application Support/Claude/local-agent-mode-sessions/...
+    raw/Library/Application Support/Claude-3p/local-agent-mode-sessions/...
     raw/.codex/sessions/...
+    raw/.cursor/projects/...
 ```
 
-Cursor transcript syncing is intentionally disabled for now. `CursorSource`
-still exists for future parser work, but Cursor files are not included in the
-default daemon scan until the SDK can extract stable metadata and replay events.
+Cursor transcript bytes are uploaded and minimally indexed for download/search
+by artifact metadata. Cursor replay/resume remains disabled until the SDK can
+extract stable metadata and parse events.
 
 Authentication prefers stored `flt login` browser credentials and falls back
 to `FLEET_API_KEY` for non-interactive hosts. The API-key fallback will be
