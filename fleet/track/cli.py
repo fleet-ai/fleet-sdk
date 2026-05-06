@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 
 import typer
 from rich.console import Console
@@ -25,9 +26,8 @@ console = Console()
 DEFAULT_SESSION_SOURCE = "remote"
 LOCAL_SESSION_SOURCE = "local"
 SOURCE_HELP = (
-    "Where to read sessions from: remote (default, orchestrator/Turbopuffer), "
-    "local (native+stub; auto alias), native (~/.claude, ~/.codex), "
-    "stub (LocalSessionStore)."
+    "Where to read sessions from: remote (default, orchestrator/Turbopuffer) "
+    "or local (manually built Fleet local index)."
 )
 
 
@@ -240,39 +240,29 @@ def _resolve_session_store(source: str):
 
     Modes:
       - `remote` (default): orchestrator-backed metadata/search index.
-      - `local`: chained Native + Stub. Shows native session files on disk
-        AND anything explicitly ingested into the stub.
-      - `auto`: backwards-compatible alias for `local`.
-      - `native`: only the read-only view of `~/.claude` / `~/.codex`.
-      - `stub`: only the LocalSessionStore (the dev stub).
+      - `local`: Fleet's prebuilt local index under ~/.fleet/track/local-store.
     """
     from .store import (
-        ChainedSessionStore,
         LocalSessionStore,
-        NativeFilesSessionStore,
         RemoteSessionStore,
     )
 
     source = _normalize_source(source)
     paths = TrackPaths.default()
-    if source == "stub":
-        return LocalSessionStore(paths)
-    if source == "native":
-        return NativeFilesSessionStore()
     if source == "remote":
         return RemoteSessionStore()
-    if source in {LOCAL_SESSION_SOURCE, "auto"}:
-        # LocalSessionStore first so explicitly-ingested rows shadow native
-        # ones with the same id (e.g. forks re-stored after resume).
-        return ChainedSessionStore(
-            LocalSessionStore(paths),
-            NativeFilesSessionStore(),
-        )
+    if source == LOCAL_SESSION_SOURCE:
+        return LocalSessionStore(paths)
     raise typer.BadParameter(f"Unknown --source value: {source!r}")
 
 
 def _normalize_source(source: str) -> str:
-    return (source or DEFAULT_SESSION_SOURCE).strip().lower()
+    normalized = (source or DEFAULT_SESSION_SOURCE).strip().lower()
+    if normalized not in {DEFAULT_SESSION_SOURCE, LOCAL_SESSION_SOURCE}:
+        raise typer.BadParameter(
+            "Unknown --source value. Expected 'remote' or 'local'."
+        )
+    return normalized
 
 
 def _validate_cursor_for_source(source: str, cursor: str | None) -> None:
@@ -375,17 +365,7 @@ def list_sessions(
     byte-compatible with the orchestrator's `/v1/track/sessions` endpoint
     so scripting against either side uses the same opaque tokens.
     """
-    from .store import ChainedSessionStore
-
     store = _resolve_session_store(source)
-
-    # `--cursor` requires a single backing store; chained stores don't
-    # support pagination (see ChainedSessionStore.page).
-    if cursor and isinstance(store, ChainedSessionStore):
-        raise typer.BadParameter(
-            "--cursor requires --source native | stub | remote; `local` chains "
-            "multiple backends and can't paginate across them."
-        )
     _validate_cursor_for_source(source, cursor)
 
     sessions, next_cursor = store.page(
@@ -444,20 +424,13 @@ def search_sessions(
     """Search tracked sessions.
 
     With the default remote source, the query is forwarded to the orchestrator
-    search endpoint, which uses Turbopuffer. Use `--source local` for the old
-    on-disk substring search.
+    search endpoint, which uses Turbopuffer. Use `--source local` only after
+    manually building the dev/test local index.
     """
     if not query.strip():
         raise typer.BadParameter("query must not be empty")
 
-    from .store import ChainedSessionStore
-
     store = _resolve_session_store(source)
-    if cursor and isinstance(store, ChainedSessionStore):
-        raise typer.BadParameter(
-            "--cursor requires --source native | stub | remote; `local` chains "
-            "multiple backends and can't paginate across them."
-        )
     _validate_cursor_for_source(source, cursor)
 
     sessions, next_cursor = store.page(
@@ -483,6 +456,64 @@ def search_sessions(
         return
 
     _render_sessions_table(sessions, next_cursor)
+
+
+@app.command()
+def build_local_index(
+    replace: bool = typer.Option(
+        True,
+        "--replace/--append",
+        help="Replace the existing Fleet local index before scanning native files.",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON for scripting"),
+) -> None:
+    """Build the dev/test local index from native session files.
+
+    This is intentionally manual: normal Track commands use the remote source.
+    Local mode reads only this Fleet index and does not live-scan native files.
+    """
+    from .store import LocalSessionStore, NativeFilesSessionStore
+
+    paths = TrackPaths.default()
+    local_root = paths.track_dir / "local-store"
+    if replace and local_root.exists():
+        shutil.rmtree(local_root)
+
+    local = LocalSessionStore(paths)
+    native = NativeFilesSessionStore(home=paths.home)
+
+    indexed = 0
+    skipped = 0
+    cursor = None
+    while True:
+        sessions, next_cursor = native.page(limit=200, cursor=cursor)
+        for session in sessions:
+            try:
+                local.create(session, list(native.own_events(session.id)))
+            except Exception:
+                skipped += 1
+                continue
+            indexed += 1
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    payload = {
+        "source": LOCAL_SESSION_SOURCE,
+        "indexed": indexed,
+        "skipped": skipped,
+        "path": str(local_root),
+        "replace": replace,
+    }
+    if json_out:
+        console.print_json(json.dumps(payload))
+        return
+
+    console.print(
+        f"[green]Indexed[/green] {indexed} sessions into {local_root}"
+        + (f" [yellow]({skipped} skipped)[/yellow]" if skipped else "")
+    )
+    console.print("  Use [bold]--source local[/bold] to read this index.")
 
 
 @app.command()
