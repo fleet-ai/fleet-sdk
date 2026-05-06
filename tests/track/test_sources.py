@@ -186,10 +186,10 @@ def test_serialize_returns_bytes(tmp_path: Path):
 # ------------------------------------------------------------------ #
 
 
-def test_default_sources_returns_all_three(tmp_path: Path):
+def test_default_sources_returns_indexable_sources(tmp_path: Path):
     sources = default_sources(home=tmp_path)
     names = [s.name for s in sources]
-    assert names == ["claude", "cursor", "codex"]
+    assert names == ["claude", "codex"]
 
 
 def test_default_sources_use_provided_home(tmp_path: Path):

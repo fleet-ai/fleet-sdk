@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import sys
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -21,6 +24,106 @@ import uuid
 
 app = typer.Typer(help="Track local AI coding sessions", no_args_is_help=True)
 console = Console()
+
+DEFAULT_SESSION_SOURCE = "remote"
+LOCAL_SESSION_SOURCE = "local"
+DEFAULT_SEARCH_TOP_K = 50
+TURBOPUFFER_QUERY_DOCS_URL = "https://turbopuffer.com/docs/query#filtering"
+SEARCH_FILTER_FIELDS = (
+    {
+        "name": "session_id",
+        "type": "string",
+        "description": "Fleet session id.",
+    },
+    {
+        "name": "user_id",
+        "type": "string",
+        "description": "Fleet user id that owns the session.",
+    },
+    {
+        "name": "device_id",
+        "type": "string",
+        "description": "Tracked local device id.",
+    },
+    {
+        "name": "tool",
+        "type": "string",
+        "description": "AI tool name, for example codex or claude.",
+    },
+    {
+        "name": "cwd",
+        "type": "string",
+        "description": "Working directory captured for the session.",
+    },
+    {
+        "name": "repo_url",
+        "type": "string",
+        "description": "Detected repository remote URL.",
+    },
+    {
+        "name": "git_branch",
+        "type": "string",
+        "description": "Detected git branch.",
+    },
+    {
+        "name": "model",
+        "type": "string",
+        "description": "Model name when captured by the source tool.",
+    },
+    {
+        "name": "forked_from",
+        "type": "string",
+        "description": "Parent Fleet session id when this session was forked.",
+    },
+    {
+        "name": "event_count",
+        "type": "integer",
+        "description": "Number of tracked events in the session.",
+    },
+    {
+        "name": "started_at",
+        "type": "datetime",
+        "description": "Session start timestamp in ISO-8601 format.",
+    },
+    {
+        "name": "last_active",
+        "type": "datetime",
+        "description": "Most recent session activity timestamp in ISO-8601 format.",
+    },
+)
+SEARCH_FILTER_OPERATORS = (
+    "And",
+    "Or",
+    "Not",
+    "Eq",
+    "NotEq",
+    "In",
+    "NotIn",
+    "Contains",
+    "NotContains",
+    "ContainsAny",
+    "NotContainsAny",
+    "Lt",
+    "Lte",
+    "Gt",
+    "Gte",
+    "AnyLt",
+    "AnyLte",
+    "AnyGt",
+    "AnyGte",
+    "Glob",
+    "NotGlob",
+    "IGlob",
+    "NotIGlob",
+    "Regex",
+    "ContainsAllTokens",
+    "ContainsTokenSequence",
+    "ContainsAnyToken",
+)
+SOURCE_HELP = (
+    "Where to read sessions from: remote (default, orchestrator/Turbopuffer) "
+    "or local (manually built Fleet local index)."
+)
 
 
 def _write_config(paths: TrackPaths, config: dict) -> None:
@@ -80,7 +183,7 @@ def enable() -> None:
     found = [s for s in sources if s.is_present()]
     if not found:
         console.print(
-            "[yellow]No AI tool sessions found[/yellow] (~/.claude, ~/.cursor, ~/.codex)"
+            "[yellow]No AI tool sessions found[/yellow] (~/.claude, ~/.codex)"
         )
     else:
         for s in found:
@@ -231,120 +334,130 @@ def _resolve_session_store(source: str):
     """Build the SessionStore the CLI reads from based on `--source`.
 
     Modes:
-      - `auto` (default): chained Native + Stub. What you actually want
-        for testing the picker — shows native session files on disk
-        AND anything explicitly ingested into the stub.
-      - `native`: only the read-only view of `~/.claude` / `~/.codex`.
-      - `stub`: only the LocalSessionStore (the dev stub).
-      - `remote`: orchestrator-backed metadata index.
+      - `remote` (default): orchestrator-backed metadata/search index.
+      - `local`: Fleet's prebuilt local index under ~/.fleet/track/local-store.
     """
     from .store import (
-        ChainedSessionStore,
         LocalSessionStore,
-        NativeFilesSessionStore,
         RemoteSessionStore,
     )
 
+    source = _normalize_source(source)
     paths = TrackPaths.default()
-    if source == "stub":
-        return LocalSessionStore(paths)
-    if source == "native":
-        return NativeFilesSessionStore()
     if source == "remote":
         return RemoteSessionStore()
-    if source == "auto":
-        # LocalSessionStore first so explicitly-ingested rows shadow native
-        # ones with the same id (e.g. forks re-stored after resume).
-        return ChainedSessionStore(
-            LocalSessionStore(paths),
-            NativeFilesSessionStore(),
-        )
+    if source == LOCAL_SESSION_SOURCE:
+        return LocalSessionStore(paths)
     raise typer.BadParameter(f"Unknown --source value: {source!r}")
 
 
-@app.command(name="ls")
-def list_sessions(
-    tool: str = typer.Option(
-        None, "--tool", "-t", help="Filter by tool (claude/codex/cursor/opencode)"
-    ),
-    cwd: str = typer.Option(None, "--cwd", help="Filter by working directory"),
-    since: str = typer.Option(
-        None, "--since", help="Only sessions active since (ISO-8601 or natural)"
-    ),
-    limit: int = typer.Option(50, "--limit", "-n", help="Max rows per page (1..200)"),
-    cursor: str = typer.Option(
-        None,
-        "--cursor",
-        help="Opaque cursor from a prior `next_cursor:` line. Drives paged scripting.",
-    ),
-    json_out: bool = typer.Option(False, "--json", help="Emit JSON for scripting"),
-    source: str = typer.Option(
-        "auto",
-        "--source",
-        help="Where to read sessions from: auto (native+stub), native (~/.claude, ~/.codex), stub (LocalSessionStore), remote (orchestrator).",
-    ),
-) -> None:
-    """List sessions across all tracked AI tools.
-
-    Sort is fixed at recency-first (`last_active DESC, id DESC`) — same
-    on every backend so cursors are interchangeable.
-
-    Pagination is cursor-based. Pass `--cursor <token>` from a previous
-    `next_cursor:` line to fetch the next page. The cursor format is
-    byte-compatible with the orchestrator's `/v1/track/sessions` endpoint
-    so scripting against either side uses the same opaque tokens.
-    """
-    from .store import _decode_cursor, ChainedSessionStore  # noqa: F401
-
-    store = _resolve_session_store(source)
-
-    # `--cursor` requires a single backing store; chained stores don't
-    # support pagination (see ChainedSessionStore.page).
-    if cursor and isinstance(store, ChainedSessionStore):
+def _normalize_source(source: str) -> str:
+    normalized = (source or DEFAULT_SESSION_SOURCE).strip().lower()
+    if normalized not in {DEFAULT_SESSION_SOURCE, LOCAL_SESSION_SOURCE}:
         raise typer.BadParameter(
-            "--cursor requires --source native | stub | remote; the default "
-            "`auto` chains multiple backends and can't paginate across them."
+            "Unknown --source value. Expected 'remote' or 'local'."
         )
-    # Fail fast on malformed cursors so the user sees a clear error.
-    if cursor:
-        try:
-            _decode_cursor(cursor)
-        except ValueError as e:
-            raise typer.BadParameter(str(e))
+    return normalized
 
-    if cursor or json_out:
-        # Paged scripting flow — any caller who passed --cursor wants the
-        # next_cursor surfaced; --json shape promises {items, next_cursor}.
-        sessions, next_cursor = store.page(
-            tool=tool,
-            cwd=cwd,
-            since=since,
-            limit=limit,
-            cursor=cursor,
-        )
-    else:
-        # Interactive flow — keep the existing flat-list shape.
-        sessions = store.list(tool=tool, cwd=cwd, since=since, limit=limit)
-        next_cursor = None
 
+def _validate_cursor_for_source(source: str, cursor: str | None) -> None:
+    if not cursor or _normalize_source(source) == "remote":
+        return
+    from .store import _decode_cursor
+
+    try:
+        _decode_cursor(cursor)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
+
+def _session_dicts(sessions) -> list[dict]:
+    from dataclasses import asdict
+
+    return [asdict(s) for s in sessions]
+
+
+def _print_sessions_json(
+    *,
+    query: str | None,
+    source: str,
+    sessions,
+    next_cursor: str | None,
+    mode: str | None = None,
+) -> None:
+    payload = {
+        "query": query,
+        "source": _normalize_source(source),
+        "items": _session_dicts(sessions),
+        "next_cursor": next_cursor,
+    }
+    if mode is not None:
+        payload["mode"] = mode
+    console.print_json(json.dumps(payload))
+
+
+def _read_json_argument(value: str) -> dict:
+    """Read an inline JSON object, @file JSON object, or stdin JSON object."""
+    raw = value
+    if value == "-":
+        raw = sys.stdin.read()
+    elif value.startswith("@"):
+        raw = Path(value[1:]).read_text()
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise typer.BadParameter(f"invalid JSON: {e}") from e
+    if not isinstance(parsed, dict):
+        raise typer.BadParameter("search body must be a JSON object")
+    return parsed
+
+
+def _sessions_from_api_items(items: list[dict]):
+    from .store import _session_from_api
+
+    return [_session_from_api(item) for item in items]
+
+
+def _search_filter_catalog() -> dict:
+    return {
+        "docs_url": TURBOPUFFER_QUERY_DOCS_URL,
+        "filterable_attributes": list(SEARCH_FILTER_FIELDS),
+        "operators": list(SEARCH_FILTER_OPERATORS),
+        "examples": [
+            ["tool", "Eq", "codex"],
+            ["last_active", "Gte", "2026-05-01T00:00:00Z"],
+            [
+                "And",
+                [
+                    ["repo_url", "Eq", "git@github.com:fleet-ai/theseus.git"],
+                    ["tool", "Eq", "codex"],
+                ],
+            ],
+        ],
+    }
+
+
+def _print_search_filter_catalog(json_out: bool) -> None:
+    catalog = _search_filter_catalog()
     if json_out:
-        from dataclasses import asdict
-
-        console.print_json(
-            json.dumps(
-                {
-                    "items": [asdict(s) for s in sessions],
-                    "next_cursor": next_cursor,
-                }
-            )
-        )
+        console.print_json(json.dumps(catalog))
         return
 
-    if not sessions:
-        console.print("[dim]No sessions found.[/dim]")
-        console.print("  Run [bold]flt track enable[/bold] to start syncing.")
-        return
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Field")
+    table.add_column("Type")
+    table.add_column("Description")
+    for field in catalog["filterable_attributes"]:
+        table.add_row(field["name"], field["type"], field["description"])
+    console.print(table)
+    console.print()
+    console.print("[bold]Operators[/bold]")
+    console.print(", ".join(catalog["operators"]))
+    console.print()
+    console.print(f"[bold]Turbopuffer docs[/bold] {catalog['docs_url']}")
 
+
+def _render_sessions_table(sessions, next_cursor: str | None) -> None:
     table = Table(show_header=True, header_style="bold")
     table.add_column("ID")
     table.add_column("Tool")
@@ -370,6 +483,237 @@ def list_sessions(
         console.print(f"[dim]next_cursor:[/dim] {next_cursor}")
 
 
+@app.command(name="ls")
+def list_sessions(
+    tool: str = typer.Option(
+        None, "--tool", "-t", help="Filter by tool (claude/codex)"
+    ),
+    cwd: str = typer.Option(None, "--cwd", help="Filter by working directory"),
+    since: str = typer.Option(
+        None, "--since", help="Only sessions active since (ISO-8601 or natural)"
+    ),
+    limit: int = typer.Option(50, "--limit", "-n", help="Max rows per page (1..200)"),
+    cursor: str = typer.Option(
+        None,
+        "--cursor",
+        help="Opaque cursor from a prior `next_cursor:` line. Drives paged scripting.",
+    ),
+    query: str = typer.Option(
+        None,
+        "--query",
+        "-q",
+        help="Substring filter over session metadata (id/tool/cwd/title).",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON for scripting"),
+    source: str = typer.Option(
+        DEFAULT_SESSION_SOURCE,
+        "--source",
+        help=SOURCE_HELP,
+    ),
+) -> None:
+    """List sessions across all tracked AI tools.
+
+    Sort is fixed at recency-first (`last_active DESC, id DESC`) — same
+    on every backend so cursors are interchangeable.
+
+    Pagination is cursor-based. Pass `--cursor <token>` from a previous
+    `next_cursor:` line to fetch the next page. The cursor format is
+    byte-compatible with the orchestrator's `/v1/track/sessions` endpoint
+    so scripting against either side uses the same opaque tokens.
+    """
+    store = _resolve_session_store(source)
+    _validate_cursor_for_source(source, cursor)
+
+    sessions, next_cursor = store.page(
+        tool=tool,
+        cwd=cwd,
+        since=since,
+        query=query,
+        limit=limit,
+        cursor=cursor,
+    )
+
+    if json_out:
+        _print_sessions_json(
+            query=query,
+            source=source,
+            sessions=sessions,
+            next_cursor=next_cursor,
+        )
+        return
+
+    if not sessions:
+        console.print("[dim]No sessions found.[/dim]")
+        console.print("  Run [bold]flt track enable[/bold] to start syncing.")
+        return
+
+    _render_sessions_table(sessions, next_cursor)
+
+
+@app.command(name="search")
+def search_sessions(
+    body_arg: str | None = typer.Argument(
+        None,
+        metavar="[BODY]",
+        help="JSON search body. Pass inline JSON, @file, or - for stdin.",
+    ),
+    json_out: bool = typer.Option(
+        True,
+        "--json/--table",
+        help="Emit agent-friendly JSON by default; use --table for a human table.",
+    ),
+    show_filters: bool = typer.Option(
+        False,
+        "--filters",
+        "--list-filters",
+        help="List filterable attributes/operators and exit.",
+    ),
+) -> None:
+    """Search tracked sessions.
+
+    Search is Turbopuffer-only. `flt track ls` lists deterministic metadata from
+    Postgres; `flt track search` posts a JSON object to the search index for
+    ranked results and returns hydrated Fleet session metadata.
+
+    Input:
+
+    \b
+      flt track search '{"query":"bugbot local index","top_k":20}'
+      flt track search @search.json
+      flt track search -
+      flt track search --filters
+
+    JSON fields:
+
+    \b
+      query    string   Orchestrator-managed hybrid search: BM25 over
+                        `search_text` plus ANN over `vector`.
+      top_k    integer  Maximum ranked results to return. Defaults to 50.
+      filters  array    Turbopuffer filter expression, forwarded as-is.
+      rank_by  array    Turbopuffer ranking expression, forwarded as-is.
+
+    The command posts this body to `POST /v1/track/sessions/search`. The server
+    always injects the caller's team boundary and returns hydrated Fleet session
+    metadata.
+
+    Turbopuffer query/filter docs:
+
+    \b
+      https://turbopuffer.com/docs/query#filtering
+
+    Filterable attributes:
+
+    \b
+      session_id, user_id, device_id, tool, cwd, repo_url, git_branch,
+      model, forked_from, event_count, started_at, last_active
+
+    `team_id` is always injected by orchestrator. Use Turbopuffer filter arrays:
+
+    \b
+      ["tool","Eq","codex"]
+      ["last_active","Gte","2026-05-01T00:00:00Z"]
+      ["And",[[...],[...]]]
+
+    Common filter operators: And, Or, Not, Eq, NotEq, In, NotIn, Lt, Lte,
+    Gt, Gte, Contains, ContainsAny.
+
+    Example body:
+
+    \b
+      {"query":"deployment debugging",
+       "filters":["And",[["repo_url","Eq","git@github.com:fleet-ai/theseus.git"],
+                         ["tool","Eq","codex"]]],
+       "top_k":25}
+    """
+    if show_filters:
+        _print_search_filter_catalog(json_out)
+        return
+
+    if body_arg is None:
+        raise typer.BadParameter("BODY is required unless --filters is provided")
+
+    body = _read_json_argument(body_arg)
+
+    body.setdefault("top_k", DEFAULT_SEARCH_TOP_K)
+    data = TrackAPIClient().search_sessions_raw(body)
+    sessions = _sessions_from_api_items(data.get("items", []))
+    next_cursor = data.get("next_cursor")
+
+    if json_out:
+        _print_sessions_json(
+            query=body.get("query") if isinstance(body.get("query"), str) else None,
+            source="remote",
+            sessions=sessions,
+            next_cursor=next_cursor,
+            mode="tpuf",
+        )
+        return
+
+    if not sessions:
+        console.print("[dim]No sessions found.[/dim]")
+        return
+
+    _render_sessions_table(sessions, next_cursor)
+
+
+@app.command()
+def build_local_index(
+    replace: bool = typer.Option(
+        True,
+        "--replace/--append",
+        help="Replace the existing Fleet local index before scanning native files.",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON for scripting"),
+) -> None:
+    """Build the dev/test local index from native session files.
+
+    This is intentionally manual: normal Track commands use the remote source.
+    Local mode reads only this Fleet index and does not live-scan native files.
+    """
+    from .store import LocalSessionStore, NativeFilesSessionStore
+
+    paths = TrackPaths.default()
+    local_root = paths.track_dir / "local-store"
+    if replace and local_root.exists():
+        shutil.rmtree(local_root)
+
+    local = LocalSessionStore(paths)
+    native = NativeFilesSessionStore(home=paths.home)
+
+    indexed = 0
+    skipped = 0
+    cursor = None
+    while True:
+        sessions, next_cursor = native.page(limit=200, cursor=cursor)
+        for session in sessions:
+            try:
+                local.create(session, list(native.own_events(session.id)))
+            except Exception:
+                skipped += 1
+                continue
+            indexed += 1
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    payload = {
+        "source": LOCAL_SESSION_SOURCE,
+        "indexed": indexed,
+        "skipped": skipped,
+        "path": str(local_root),
+        "replace": replace,
+    }
+    if json_out:
+        console.print_json(json.dumps(payload))
+        return
+
+    console.print(
+        f"[green]Indexed[/green] {indexed} sessions into {local_root}"
+        + (f" [yellow]({skipped} skipped)[/yellow]" if skipped else "")
+    )
+    console.print("  Use [bold]--source local[/bold] to read this index.")
+
+
 @app.command()
 def resume(
     session_id: str = typer.Argument(
@@ -383,9 +727,9 @@ def resume(
         None, "--prompt", "-p", help="Initial prompt to send to the resumed CLI"
     ),
     source: str = typer.Option(
-        "auto",
+        DEFAULT_SESSION_SOURCE,
         "--source",
-        help="Where to read sessions from: auto (native+stub), native, stub, remote.",
+        help=SOURCE_HELP,
     ),
     compact: bool = typer.Option(
         True,
@@ -471,7 +815,7 @@ def resume(
             if not available:
                 console.print(
                     "[red]No supported AI CLIs found on PATH.[/red] "
-                    "Install one of: claude, codex, cursor, opencode."
+                    "Install one of: claude, codex."
                 )
                 raise typer.Exit(1)
             if len(available) == 1:

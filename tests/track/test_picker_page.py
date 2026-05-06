@@ -50,7 +50,7 @@ def _state_for(
     query: str = "",
 ) -> dict:
     return {
-        "source": "stub",
+        "source": "local",
         "tool": None,
         "cwd": None,
         "since": None,

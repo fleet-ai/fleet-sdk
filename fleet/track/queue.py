@@ -14,7 +14,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 from .paths import TrackPaths
 
@@ -26,12 +26,12 @@ MAX_BACKOFF_SECS = 1800  # 30 min
 
 
 def _backoff(attempts: int) -> float:
-    return min(BASE_BACKOFF_SECS * (2 ** attempts), MAX_BACKOFF_SECS)
+    return min(BASE_BACKOFF_SECS * (2**attempts), MAX_BACKOFF_SECS)
 
 
 @dataclass
 class QueueItem:
-    path: str        # relative to $HOME
+    path: str  # relative to $HOME
     sha256: str
     attempts: int
     last_error: Optional[str]
@@ -46,7 +46,9 @@ class UploadQueue:
 
     def _open_conn(self, _retry: bool = False) -> sqlite3.Connection:
         try:
-            conn = sqlite3.connect(self._paths.state_db, timeout=10, check_same_thread=False)
+            conn = sqlite3.connect(
+                self._paths.state_db, timeout=10, check_same_thread=False
+            )
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("""
@@ -62,7 +64,9 @@ class UploadQueue:
                     UNIQUE(path, sha256)
                 )
             """)
-            conn.execute("CREATE INDEX IF NOT EXISTS queue_status ON queue(status, next_attempt_at)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS queue_status ON queue(status, next_attempt_at)"
+            )
             conn.commit()
 
             result = conn.execute("PRAGMA integrity_check").fetchone()
@@ -85,7 +89,9 @@ class UploadQueue:
     def _wipe_and_reinit(self) -> None:
         """Delete corrupt database files and start fresh. Queue items are lost but
         the next reconcile will re-enqueue anything not yet on S3."""
-        log.warning("queue database is corrupt — wiping and reinitialising (next reconcile will re-upload missing files)")
+        log.warning(
+            "queue database is corrupt — wiping and reinitialising (next reconcile will re-upload missing files)"
+        )
         for suffix in ("", "-shm", "-wal"):
             p = Path(str(self._paths.state_db) + suffix)
             if p.exists():
@@ -105,12 +111,23 @@ class UploadQueue:
             self._conn.commit()
 
     def enqueue_batch(self, items: list[tuple[str, str]]) -> None:
+        # Reset any existing row for the same (path, sha256) back to pending.
+        # The reconciler only calls this for files the remote manifest is
+        # missing, so any prior `done`/`failed`/`in_flight` state is a lie we
+        # need to overrule — otherwise INSERT OR IGNORE would let stale `done`
+        # rows block re-upload indefinitely.
         now = int(time.time())
         with self._lock:
             self._conn.executemany(
                 """
-                INSERT OR IGNORE INTO queue (path, sha256, status, next_attempt_at, enqueued_at, updated_at)
+                INSERT INTO queue (path, sha256, status, next_attempt_at, enqueued_at, updated_at)
                 VALUES (?, ?, 'pending', 0, ?, ?)
+                ON CONFLICT(path, sha256) DO UPDATE SET
+                    status = 'pending',
+                    next_attempt_at = 0,
+                    attempts = 0,
+                    last_error = NULL,
+                    updated_at = excluded.updated_at
                 """,
                 [(path, sha256, now, now) for path, sha256 in items],
             )
@@ -176,7 +193,8 @@ class UploadQueue:
         now = int(time.time())
         with self._lock:
             row = self._conn.execute(
-                "SELECT attempts FROM queue WHERE path = ? AND sha256 = ?", (path, sha256)
+                "SELECT attempts FROM queue WHERE path = ? AND sha256 = ?",
+                (path, sha256),
             ).fetchone()
             attempts = (row[0] if row else 0) + 1
             status = "failed" if attempts >= MAX_ATTEMPTS else "pending"
@@ -206,8 +224,24 @@ class UploadQueue:
         """Purge successfully uploaded items older than 24h."""
         cutoff = int(time.time()) - 86400
         with self._lock:
-            self._conn.execute("DELETE FROM queue WHERE status = 'done' AND updated_at < ?", (cutoff,))
+            self._conn.execute(
+                "DELETE FROM queue WHERE status = 'done' AND updated_at < ?", (cutoff,)
+            )
             self._conn.commit()
+
+    def delete_paths(self, paths: Iterable[str]) -> int:
+        """Delete every queued row for the given relative paths."""
+        unique_paths = tuple(dict.fromkeys(paths))
+        if not unique_paths:
+            return 0
+        placeholders = ",".join("?" for _ in unique_paths)
+        with self._lock:
+            cur = self._conn.execute(
+                f"DELETE FROM queue WHERE path IN ({placeholders})",
+                unique_paths,
+            )
+            self._conn.commit()
+        return cur.rowcount
 
     def stats(self) -> dict[str, int]:
         with self._lock:

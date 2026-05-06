@@ -30,7 +30,7 @@ from .drainer import QueueDrainer
 from .merkle import HashCache, MerkleTree
 from .paths import TrackPaths
 from .queue import UploadQueue
-from .reconciler import Reconciler
+from .reconciler import Reconciler, _is_unsupported_manifest_path
 from .sources import source_summary
 from .status import (
     TrackStatus,
@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from .reconciler import ReconcileResult
 
 RECONCILE_INTERVAL = 600  # full Merkle diff every 10 minutes
+MANIFEST_FLUSH_INTERVAL = 60  # at minimum, persist manifest this often when dirty
 
 
 def _setup_logging(paths: TrackPaths) -> None:
@@ -134,6 +135,7 @@ class Daemon:
         self._confirmed_map: dict[str, str] = {}
         self._confirmed_lock = threading.Lock()
         self._manifest_dirty = False  # set when confirmed_map gains new entries
+        self._last_manifest_flush: float = 0.0
         # path -> sha256 for rows this process has successfully registered
         # in the orchestrator metadata index.
         self._metadata_indexed: dict[str, str] = {}
@@ -173,6 +175,7 @@ class Daemon:
 
         self._device_id = device_id
         result: ReconcileResult = self._reconciler.reconcile(device_id)
+        self._apply_reconcile_result(result)
 
         # Drain until queue empty (or one drain returns claimed=0).
         assert self._drainer is not None
@@ -244,12 +247,19 @@ class Daemon:
                 last_queue_reset = now
 
             self._drain_queue()
-            # Write manifest once all pending uploads have drained.
+            # Persist manifest opportunistically when the queue is idle, but
+            # also at least every MANIFEST_FLUSH_INTERVAL seconds so a daemon
+            # that stays continuously busy still publishes progress. The
+            # manifest only ever contains files in _confirmed_map (successful
+            # S3 PUTs), so an interim flush is always safe.
             if self._manifest_dirty:
                 stats = self._queue.stats()
-                if stats.get("pending", 0) == 0 and stats.get("in_flight", 0) == 0:
+                idle = stats.get("pending", 0) == 0 and stats.get("in_flight", 0) == 0
+                stale = (now - self._last_manifest_flush) >= MANIFEST_FLUSH_INTERVAL
+                if idle or stale:
                     self._upload_manifest()
                     self._manifest_dirty = False
+                    self._last_manifest_flush = now
             self._write_status()
             self._stop.wait(timeout=10)
 
@@ -283,9 +293,27 @@ class Daemon:
             self._status.errors = [str(e)]
             return
 
+        self._apply_reconcile_result(result)
+
+        if not result.in_sync:
+            self._drain_queue()
+
+        log.info(
+            "reconcile done run_id=%s changed=%d", run_id, len(result.changed_paths)
+        )
+
+    def _apply_reconcile_result(self, result: "ReconcileResult") -> None:
         # Seed confirmed_map from S3 — these are files we know are safely stored.
+        # Pruned paths are legacy manifest entries that are no longer part of
+        # default sync (currently Cursor); mark the manifest dirty so the next
+        # upload stops advertising them.
         confirmed_existing: dict[str, str] = {}
         with self._confirmed_lock:
+            if result.pruned_paths:
+                self._queue.delete_paths(result.pruned_paths)
+                for path in result.pruned_paths:
+                    self._confirmed_map.pop(path, None)
+                self._manifest_dirty = True
             for path, digest in result.remote_map.items():
                 self._confirmed_map.setdefault(path, digest)
                 if result.local_map.get(path) == digest:
@@ -296,13 +324,6 @@ class Daemon:
         self._status.files_total = len(result.local_map)
         self._status.last_sync = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._status.state = "idle"
-
-        if not result.in_sync:
-            self._drain_queue()
-
-        log.info(
-            "reconcile done run_id=%s changed=%d", run_id, len(result.changed_paths)
-        )
 
     def _upload_manifest(self) -> None:
         """PUT manifest.json reflecting only files confirmed uploaded to S3.
@@ -363,6 +384,14 @@ class Daemon:
     # ------------------------------------------------------------------ #
 
     def _on_upload_done(self, rel_path: str, sha256: str) -> None:
+        if _is_unsupported_manifest_path(rel_path):
+            self._queue.delete_paths([rel_path])
+            with self._confirmed_lock:
+                if self._confirmed_map.pop(rel_path, None) is not None:
+                    self._manifest_dirty = True
+            log.info("ignored unsupported upload result %s", rel_path)
+            return
+
         self._queue.mark_done(rel_path, sha256)
         self._status.files_synced += 1
         # Record this file as confirmed on S3 using the hash we originally computed.

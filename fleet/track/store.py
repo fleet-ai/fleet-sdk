@@ -809,8 +809,30 @@ class RemoteSessionStore:
             return _session_from_api(self._api.get_session(id))
         except Exception as e:
             if getattr(e, "status_code", None) == 404:
-                return None
-            raise
+                pass
+            else:
+                raise
+
+        if not id:
+            return None
+
+        matches: list[Session] = []
+        cursor = None
+        while True:
+            items, cursor = self.page(limit=MAX_PAGE_LIMIT, cursor=cursor)
+            for session in items:
+                if session.id.startswith(id):
+                    matches.append(session)
+                    if len(matches) > 1:
+                        raise KeyError(
+                            f"Ambiguous prefix {id!r}: matches {[m.id for m in matches]}"
+                        )
+            if cursor is None:
+                break
+
+        if matches:
+            return matches[0]
+        return None
 
     def events(self, id: str) -> Iterator[Event]:
         leaf = self.get(id)
@@ -922,30 +944,7 @@ class NativeFilesSessionStore:
         limit = _clamp_limit(limit)
         cur = _decode_cursor(cursor)
 
-        rows: list[Session] = []
-        for source, build_session in self._sources_with_session_builders():
-            if tool is not None and source.name != tool:
-                continue
-            if not source.is_present():
-                continue
-            for path in source.iter_files():
-                # Skip fleet checkouts; they're transient views, not
-                # native sessions, and would clutter the picker.
-                if _looks_like_fleet_checkout(path):
-                    continue
-                try:
-                    s = build_session(path)
-                except OSError:
-                    continue
-                if s is None:
-                    continue
-                if cwd is not None and s.cwd != cwd:
-                    continue
-                if since is not None and (s.last_active or "") < since:
-                    continue
-                if not _matches_query(s, query):
-                    continue
-                rows.append(s)
+        rows = list(self._iter_sessions(tool=tool, cwd=cwd, since=since, query=query))
 
         rows.sort(key=_sort_key, reverse=True)
         rows = [s for s in rows if _passes_cursor(s, cur)]
@@ -961,12 +960,15 @@ class NativeFilesSessionStore:
         return page, next_cursor
 
     def get(self, id: str) -> Optional[Session]:
-        # Two-pass: exact match, then unique prefix.
-        all_sessions = self.list()
-        for s in all_sessions:
+        # Exact match first, then unique prefix. This must scan all native
+        # sessions, not just the first list() page, because callers like
+        # build-local-index replay events for every paginated row.
+        matches: list[Session] = []
+        for s in self._iter_sessions():
             if s.id == id:
                 return s
-        matches = [s for s in all_sessions if s.id.startswith(id)]
+            if s.id.startswith(id):
+                matches.append(s)
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
@@ -1008,6 +1010,38 @@ class NativeFilesSessionStore:
     # ------------------------------------------------------------------ #
     # Internals                                                            #
     # ------------------------------------------------------------------ #
+
+    def _iter_sessions(
+        self,
+        *,
+        tool: Optional[str] = None,
+        cwd: Optional[str] = None,
+        since: Optional[str] = None,
+        query: Optional[str] = None,
+    ) -> Iterator[Session]:
+        for source, build_session in self._sources_with_session_builders():
+            if tool is not None and source.name != tool:
+                continue
+            if not source.is_present():
+                continue
+            for path in source.iter_files():
+                # Skip fleet checkouts; they're transient views, not
+                # native sessions, and would clutter the picker.
+                if _looks_like_fleet_checkout(path):
+                    continue
+                try:
+                    s = build_session(path)
+                except OSError:
+                    continue
+                if s is None:
+                    continue
+                if cwd is not None and s.cwd != cwd:
+                    continue
+                if since is not None and (s.last_active or "") < since:
+                    continue
+                if not _matches_query(s, query):
+                    continue
+                yield s
 
     def _sources_with_session_builders(self):
         """Each tuple is (source_instance, fn(path)→Session|None)."""

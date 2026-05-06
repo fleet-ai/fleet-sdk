@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import httpx
@@ -89,6 +88,47 @@ def test_reconcile_when_in_sync_enqueues_nothing(tmp_path: Path):
 
     assert result.in_sync is True
     assert result.changed_paths == ()
+    assert queue.stats() == {}
+    queue.close()
+
+
+def test_reconcile_prunes_legacy_cursor_manifest_paths(tmp_path: Path):
+    """Old Cursor entries should not keep the manifest out of sync."""
+    paths = TrackPaths.under(tmp_path)
+    paths.ensure_track_dir()
+    queue = UploadQueue(paths)
+    cache = HashCache(paths)
+
+    f1 = _seed_file(tmp_path, ".codex/sessions/2026/05/05/rollout-s1.jsonl", "AAA")
+    tree = MerkleTree(cache, file_iter=[f1])
+    local_map, _ = tree.build()
+    cursor_rel = ".cursor/projects/p1/agent-transcripts/t1/session.jsonl"
+    remote_files = {**local_map, cursor_rel: "legacy-cursor-digest"}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "root_hash": MerkleTree.compute_root(remote_files),
+                "files": remote_files,
+            },
+        )
+
+    api = TrackAPIClient(
+        client=httpx.Client(
+            transport=httpx.MockTransport(handler), base_url="http://test"
+        ),
+        auth_provider=_auth,
+    )
+
+    reconciler = Reconciler(queue=queue, cache=cache, tree=tree, api=api)
+    result = reconciler.reconcile("dev1")
+
+    assert result.in_sync is True
+    assert result.changed_paths == ()
+    assert result.pruned_paths == (cursor_rel,)
+    assert result.local_map == local_map
+    assert result.remote_map == local_map
     assert queue.stats() == {}
     queue.close()
 
