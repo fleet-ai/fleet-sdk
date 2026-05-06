@@ -199,6 +199,48 @@ Download behavior:
 - Repeated downloads are cache hits unless metadata such as `last_active`,
   `event_count`, `content_codec`, or byte sizes changes.
 
+### FleetCode MCP Connector
+
+The SDK ships FleetCode, a small stdio MCP server for connector hosts that have
+the Fleet SDK installed. It exposes the same three agent-facing operations as
+the CLI:
+
+- `fleetcode_search_sessions` for structured session search.
+- `fleetcode_aggregate_sessions` for grouped metadata metrics.
+- `fleetcode_download_session` for local cached JSONL downloads.
+
+It also exposes `fleetcode_query_help`, which returns filterable fields, operators,
+metrics, and examples so agents can construct valid queries.
+
+The MCP server requires Python 3.10+. If the connector machine already installs
+the SDK as `fleet-python[cli]`, the MCP dependency is included. Otherwise,
+install the smaller FleetCode extra in the environment that runs the connector:
+
+```bash
+pip install 'fleet-python[fleetcode]'
+```
+
+Then configure the connector to run:
+
+```json
+{
+  "command": "fleetcode-mcp",
+  "env": {
+    "FLEET_TRACK_BASE_URL": "https://us-west-1.fleetai.com"
+  }
+}
+```
+
+Authentication is the same as `flt track`: `FLEET_API_KEY` is preferred when
+set, otherwise the MCP process uses stored `flt login` credentials from the
+same OS user. For a connector running under a different user or on a different
+machine, either run `flt login` in that connector environment or pass
+`FLEET_API_KEY` in `env`.
+
+`FLEET_TRACK_BASE_URL` is optional; the normal Fleet default is used when it is
+omitted. The MCP process keeps orchestrator as the auth boundary and downloads
+session bytes directly to the same local cache as `flt track download`.
+
 ### Compression
 
 Uploads are raw by default for safe rollout. To store new uploaded session blobs

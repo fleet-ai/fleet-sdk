@@ -35,6 +35,7 @@ dependencies = [
 
 [project.scripts]
 flt = "fleet.cli:main"
+fleetcode-mcp = "fleet.track.mcp_server:main"
 
 [project.optional-dependencies]
 cli = [
@@ -42,6 +43,10 @@ cli = [
     "rich>=10.0.0",
     "watchdog>=4.0.0",
     "textual>=0.50.0",
+    "mcp==1.24.0; python_version >= '3.10'",
+]
+fleetcode = [
+    "mcp==1.24.0; python_version >= '3.10'",
 ]
 dev = [
     "pytest>=7.0.0",
