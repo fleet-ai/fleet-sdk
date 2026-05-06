@@ -17,6 +17,7 @@ from fleet.track.store import (
     LocalSessionStore,
     NativeFilesSessionStore,
     Session,
+    session_from_native_path,
 )
 from fleet.track.unified import UserMessage
 
@@ -57,6 +58,48 @@ def _seed_native_claude(home: Path, *, sid: str, encoded_cwd: str = "-tmp-x") ->
     return f
 
 
+def _seed_native_claude_desktop(home: Path, *, sid: str) -> Path:
+    base = (
+        home
+        / "Library"
+        / "Application Support"
+        / "Claude"
+        / "local-agent-mode-sessions"
+        / "account"
+        / "workspace"
+        / "local_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        / ".claude"
+        / "projects"
+        / "-tmp-desktop"
+    )
+    base.mkdir(parents=True, exist_ok=True)
+    f = base / f"{sid}.jsonl"
+    rows = [
+        {
+            "type": "user",
+            "uuid": "u1",
+            "sessionId": sid,
+            "cwd": "/tmp/desktop",
+            "gitBranch": "main",
+            "version": "0.5",
+            "timestamp": "2026-05-06T00:00:00Z",
+            "message": {"role": "user", "content": "desktop hi"},
+        },
+        {
+            "type": "assistant",
+            "uuid": "a1",
+            "parentUuid": "u1",
+            "timestamp": "2026-05-06T00:00:01Z",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "desktop yo"}],
+            },
+        },
+    ]
+    f.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    return f
+
+
 def _seed_native_codex(home: Path, *, sid: str, cwd: str = "/tmp/y") -> Path:
     base = home / ".codex" / "sessions" / "2026" / "05" / "01"
     base.mkdir(parents=True, exist_ok=True)
@@ -86,6 +129,14 @@ def _seed_native_codex(home: Path, *, sid: str, cwd: str = "/tmp/y") -> Path:
     return f
 
 
+def _seed_native_cursor(home: Path) -> Path:
+    base = home / ".cursor" / "projects" / "p1" / "agent-transcripts" / "t1"
+    base.mkdir(parents=True, exist_ok=True)
+    f = base / "session.jsonl"
+    f.write_text('{"role":"user","content":"cursor hi"}\n')
+    return f
+
+
 # ------------------------------------------------------------------ #
 # NativeFilesSessionStore                                              #
 # ------------------------------------------------------------------ #
@@ -103,6 +154,27 @@ def test_native_store_lists_claude_session_by_filename(tmp_path: Path):
     assert s.event_count == 2  # 2 lines
 
 
+def test_native_store_lists_claude_desktop_embedded_session(tmp_path: Path):
+    sid = "33333333-4444-5555-6666-777777777777"
+    path = _seed_native_claude_desktop(tmp_path, sid=sid)
+    store = NativeFilesSessionStore(home=tmp_path)
+
+    session = store.get(sid)
+    assert session is not None
+    assert session.id == sid
+    assert session.tool == "claude"
+    assert session.cwd == "/tmp/desktop"
+
+    sessions = store.list(tool="claude")
+    assert sid in {s.id for s in sessions}
+    assert list(store.events(sid))
+
+    indexed = session_from_native_path(path, home=tmp_path)
+    assert indexed is not None
+    assert indexed.id == sid
+    assert indexed.tool == "claude"
+
+
 def test_native_store_lists_codex_session_by_uuid_in_filename(tmp_path: Path):
     sid = "abcdef01-2345-6789-abcd-ef0123456789"
     _seed_native_codex(tmp_path, sid=sid, cwd="/tmp/cdx")
@@ -113,12 +185,36 @@ def test_native_store_lists_codex_session_by_uuid_in_filename(tmp_path: Path):
     assert s.cwd == "/tmp/cdx"
 
 
+def test_native_store_lists_cursor_transcript_as_downloadable_artifact(
+    tmp_path: Path,
+):
+    path = _seed_native_cursor(tmp_path)
+    store = NativeFilesSessionStore(home=tmp_path)
+
+    sessions = store.list(tool="cursor")
+    assert len(sessions) == 1
+    session = sessions[0]
+    assert session.id.startswith("cursor-")
+    assert session.tool == "cursor"
+    assert session.event_count == 1
+
+    indexed = session_from_native_path(path, home=tmp_path)
+    assert indexed is not None
+    assert indexed.id == session.id
+    assert indexed.tool == "cursor"
+
+    with pytest.raises(NotImplementedError):
+        list(store.events(session.id))
+
+
 def test_native_store_filters_by_tool(tmp_path: Path):
     _seed_native_claude(tmp_path, sid="11111111-1111-1111-1111-111111111111")
     _seed_native_codex(tmp_path, sid="22222222-2222-2222-2222-222222222222")
+    _seed_native_cursor(tmp_path)
     store = NativeFilesSessionStore(home=tmp_path)
     assert {s.tool for s in store.list(tool="claude")} == {"claude"}
     assert {s.tool for s in store.list(tool="codex")} == {"codex"}
+    assert {s.tool for s in store.list(tool="cursor")} == {"cursor"}
 
 
 def test_native_store_skips_fleet_checkouts(tmp_path: Path):

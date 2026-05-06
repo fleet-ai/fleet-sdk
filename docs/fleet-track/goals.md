@@ -6,9 +6,9 @@ FleetTrack now has a usable v1 product path:
 
 - Authentication through `FLEET_API_KEY` or stored `flt login` credentials.
 - `flt track enable/status/daemon/logs/ls/resume/gc`.
-- Local source discovery for Claude and Codex. Cursor discovery code exists, but
-  default syncing is disabled until metadata extraction and event replay are
-  implemented.
+- Local source discovery and raw-byte sync for Claude, Claude Desktop
+  local-agent, Codex, and Cursor. Cursor replay remains disabled until metadata
+  extraction and event replay are implemented.
 - Periodic full reconciliation into a SQLite upload queue.
 - Scrubbed whole-file uploads to S3 through orchestrator-issued presigned URLs.
 - Remote session metadata indexing for listing/search/resume.

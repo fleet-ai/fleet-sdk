@@ -39,6 +39,7 @@ revisit if we ever ship multi-process scenarios.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -892,8 +893,9 @@ class RemoteSessionStore:
 class NativeFilesSessionStore:
     """Read-only `SessionStore` view of native CLI session files.
 
-    Walks `~/.claude/projects/` and `~/.codex/sessions/` (via the same
-    `Source` classes the daemon uses). Useful as a "show me what's
+    Walks `~/.claude/projects/`, Claude Desktop local-agent transcripts,
+    `~/.codex/sessions/`, and Cursor agent transcripts (via the same `Source`
+    classes the daemon uses). Useful as a "show me what's
     actually on disk" backend for `flt track ls` / `flt track resume`
     before the remote backend exists or before LocalSessionStore has
     been seeded.
@@ -991,6 +993,8 @@ class NativeFilesSessionStore:
             yield from ClaudeSource(home=self._home).parse(path)
         elif s.tool == "codex":
             yield from CodexSource(home=self._home).parse(path)
+        elif s.tool == "cursor":
+            raise NotImplementedError("Cursor transcript replay is not implemented yet")
 
     # Native session files don't carry forked_from links, so events()
     # here never walks a fork chain — own_events is the same stream.
@@ -1020,8 +1024,6 @@ class NativeFilesSessionStore:
         query: Optional[str] = None,
     ) -> Iterator[Session]:
         for source, build_session in self._sources_with_session_builders():
-            if tool is not None and source.name != tool:
-                continue
             if not source.is_present():
                 continue
             for path in source.iter_files():
@@ -1035,6 +1037,8 @@ class NativeFilesSessionStore:
                     continue
                 if s is None:
                     continue
+                if tool is not None and s.tool != tool:
+                    continue
                 if cwd is not None and s.cwd != cwd:
                     continue
                 if since is not None and (s.last_active or "") < since:
@@ -1045,11 +1049,18 @@ class NativeFilesSessionStore:
 
     def _sources_with_session_builders(self):
         """Each tuple is (source_instance, fn(path)→Session|None)."""
-        from .sources import ClaudeSource, CodexSource
+        from .sources import (
+            ClaudeDesktopSource,
+            ClaudeSource,
+            CodexSource,
+            CursorSource,
+        )
 
         return [
             (ClaudeSource(home=self._home), self._build_claude_session),
+            (ClaudeDesktopSource(home=self._home), self._build_claude_session),
             (CodexSource(home=self._home), self._build_codex_session),
+            (CursorSource(home=self._home), self._build_cursor_session),
         ]
 
     def _build_claude_session(self, path) -> Optional[Session]:
@@ -1085,16 +1096,45 @@ class NativeFilesSessionStore:
             cwd=cwd,
         )
 
+    def _build_cursor_session(self, path) -> Optional[Session]:
+        if path.suffix not in {".jsonl", ".txt"}:
+            return None
+        try:
+            rel = path.relative_to(self._home)
+        except ValueError:
+            return None
+        if not _is_cursor_transcript_path(rel.parts):
+            return None
+        return _build_session_from_path(
+            tool="cursor",
+            id=_cursor_session_id(path, home=self._home),
+            path=path,
+            cwd=None,
+        )
+
     def _path_for(self, session: Session) -> Optional["Path"]:  # noqa: F821
-        from .sources import ClaudeSource, CodexSource
+        from .sources import (
+            ClaudeDesktopSource,
+            ClaudeSource,
+            CodexSource,
+            CursorSource,
+        )
 
         if session.tool == "claude":
-            for p in ClaudeSource(home=self._home).iter_files():
-                if p.stem == session.id:
-                    return p
+            for source in (
+                ClaudeSource(home=self._home),
+                ClaudeDesktopSource(home=self._home),
+            ):
+                for p in source.iter_files():
+                    if p.stem == session.id:
+                        return p
         elif session.tool == "codex":
             for p in CodexSource(home=self._home).iter_files():
                 if p.stem.endswith(session.id):
+                    return p
+        elif session.tool == "cursor":
+            for p in CursorSource(home=self._home).iter_files():
+                if _cursor_session_id(p, home=self._home) == session.id:
                     return p
         return None
 
@@ -1496,7 +1536,7 @@ def session_from_native_path(path, *, home: Optional[Path] = None) -> Optional[S
 
     parts = rel.parts
     native = NativeFilesSessionStore(home=home)
-    if len(parts) >= 3 and parts[0] == ".claude" and parts[1] == "projects":
+    if _is_claude_projects_path(parts):
         if path.suffix != ".jsonl":
             return None
         return native._build_claude_session(path)
@@ -1512,7 +1552,48 @@ def session_from_native_path(path, *, home: Optional[Path] = None) -> Optional[S
         if path.suffix != ".jsonl":
             return None
         return native._build_codex_session(path)
+    if _is_cursor_transcript_path(parts):
+        if path.suffix not in {".jsonl", ".txt"}:
+            return None
+        return native._build_cursor_session(path)
     return None
+
+
+def _is_claude_projects_path(parts: tuple[str, ...]) -> bool:
+    """True for normal and embedded Claude Code transcript paths.
+
+    Normal Claude Code sessions live at `.claude/projects/...`. Claude Desktop
+    local-agent sessions embed the same layout deeper under app data, e.g.
+    `Library/Application Support/Claude/local-agent-mode-sessions/.../.claude/projects/...`.
+    """
+    for idx in range(len(parts) - 1):
+        if parts[idx] == ".claude" and parts[idx + 1] == "projects":
+            return True
+    return False
+
+
+def _is_cursor_transcript_path(parts: tuple[str, ...]) -> bool:
+    """True for Cursor agent transcript files under `.cursor/projects`."""
+    return (
+        len(parts) >= 5
+        and parts[0] == ".cursor"
+        and parts[1] == "projects"
+        and "agent-transcripts" in parts
+    )
+
+
+def _cursor_session_id(path, *, home: Path) -> str:
+    """Stable path-derived id for Cursor transcript artifacts.
+
+    Cursor transcript metadata is not stable enough for replay yet, but a
+    deterministic id lets Fleet index and download the raw uploaded artifact.
+    """
+    try:
+        rel = path.relative_to(home).as_posix()
+    except ValueError:
+        rel = str(path)
+    digest = hashlib.sha256(rel.encode("utf-8")).hexdigest()[:24]
+    return f"cursor-{digest}"
 
 
 def _decode_claude_cwd(path) -> Optional[str]:

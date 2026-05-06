@@ -95,7 +95,7 @@ def enable() -> None:
     found = [s for s in sources if s.is_present()]
     if not found:
         console.print(
-            "[yellow]No AI tool sessions found[/yellow] (~/.claude, ~/.codex)"
+            "[yellow]No AI tool sessions found[/yellow] (~/.claude, Claude Desktop local-agent sessions, ~/.codex, ~/.cursor)"
         )
     else:
         for s in found:
@@ -351,7 +351,9 @@ def _print_search_filter_catalog(json_out: bool) -> None:
     console.print("[bold]Operators[/bold]")
     console.print(", ".join(catalog["operators"]))
     console.print()
-    console.print("[bold]Logical operators[/bold] " + ", ".join(catalog["logical_operators"]))
+    console.print(
+        "[bold]Logical operators[/bold] " + ", ".join(catalog["logical_operators"])
+    )
     console.print()
     console.print("[bold]Time fields[/bold] " + ", ".join(catalog["time_fields"]))
 

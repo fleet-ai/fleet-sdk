@@ -95,7 +95,11 @@ class Reconciler:
 def _prune_unsupported_manifest_paths(
     file_map: dict[str, str],
 ) -> tuple[dict[str, str], tuple[str, ...]]:
-    """Drop legacy paths that are no longer part of default remote sync."""
+    """Drop legacy paths that are no longer part of default remote sync.
+
+    This hook is intentionally empty today; keep it so future source removals
+    can prune stale manifest entries without changing reconcile flow.
+    """
     kept: dict[str, str] = {}
     pruned: list[str] = []
     for path, digest in file_map.items():
@@ -106,6 +110,5 @@ def _prune_unsupported_manifest_paths(
     return kept, tuple(sorted(pruned))
 
 
-def _is_unsupported_manifest_path(path: str) -> bool:
-    normalized = path.lstrip("/")
-    return normalized == ".cursor" or normalized.startswith(".cursor/")
+def _is_unsupported_manifest_path(_path: str) -> bool:
+    return False

@@ -3,7 +3,7 @@
 Public surface:
     Source                 — abstract base class
     SourceSummary          — reportable view of one source
-    ClaudeSource, CursorSource, CodexSource — concrete impls
+    ClaudeSource, ClaudeDesktopSource, CursorSource, CodexSource — concrete impls
     default_sources(home)  — list of standard sources for a given home
     relative_to_home       — shared util
 
@@ -26,6 +26,7 @@ from .base import (
     relative_to_home,
 )
 from .claude import ClaudeSource
+from .claude_desktop import ClaudeDesktopSource
 from .codex import CodexSource
 from .cursor import CursorSource
 
@@ -33,6 +34,7 @@ __all__ = [
     "Source",
     "SourceSummary",
     "ClaudeSource",
+    "ClaudeDesktopSource",
     "CursorSource",
     "CodexSource",
     "default_sources",
@@ -48,11 +50,11 @@ __all__ = [
 
 def default_sources(home: Optional[Path] = None) -> list[Source]:
     """The standard set of sources we sync from. Tests pass a tmp home."""
-    # CursorSource remains importable, but it is not in the default sync set
-    # until we have stable metadata extraction and event parsing for resume.
     return [
         ClaudeSource(home=home),
+        ClaudeDesktopSource(home=home),
         CodexSource(home=home),
+        CursorSource(home=home),
     ]
 
 
@@ -66,7 +68,18 @@ EXCLUDE_PATTERNS = DEFAULT_EXCLUDE_PATTERNS
 # Path.home(); but exposed as a module attribute for legacy callers.
 WATCH_ROOTS = [
     Path.home() / ".claude" / "projects",
+    Path.home()
+    / "Library"
+    / "Application Support"
+    / "Claude"
+    / "local-agent-mode-sessions",
+    Path.home()
+    / "Library"
+    / "Application Support"
+    / "Claude-3p"
+    / "local-agent-mode-sessions",
     Path.home() / ".codex",
+    Path.home() / ".cursor" / "projects",
 ]
 
 

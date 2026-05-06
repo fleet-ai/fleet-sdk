@@ -8,6 +8,7 @@ import pytest
 
 from fleet.track.sources import (
     DEFAULT_EXCLUDE_PATTERNS,
+    ClaudeDesktopSource,
     ClaudeSource,
     CodexSource,
     CursorSource,
@@ -28,6 +29,26 @@ def _seed_claude(home: Path) -> None:
     base.mkdir(parents=True)
     (base / "abc.jsonl").write_text('{"role": "user"}\n')
     (base / "session-env").write_text("FOO=bar")  # excluded
+
+
+def _seed_claude_desktop(home: Path, app_name: str = "Claude") -> Path:
+    base = (
+        home
+        / "Library"
+        / "Application Support"
+        / app_name
+        / "local-agent-mode-sessions"
+        / "account"
+        / "workspace"
+        / "local_11111111-2222-3333-4444-555555555555"
+        / ".claude"
+        / "projects"
+        / "-desktop-cwd"
+    )
+    base.mkdir(parents=True)
+    f = base / "22222222-3333-4444-5555-666666666666.jsonl"
+    f.write_text('{"type": "user"}\n')
+    return f
 
 
 def _seed_cursor(home: Path) -> None:
@@ -88,6 +109,47 @@ def test_claude_read_for_upload_trims_partial_jsonl_line(tmp_path: Path):
     f = next(s.iter_files())
     f.write_text('{"a": 1}\n{"partial":')  # mid-write
     assert s.read_for_upload(f) == b'{"a": 1}\n'
+
+
+# ------------------------------------------------------------------ #
+# ClaudeDesktopSource                                                  #
+# ------------------------------------------------------------------ #
+
+
+def test_claude_desktop_iter_files_finds_embedded_project_jsonl(tmp_path: Path):
+    expected = _seed_claude_desktop(tmp_path)
+    s = ClaudeDesktopSource(home=tmp_path)
+
+    assert s.is_present() is True
+    assert list(s.iter_files()) == [expected]
+
+
+def test_claude_desktop_checks_3p_root_too(tmp_path: Path):
+    expected = _seed_claude_desktop(tmp_path, app_name="Claude-3p")
+    s = ClaudeDesktopSource(home=tmp_path)
+
+    assert s.is_present() is True
+    assert list(s.iter_files()) == [expected]
+
+
+def test_claude_desktop_skips_non_session_embedded_claude_dirs(tmp_path: Path):
+    base = (
+        tmp_path
+        / "Library"
+        / "Application Support"
+        / "Claude"
+        / "local-agent-mode-sessions"
+        / "account"
+        / "workspace"
+        / "not-a-session"
+        / ".claude"
+        / "projects"
+        / "-desktop-cwd"
+    )
+    base.mkdir(parents=True)
+    (base / "22222222-3333-4444-5555-666666666666.jsonl").write_text("{}\n")
+
+    assert list(ClaudeDesktopSource(home=tmp_path).iter_files()) == []
 
 
 # ------------------------------------------------------------------ #
@@ -189,7 +251,7 @@ def test_serialize_returns_bytes(tmp_path: Path):
 def test_default_sources_returns_indexable_sources(tmp_path: Path):
     sources = default_sources(home=tmp_path)
     names = [s.name for s in sources]
-    assert names == ["claude", "codex"]
+    assert names == ["claude", "claude-desktop", "codex", "cursor"]
 
 
 def test_default_sources_use_provided_home(tmp_path: Path):

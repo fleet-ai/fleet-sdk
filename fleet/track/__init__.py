@@ -39,6 +39,7 @@ from .resumer import (
 
 # --- Session store + chained view --- #
 from .sources import (
+    ClaudeDesktopSource,
     ClaudeSource,
     CodexSource,
     CursorSource,
@@ -99,6 +100,7 @@ __all__ = [
     "Source",
     "SourceSummary",
     "ClaudeSource",
+    "ClaudeDesktopSource",
     "CodexSource",
     "CursorSource",
     "default_sources",
