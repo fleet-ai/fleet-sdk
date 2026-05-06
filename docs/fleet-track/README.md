@@ -58,8 +58,59 @@ flt track status
 flt track daemon --once
 flt track logs
 flt track ls
+flt track search
 flt track resume
 flt track gc
+```
+
+### Search
+
+`flt track ls` lists deterministic session metadata from the orchestrator's
+Postgres store. `flt track search` is Turbopuffer-only and emits JSON by default
+for agent workflows.
+
+Simple query mode sends the query to the orchestrator-managed hybrid index:
+
+```bash
+flt track search "bugbot local index"
+```
+
+For structured search, agents can pass a Turbopuffer-shaped JSON body through
+orchestrator:
+
+```bash
+flt track search --tpuf '{"query":"bugbot local index","top_k":20}'
+flt track search --tpuf @search.json
+flt track search --tpuf -
+```
+
+The raw body supports `query`, `rank_by`, `filters`, and `top_k`, matching
+`POST /v1/track/sessions/search`. Orchestrator injects the team boundary and
+hydrates the ranked results back to Fleet session metadata.
+
+Filterable attributes are:
+
+```text
+session_id, user_id, device_id, tool, cwd, repo_url, git_branch, model,
+forked_from, event_count, started_at, last_active
+```
+
+`team_id` is always injected by orchestrator. Filters use Turbopuffer filter
+arrays, for example:
+
+```json
+{
+  "query": "deployment debugging",
+  "filters": [
+    "And",
+    [
+      ["repo_url", "Eq", "git@github.com:fleet-ai/theseus.git"],
+      ["tool", "Eq", "codex"],
+      ["last_active", "Gte", "2026-05-01T00:00:00Z"]
+    ]
+  ],
+  "top_k": 25
+}
 ```
 
 ## Design Notes

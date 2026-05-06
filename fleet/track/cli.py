@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -288,17 +290,39 @@ def _print_sessions_json(
     source: str,
     sessions,
     next_cursor: str | None,
+    mode: str | None = None,
 ) -> None:
-    console.print_json(
-        json.dumps(
-            {
-                "query": query,
-                "source": _normalize_source(source),
-                "items": _session_dicts(sessions),
-                "next_cursor": next_cursor,
-            }
-        )
-    )
+    payload = {
+        "query": query,
+        "source": _normalize_source(source),
+        "items": _session_dicts(sessions),
+        "next_cursor": next_cursor,
+    }
+    if mode is not None:
+        payload["mode"] = mode
+    console.print_json(json.dumps(payload))
+
+
+def _read_json_argument(value: str) -> dict:
+    """Read an inline JSON object, @file JSON object, or stdin JSON object."""
+    raw = value
+    if value == "-":
+        raw = sys.stdin.read()
+    elif value.startswith("@"):
+        raw = Path(value[1:]).read_text()
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise typer.BadParameter(f"invalid JSON: {e}") from e
+    if not isinstance(parsed, dict):
+        raise typer.BadParameter("--tpuf must be a JSON object")
+    return parsed
+
+
+def _sessions_from_api_items(items: list[dict]):
+    from .store import _session_from_api
+
+    return [_session_from_api(item) for item in items]
 
 
 def _render_sessions_table(sessions, next_cursor: str | None) -> None:
@@ -346,7 +370,7 @@ def list_sessions(
         None,
         "--query",
         "-q",
-        help="Search remote sessions. With --source remote, forwards the query to the server search index.",
+        help="Substring filter over session metadata (id/tool/cwd/title).",
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON for scripting"),
     source: str = typer.Option(
@@ -396,58 +420,96 @@ def list_sessions(
 
 @app.command(name="search")
 def search_sessions(
-    query: str = typer.Argument(..., help="Search query to send to the session index"),
-    tool: str = typer.Option(
-        None, "--tool", "-t", help="Filter by tool (claude/codex/cursor/opencode)"
-    ),
-    cwd: str = typer.Option(None, "--cwd", help="Filter by working directory"),
-    since: str = typer.Option(
-        None, "--since", help="Only sessions active since (ISO-8601)"
-    ),
-    limit: int = typer.Option(50, "--limit", "-n", help="Max rows per page (1..200)"),
-    cursor: str = typer.Option(
+    query: str | None = typer.Argument(
         None,
-        "--cursor",
-        help="Opaque cursor from a prior search response.",
+        help="Natural-language query to send to Turbopuffer. Omit when using --tpuf.",
+    ),
+    limit: int = typer.Option(
+        50,
+        "--limit",
+        "-n",
+        help="Default top_k for the Turbopuffer request when --tpuf omits top_k.",
+    ),
+    tpuf: str = typer.Option(
+        None,
+        "--tpuf",
+        "--raw-tpuf",
+        help=(
+            "POST a Turbopuffer-shaped JSON search body to orchestrator. "
+            "Pass inline JSON, @file, or - for stdin."
+        ),
     ),
     json_out: bool = typer.Option(
         True,
         "--json/--table",
         help="Emit agent-friendly JSON by default; use --table for a human table.",
     ),
-    source: str = typer.Option(
-        DEFAULT_SESSION_SOURCE,
-        "--source",
-        help=SOURCE_HELP,
-    ),
 ) -> None:
     """Search tracked sessions.
 
-    With the default remote source, the query is forwarded to the orchestrator
-    search endpoint, which uses Turbopuffer. Use `--source local` only after
-    manually building the dev/test local index.
+    Search is Turbopuffer-only. `flt track ls` lists deterministic session
+    metadata from Postgres; `flt track search` asks the search index for ranked
+    results and returns hydrated Fleet session metadata.
+
+    \b
+    Simple query mode:
+
+      flt track search "bugbot local index"
+
+    Structured agent mode:
+
+      flt track search --tpuf '{"query":"bugbot local index","top_k":20}'
+      flt track search --tpuf @search.json
+      flt track search --tpuf -
+
+    Both modes send a JSON object to `POST /v1/track/sessions/search`.
+    Supported fields are `query`, `rank_by`, `filters`, and `top_k`.
+    `query` runs orchestrator-managed hybrid search: BM25 over `search_text`
+    plus ANN over `vector`. `rank_by` and `filters` are forwarded in
+    Turbopuffer shape. The server always injects the caller's team boundary
+    and returns hydrated Fleet session metadata.
+
+    \b
+    Filterable attributes:
+
+      session_id, user_id, device_id, tool, cwd, repo_url, git_branch,
+      model, forked_from, event_count, started_at, last_active
+
+    `team_id` is always injected by orchestrator. Use Turbopuffer filter arrays,
+    for example ["tool","Eq","codex"], ["last_active","Gte","2026-05-01T00:00:00Z"],
+    or ["And",[[...],[...]]].
+
+    \b
+    Example raw filter body:
+
+      {"query":"deployment debugging",
+       "filters":["And",[["repo_url","Eq","git@github.com:fleet-ai/theseus.git"],
+                         ["tool","Eq","codex"]]],
+       "top_k":25}
     """
-    if not query.strip():
-        raise typer.BadParameter("query must not be empty")
+    if tpuf is None:
+        if query is None or not query.strip():
+            raise typer.BadParameter(
+                "query must not be empty unless --tpuf is provided"
+            )
+        body = {"query": query}
+    else:
+        body = _read_json_argument(tpuf)
+        if query is not None and "query" not in body and "rank_by" not in body:
+            body["query"] = query
 
-    store = _resolve_session_store(source)
-    _validate_cursor_for_source(source, cursor)
-
-    sessions, next_cursor = store.page(
-        tool=tool,
-        cwd=cwd,
-        since=since,
-        query=query,
-        limit=limit,
-        cursor=cursor,
-    )
+    body.setdefault("top_k", limit)
+    data = TrackAPIClient().search_sessions_raw(body)
+    sessions = _sessions_from_api_items(data.get("items", []))
+    next_cursor = data.get("next_cursor")
 
     if json_out:
         _print_sessions_json(
-            query=query,
-            source=source,
+            query=body.get("query") if isinstance(body.get("query"), str) else None,
+            source="remote",
             sessions=sessions,
             next_cursor=next_cursor,
+            mode="tpuf",
         )
         return
 

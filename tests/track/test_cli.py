@@ -142,56 +142,190 @@ def test_track_ls_honors_explicit_local_source(monkeypatch):
     assert json.loads(result.stdout)["source"] == "local"
 
 
-def test_track_search_emits_agent_friendly_json_and_passes_cursor(monkeypatch):
+def test_track_search_posts_simple_query_to_raw_remote_search(monkeypatch):
     calls: list[dict] = []
 
-    class FakeStore:
-        def page(self, **kwargs):
-            calls.append(kwargs)
-            return (
-                [
-                    Session(
-                        id="session-2",
-                        tool="claude",
-                        cwd="/theseus",
-                        last_active="2026-05-06T00:00:00Z",
-                        metadata={"title": "Turbopuffer indexing"},
-                    )
+    class FakeAPI:
+        def search_sessions_raw(self, body):
+            calls.append(body)
+            return {
+                "items": [
+                    {
+                        "id": "session-2",
+                        "tool": "claude",
+                        "cwd": "/theseus",
+                        "last_active": "2026-05-06T00:00:00Z",
+                        "metadata": {"title": "Turbopuffer indexing"},
+                    }
                 ],
-                None,
-            )
+                "next_cursor": None,
+            }
 
-    monkeypatch.setattr(cli, "_resolve_session_store", lambda source: FakeStore())
+    monkeypatch.setattr(cli, "TrackAPIClient", FakeAPI)
 
     result = runner.invoke(
         cli.app,
         [
             "search",
             "who worked on turbopuffer indexing",
-            "--tool",
-            "claude",
             "--limit",
             "5",
-            "--cursor",
-            "opaque-tpuf-cursor",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert calls == [{"query": "who worked on turbopuffer indexing", "top_k": 5}]
+    payload = json.loads(result.stdout)
+    assert payload["mode"] == "tpuf"
+    assert payload["source"] == "remote"
+    assert payload["query"] == "who worked on turbopuffer indexing"
+    assert payload["items"][0]["metadata"]["title"] == "Turbopuffer indexing"
+
+
+def test_track_search_requires_query_without_tpuf(monkeypatch):
+    class FakeAPI:
+        def search_sessions_raw(self, body):  # pragma: no cover - must not call
+            raise AssertionError("unexpected API call")
+
+    monkeypatch.setattr(cli, "TrackAPIClient", FakeAPI)
+
+    result = runner.invoke(cli.app, ["search"])
+
+    assert result.exit_code != 0
+    assert "query must not be empty unless --tpuf is provided" in (
+        result.stdout + result.stderr
+    )
+
+
+def test_track_search_tpuf_still_accepts_positional_query(monkeypatch):
+    calls: list[dict] = []
+
+    class FakeAPI:
+        def search_sessions_raw(self, body):
+            calls.append(body)
+            return {
+                "items": [
+                    {
+                        "id": "session-2",
+                        "tool": "claude",
+                        "cwd": "/theseus",
+                        "last_active": "2026-05-06T00:00:00Z",
+                        "metadata": {"title": "Turbopuffer indexing"},
+                    }
+                ],
+                "next_cursor": None,
+            }
+
+    monkeypatch.setattr(cli, "TrackAPIClient", FakeAPI)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "search",
+            "who worked on turbopuffer indexing",
+            "--tpuf",
+            json.dumps({"filters": ["tool", "Eq", "claude"]}),
         ],
     )
 
     assert result.exit_code == 0, result.stdout
     assert calls == [
         {
-            "tool": "claude",
-            "cwd": None,
-            "since": None,
             "query": "who worked on turbopuffer indexing",
-            "limit": 5,
-            "cursor": "opaque-tpuf-cursor",
+            "filters": ["tool", "Eq", "claude"],
+            "top_k": 50,
         }
     ]
+
+
+def test_track_search_tpuf_posts_json_file_to_remote_api(tmp_path, monkeypatch):
+    calls: list[dict] = []
+    spec = {
+        "query": "bugbot local index",
+        "filters": [
+            "And",
+            [
+                ["repo_url", "Eq", "git@github.com:fleet-ai/fleet-sdk.git"],
+                ["tool", "Eq", "codex"],
+            ],
+        ],
+        "top_k": 10,
+    }
+    spec_path = tmp_path / "search.json"
+    spec_path.write_text(json.dumps(spec))
+
+    class FakeAPI:
+        def search_sessions_raw(self, body):
+            calls.append(body)
+            return {
+                "items": [
+                    {
+                        "id": "session-raw",
+                        "tool": "codex",
+                        "cwd": "/repo",
+                        "last_active": "2026-05-06T00:00:00Z",
+                        "metadata": {"title": "Raw search"},
+                    }
+                ],
+                "next_cursor": None,
+            }
+
+    monkeypatch.setattr(cli, "TrackAPIClient", FakeAPI)
+
+    result = runner.invoke(cli.app, ["search", "--tpuf", f"@{spec_path}"])
+
+    assert result.exit_code == 0, result.stdout
+    assert calls == [spec]
     payload = json.loads(result.stdout)
+    assert payload["mode"] == "tpuf"
     assert payload["source"] == "remote"
-    assert payload["query"] == "who worked on turbopuffer indexing"
-    assert payload["items"][0]["metadata"]["title"] == "Turbopuffer indexing"
+    assert payload["query"] == "bugbot local index"
+    assert payload["items"][0]["id"] == "session-raw"
+
+
+def test_track_search_tpuf_applies_limit_as_default_top_k(monkeypatch):
+    calls: list[dict] = []
+
+    class FakeAPI:
+        def search_sessions_raw(self, body):
+            calls.append(body)
+            return {"items": [], "next_cursor": None}
+
+    monkeypatch.setattr(cli, "TrackAPIClient", FakeAPI)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "search",
+            "--tpuf",
+            json.dumps({"rank_by": ["last_active", "desc"]}),
+            "--limit",
+            "25",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert calls == [{"rank_by": ["last_active", "desc"], "top_k": 25}]
+
+
+def test_track_search_help_documents_agent_tpuf_mode():
+    result = runner.invoke(cli.app, ["search", "--help"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "--tpuf" in result.stdout
+    assert "Turbopuffer-shaped JSON" in result.stdout
+    assert "rank_by" in result.stdout
+    assert "filters" in result.stdout
+    assert "Filterable attributes" in result.stdout
+    assert "repo_url" in result.stdout
+    assert "last_active" in result.stdout
+    assert "event_count" in result.stdout
+    assert "team_id" in result.stdout
+    assert "--tool" not in result.stdout
+    assert "--cwd" not in result.stdout
+    assert "--since" not in result.stdout
+    assert "--cursor" not in result.stdout
+    assert "--source" not in result.stdout
 
 
 def test_build_local_index_scans_native_files_into_local_store(tmp_path, monkeypatch):
