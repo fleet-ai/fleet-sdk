@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Optional
 
 import typer
 from rich.console import Console
@@ -854,3 +855,130 @@ def resume(
     except Exception as e:
         console.print(f"[red]Resume failed:[/red] {e}")
         raise typer.Exit(1)
+
+
+# ------------------------------------------------------------------ #
+# install-mcp / uninstall-mcp                                          #
+# ------------------------------------------------------------------ #
+
+
+_MCP_CLIENT_LABEL = {
+    "claude-code": "Claude Code",
+    "claude-desktop": "Claude Desktop",
+    "codex": "Codex",
+}
+
+
+def _mcp_clients_to_target(client: Optional[str], all_clients: bool) -> list[str]:
+    from .mcp_install import CLIENT_CHOICES, detect_installed_clients
+
+    if client and all_clients:
+        console.print("[red]--client and --all are mutually exclusive.[/red]")
+        raise typer.Exit(2)
+    if client:
+        if client not in CLIENT_CHOICES:
+            console.print(
+                f"[red]Unknown client:[/red] {client}. "
+                f"Choose from: {', '.join(CLIENT_CHOICES)}"
+            )
+            raise typer.Exit(2)
+        return [client]
+    if all_clients:
+        return list(CLIENT_CHOICES)
+    return detect_installed_clients()
+
+
+@app.command(name="install-mcp")
+def install_mcp(
+    client: Optional[str] = typer.Option(
+        None, "--client", help="Target one client (claude-code|claude-desktop|codex)."
+    ),
+    all_clients: bool = typer.Option(
+        False, "--all", help="Install for every supported client, even if not detected."
+    ),
+    print_only: bool = typer.Option(
+        False, "--print", help="Print the config snippet that would be written; do not write."
+    ),
+) -> None:
+    """Install the FleetCode MCP server into local agent client configs.
+
+    By default, detects which clients have a config file present and writes
+    to all of them. Uses the `flt login` auth path; no FLEET_API_KEY is set
+    in the spawned environment.
+    """
+    from .mcp_install import (
+        config_path_for,
+        install_many,
+        render_snippet,
+        resolve_command_spec,
+    )
+
+    targets = _mcp_clients_to_target(client, all_clients)
+    if not targets:
+        console.print(
+            "[yellow]No supported MCP client configs detected.[/yellow] "
+            "Open Claude Code, Claude Desktop, or Codex once to create their "
+            "config, then re-run — or use --all / --client."
+        )
+        raise typer.Exit(0)
+
+    try:
+        spec = resolve_command_spec()
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+
+    if print_only:
+        for t in targets:
+            console.print(
+                f"\n[bold]{_MCP_CLIENT_LABEL[t]}[/bold] "
+                f"[dim]({config_path_for(t)})[/dim]"
+            )
+            console.print(render_snippet(t, spec), markup=False, highlight=False)
+        return
+
+    results = install_many(targets, spec=spec)
+    for r in results:
+        label = _MCP_CLIENT_LABEL[r.client]
+        if r.action == "added":
+            console.print(f"[green]✓[/green] {label}: added [dim]({r.path})[/dim]")
+        elif r.action == "updated":
+            console.print(f"[green]✓[/green] {label}: updated [dim]({r.path})[/dim]")
+        elif r.action == "unchanged":
+            console.print(f"[dim]·[/dim] {label}: already up to date")
+        elif r.action == "skipped":
+            console.print(f"[dim]·[/dim] {label}: skipped ({r.detail})")
+    console.print(
+        "\nDone. [bold]Restart[/bold] each app to pick up the new MCP server."
+    )
+
+
+@app.command(name="uninstall-mcp")
+def uninstall_mcp(
+    client: Optional[str] = typer.Option(
+        None, "--client", help="Target one client (claude-code|claude-desktop|codex)."
+    ),
+    all_clients: bool = typer.Option(
+        False, "--all", help="Uninstall from every supported client."
+    ),
+) -> None:
+    """Remove the FleetCode MCP server entry from local agent client configs."""
+    from .mcp_install import uninstall_many
+
+    targets = _mcp_clients_to_target(client, all_clients)
+    if not targets:
+        # Default to all when nothing detected, since the entry might exist in
+        # a config we haven't otherwise touched.
+        from .mcp_install import CLIENT_CHOICES
+
+        targets = list(CLIENT_CHOICES)
+
+    results = uninstall_many(targets)
+    for r in results:
+        label = _MCP_CLIENT_LABEL[r.client]
+        if r.action == "removed":
+            console.print(
+                f"[green]✓[/green] {label}: removed [dim]({r.path})[/dim]"
+            )
+        else:
+            console.print(f"[dim]·[/dim] {label}: skipped ({r.detail})")
