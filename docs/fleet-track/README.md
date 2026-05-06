@@ -69,24 +69,32 @@ flt track gc
 Postgres store. `flt track search` is Turbopuffer-only and emits JSON by default
 for agent workflows.
 
-Simple query mode sends the query to the orchestrator-managed hybrid index:
+Search accepts one JSON object and posts it to the orchestrator-managed hybrid
+index. Pass inline JSON, `@file`, or `-` for stdin:
 
 ```bash
-flt track search "bugbot local index"
+flt track search '{"query":"bugbot local index","top_k":20}'
+flt track search @search.json
+flt track search -
+flt track search --filters
 ```
 
-For structured search, agents can pass a Turbopuffer-shaped JSON body through
-orchestrator:
+The JSON body supports:
 
-```bash
-flt track search --tpuf '{"query":"bugbot local index","top_k":20}'
-flt track search --tpuf @search.json
-flt track search --tpuf -
+```text
+query    string   Orchestrator-managed hybrid search: BM25 over search_text
+                  plus ANN over vector.
+top_k    integer  Maximum ranked results to return. Defaults to 50.
+filters  array    Turbopuffer filter expression, forwarded as-is.
+rank_by  array    Turbopuffer ranking expression, forwarded as-is.
 ```
 
-The raw body supports `query`, `rank_by`, `filters`, and `top_k`, matching
-`POST /v1/track/sessions/search`. Orchestrator injects the team boundary and
-hydrates the ranked results back to Fleet session metadata.
+The command posts the body to `POST /v1/track/sessions/search`. Orchestrator
+injects the team boundary and hydrates the ranked results back to Fleet session
+metadata.
+
+Turbopuffer's query and filter docs are available at
+<https://turbopuffer.com/docs/query#filtering>.
 
 Filterable attributes are:
 
@@ -96,7 +104,10 @@ forked_from, event_count, started_at, last_active
 ```
 
 `team_id` is always injected by orchestrator. Filters use Turbopuffer filter
-arrays, for example:
+arrays. Common operators include `And`, `Or`, `Not`, `Eq`, `NotEq`, `In`,
+`NotIn`, `Lt`, `Lte`, `Gt`, `Gte`, `Contains`, and `ContainsAny`.
+
+Example body:
 
 ```json
 {

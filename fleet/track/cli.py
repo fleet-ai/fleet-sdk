@@ -27,6 +27,99 @@ console = Console()
 
 DEFAULT_SESSION_SOURCE = "remote"
 LOCAL_SESSION_SOURCE = "local"
+DEFAULT_SEARCH_TOP_K = 50
+TURBOPUFFER_QUERY_DOCS_URL = "https://turbopuffer.com/docs/query#filtering"
+SEARCH_FILTER_FIELDS = (
+    {
+        "name": "session_id",
+        "type": "string",
+        "description": "Fleet session id.",
+    },
+    {
+        "name": "user_id",
+        "type": "string",
+        "description": "Fleet user id that owns the session.",
+    },
+    {
+        "name": "device_id",
+        "type": "string",
+        "description": "Tracked local device id.",
+    },
+    {
+        "name": "tool",
+        "type": "string",
+        "description": "AI tool name, for example codex, claude, cursor, or opencode.",
+    },
+    {
+        "name": "cwd",
+        "type": "string",
+        "description": "Working directory captured for the session.",
+    },
+    {
+        "name": "repo_url",
+        "type": "string",
+        "description": "Detected repository remote URL.",
+    },
+    {
+        "name": "git_branch",
+        "type": "string",
+        "description": "Detected git branch.",
+    },
+    {
+        "name": "model",
+        "type": "string",
+        "description": "Model name when captured by the source tool.",
+    },
+    {
+        "name": "forked_from",
+        "type": "string",
+        "description": "Parent Fleet session id when this session was forked.",
+    },
+    {
+        "name": "event_count",
+        "type": "integer",
+        "description": "Number of tracked events in the session.",
+    },
+    {
+        "name": "started_at",
+        "type": "datetime",
+        "description": "Session start timestamp in ISO-8601 format.",
+    },
+    {
+        "name": "last_active",
+        "type": "datetime",
+        "description": "Most recent session activity timestamp in ISO-8601 format.",
+    },
+)
+SEARCH_FILTER_OPERATORS = (
+    "And",
+    "Or",
+    "Not",
+    "Eq",
+    "NotEq",
+    "In",
+    "NotIn",
+    "Contains",
+    "NotContains",
+    "ContainsAny",
+    "NotContainsAny",
+    "Lt",
+    "Lte",
+    "Gt",
+    "Gte",
+    "AnyLt",
+    "AnyLte",
+    "AnyGt",
+    "AnyGte",
+    "Glob",
+    "NotGlob",
+    "IGlob",
+    "NotIGlob",
+    "Regex",
+    "ContainsAllTokens",
+    "ContainsTokenSequence",
+    "ContainsAnyToken",
+)
 SOURCE_HELP = (
     "Where to read sessions from: remote (default, orchestrator/Turbopuffer) "
     "or local (manually built Fleet local index)."
@@ -315,7 +408,7 @@ def _read_json_argument(value: str) -> dict:
     except json.JSONDecodeError as e:
         raise typer.BadParameter(f"invalid JSON: {e}") from e
     if not isinstance(parsed, dict):
-        raise typer.BadParameter("--tpuf must be a JSON object")
+        raise typer.BadParameter("search body must be a JSON object")
     return parsed
 
 
@@ -323,6 +416,45 @@ def _sessions_from_api_items(items: list[dict]):
     from .store import _session_from_api
 
     return [_session_from_api(item) for item in items]
+
+
+def _search_filter_catalog() -> dict:
+    return {
+        "docs_url": TURBOPUFFER_QUERY_DOCS_URL,
+        "filterable_attributes": list(SEARCH_FILTER_FIELDS),
+        "operators": list(SEARCH_FILTER_OPERATORS),
+        "examples": [
+            ["tool", "Eq", "codex"],
+            ["last_active", "Gte", "2026-05-01T00:00:00Z"],
+            [
+                "And",
+                [
+                    ["repo_url", "Eq", "git@github.com:fleet-ai/theseus.git"],
+                    ["tool", "Eq", "codex"],
+                ],
+            ],
+        ],
+    }
+
+
+def _print_search_filter_catalog(json_out: bool) -> None:
+    catalog = _search_filter_catalog()
+    if json_out:
+        console.print_json(json.dumps(catalog))
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Field")
+    table.add_column("Type")
+    table.add_column("Description")
+    for field in catalog["filterable_attributes"]:
+        table.add_row(field["name"], field["type"], field["description"])
+    console.print(table)
+    console.print()
+    console.print("[bold]Operators[/bold]")
+    console.print(", ".join(catalog["operators"]))
+    console.print()
+    console.print(f"[bold]Turbopuffer docs[/bold] {catalog['docs_url']}")
 
 
 def _render_sessions_table(sessions, next_cursor: str | None) -> None:
@@ -420,85 +552,89 @@ def list_sessions(
 
 @app.command(name="search")
 def search_sessions(
-    query: str | None = typer.Argument(
+    body_arg: str | None = typer.Argument(
         None,
-        help="Natural-language query to send to Turbopuffer. Omit when using --tpuf.",
-    ),
-    limit: int = typer.Option(
-        50,
-        "--limit",
-        "-n",
-        help="Default top_k for the Turbopuffer request when --tpuf omits top_k.",
-    ),
-    tpuf: str = typer.Option(
-        None,
-        "--tpuf",
-        "--raw-tpuf",
-        help=(
-            "POST a Turbopuffer-shaped JSON search body to orchestrator. "
-            "Pass inline JSON, @file, or - for stdin."
-        ),
+        metavar="[BODY]",
+        help="JSON search body. Pass inline JSON, @file, or - for stdin.",
     ),
     json_out: bool = typer.Option(
         True,
         "--json/--table",
         help="Emit agent-friendly JSON by default; use --table for a human table.",
     ),
+    show_filters: bool = typer.Option(
+        False,
+        "--filters",
+        "--list-filters",
+        help="List filterable attributes/operators and exit.",
+    ),
 ) -> None:
     """Search tracked sessions.
 
-    Search is Turbopuffer-only. `flt track ls` lists deterministic session
-    metadata from Postgres; `flt track search` asks the search index for ranked
-    results and returns hydrated Fleet session metadata.
+    Search is Turbopuffer-only. `flt track ls` lists deterministic metadata from
+    Postgres; `flt track search` posts a JSON object to the search index for
+    ranked results and returns hydrated Fleet session metadata.
+
+    Input:
 
     \b
-    Simple query mode:
+      flt track search '{"query":"bugbot local index","top_k":20}'
+      flt track search @search.json
+      flt track search -
+      flt track search --filters
 
-      flt track search "bugbot local index"
-
-    Structured agent mode:
-
-      flt track search --tpuf '{"query":"bugbot local index","top_k":20}'
-      flt track search --tpuf @search.json
-      flt track search --tpuf -
-
-    Both modes send a JSON object to `POST /v1/track/sessions/search`.
-    Supported fields are `query`, `rank_by`, `filters`, and `top_k`.
-    `query` runs orchestrator-managed hybrid search: BM25 over `search_text`
-    plus ANN over `vector`. `rank_by` and `filters` are forwarded in
-    Turbopuffer shape. The server always injects the caller's team boundary
-    and returns hydrated Fleet session metadata.
+    JSON fields:
 
     \b
+      query    string   Orchestrator-managed hybrid search: BM25 over
+                        `search_text` plus ANN over `vector`.
+      top_k    integer  Maximum ranked results to return. Defaults to 50.
+      filters  array    Turbopuffer filter expression, forwarded as-is.
+      rank_by  array    Turbopuffer ranking expression, forwarded as-is.
+
+    The command posts this body to `POST /v1/track/sessions/search`. The server
+    always injects the caller's team boundary and returns hydrated Fleet session
+    metadata.
+
+    Turbopuffer query/filter docs:
+
+    \b
+      https://turbopuffer.com/docs/query#filtering
+
     Filterable attributes:
 
+    \b
       session_id, user_id, device_id, tool, cwd, repo_url, git_branch,
       model, forked_from, event_count, started_at, last_active
 
-    `team_id` is always injected by orchestrator. Use Turbopuffer filter arrays,
-    for example ["tool","Eq","codex"], ["last_active","Gte","2026-05-01T00:00:00Z"],
-    or ["And",[[...],[...]]].
+    `team_id` is always injected by orchestrator. Use Turbopuffer filter arrays:
 
     \b
-    Example raw filter body:
+      ["tool","Eq","codex"]
+      ["last_active","Gte","2026-05-01T00:00:00Z"]
+      ["And",[[...],[...]]]
 
+    Common filter operators: And, Or, Not, Eq, NotEq, In, NotIn, Lt, Lte,
+    Gt, Gte, Contains, ContainsAny.
+
+    Example body:
+
+    \b
       {"query":"deployment debugging",
        "filters":["And",[["repo_url","Eq","git@github.com:fleet-ai/theseus.git"],
                          ["tool","Eq","codex"]]],
        "top_k":25}
     """
-    if tpuf is None:
-        if query is None or not query.strip():
-            raise typer.BadParameter(
-                "query must not be empty unless --tpuf is provided"
-            )
-        body = {"query": query}
-    else:
-        body = _read_json_argument(tpuf)
-        if query is not None and "query" not in body and "rank_by" not in body:
-            body["query"] = query
+    if show_filters:
+        _print_search_filter_catalog(json_out)
+        return
 
-    body.setdefault("top_k", limit)
+    if body_arg is None:
+        raise typer.BadParameter("BODY is required unless --filters is provided")
+
+    body = _read_json_argument(body_arg)
+
+    body.setdefault("top_k", DEFAULT_SEARCH_TOP_K)
     data = TrackAPIClient().search_sessions_raw(body)
     sessions = _sessions_from_api_items(data.get("items", []))
     next_cursor = data.get("next_cursor")
