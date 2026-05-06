@@ -32,14 +32,26 @@ def _seed_native_claude(home: Path, *, sid: str, encoded_cwd: str = "-tmp-x") ->
     f = base / f"{sid}.jsonl"
     rows = [
         # First row carries claude metadata so the parser synthesizes SessionStart.
-        {"type": "user", "uuid": "u1", "sessionId": sid, "cwd": "/tmp/x",
-         "gitBranch": "main", "version": "0.5",
-         "timestamp": "2026-04-30T00:00:00Z",
-         "message": {"role": "user", "content": "hi"}},
-        {"type": "assistant", "uuid": "a1", "parentUuid": "u1",
-         "timestamp": "2026-04-30T00:00:01Z",
-         "message": {"role": "assistant",
-                     "content": [{"type": "text", "text": "yo"}]}},
+        {
+            "type": "user",
+            "uuid": "u1",
+            "sessionId": sid,
+            "cwd": "/tmp/x",
+            "gitBranch": "main",
+            "version": "0.5",
+            "timestamp": "2026-04-30T00:00:00Z",
+            "message": {"role": "user", "content": "hi"},
+        },
+        {
+            "type": "assistant",
+            "uuid": "a1",
+            "parentUuid": "u1",
+            "timestamp": "2026-04-30T00:00:01Z",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "yo"}],
+            },
+        },
     ]
     f.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     return f
@@ -50,12 +62,25 @@ def _seed_native_codex(home: Path, *, sid: str, cwd: str = "/tmp/y") -> Path:
     base.mkdir(parents=True, exist_ok=True)
     f = base / f"rollout-2026-05-01T00-00-00-{sid}.jsonl"
     rows = [
-        {"timestamp": "2026-05-01T00:00:00Z", "type": "session_meta",
-         "payload": {"id": sid, "cwd": cwd, "cli_version": "0.5",
-                     "base_instructions": {"text": "you are codex"}}},
-        {"timestamp": "2026-05-01T00:00:01Z", "type": "response_item",
-         "payload": {"type": "message", "role": "user",
-                     "content": [{"type": "input_text", "text": "first"}]}},
+        {
+            "timestamp": "2026-05-01T00:00:00Z",
+            "type": "session_meta",
+            "payload": {
+                "id": sid,
+                "cwd": cwd,
+                "cli_version": "0.5",
+                "base_instructions": {"text": "you are codex"},
+            },
+        },
+        {
+            "timestamp": "2026-05-01T00:00:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "first"}],
+            },
+        },
     ]
     f.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     return f
@@ -104,11 +129,17 @@ def test_native_store_skips_fleet_checkouts(tmp_path: Path):
     sid = "11111111-1111-1111-1111-111111111111"
     f = base / f"{sid}.jsonl"
     rows = [
-        {"_fleet_meta": {"forked_from": "src", "fork_point": 0,
-                         "ephemeral_id": sid, "target_tool": "claude"},
-         "type": "system", "content": "fleet checkout"},
-        {"type": "user", "uuid": "u1",
-         "message": {"role": "user", "content": "hi"}},
+        {
+            "_fleet_meta": {
+                "forked_from": "src",
+                "fork_point": 0,
+                "ephemeral_id": sid,
+                "target_tool": "claude",
+            },
+            "type": "system",
+            "content": "fleet checkout",
+        },
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content": "hi"}},
     ]
     f.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     store = NativeFilesSessionStore(home=tmp_path)
@@ -121,8 +152,12 @@ def test_native_store_skips_non_uuid_filenames(tmp_path: Path):
     base = tmp_path / ".claude" / "projects" / "-tmp-x"
     base.mkdir(parents=True)
     f = base / "agent-not-a-uuid.jsonl"
-    f.write_text(json.dumps({"type": "user", "uuid": "u1",
-                             "message": {"role": "user", "content": "hi"}}) + "\n")
+    f.write_text(
+        json.dumps(
+            {"type": "user", "uuid": "u1", "message": {"role": "user", "content": "hi"}}
+        )
+        + "\n"
+    )
     store = NativeFilesSessionStore(home=tmp_path)
     assert store.list() == []
 
@@ -133,6 +168,30 @@ def test_native_store_get_by_prefix(tmp_path: Path):
     s = store.get("abcdef01")
     assert s is not None
     assert s.id == "abcdef01-2345-6789-abcd-ef0123456789"
+
+
+def test_native_store_get_and_events_scan_past_default_first_page(tmp_path: Path):
+    import os
+    import time
+
+    paths: list[Path] = []
+    for i in range(60):
+        sid = f"00000000-0000-0000-0000-{i:012d}"
+        paths.append(_seed_native_claude(tmp_path, sid=sid, encoded_cwd=f"-tmp-{i}"))
+
+    now = time.time()
+    for i, path in enumerate(paths):
+        timestamp = now - i
+        os.utime(path, (timestamp, timestamp))
+
+    target = "00000000-0000-0000-0000-000000000059"
+    store = NativeFilesSessionStore(home=tmp_path)
+
+    assert target not in {session.id for session in store.list()}
+    session = store.get(target)
+    assert session is not None
+    assert session.id == target
+    assert any(event.type == "user_message" for event in store.events(target))
 
 
 def test_native_store_get_missing_returns_none(tmp_path: Path):
@@ -165,12 +224,16 @@ def test_native_store_is_read_only(tmp_path: Path):
 def test_native_store_list_recency_sorted(tmp_path: Path):
     """Most-recent-first sort is what the picker shows."""
     import time
-    a = _seed_native_claude(tmp_path, sid="11111111-1111-1111-1111-111111111111",
-                            encoded_cwd="-tmp-a")
-    b = _seed_native_claude(tmp_path, sid="22222222-2222-2222-2222-222222222222",
-                            encoded_cwd="-tmp-b")
+
+    a = _seed_native_claude(
+        tmp_path, sid="11111111-1111-1111-1111-111111111111", encoded_cwd="-tmp-a"
+    )
+    b = _seed_native_claude(
+        tmp_path, sid="22222222-2222-2222-2222-222222222222", encoded_cwd="-tmp-b"
+    )
     # Bump b's mtime forward.
     import os
+
     fresh = time.time()
     os.utime(b, (fresh, fresh))
     os.utime(a, (fresh - 3600, fresh - 3600))
@@ -196,8 +259,7 @@ def test_chained_lists_union_deduped_by_id(tmp_path: Path):
 
     # Native: two sessions
     _seed_native_claude(tmp_path, sid=sid_overlap)
-    _seed_native_claude(tmp_path, sid=sid_native_only,
-                        encoded_cwd="-tmp-other")
+    _seed_native_claude(tmp_path, sid=sid_native_only, encoded_cwd="-tmp-other")
     # Local: one of those (overlapping id; first-store-wins).
     # The store recomputes event_count from the events list, so just
     # use cwd as the discriminator.
@@ -275,8 +337,9 @@ def test_chained_fork_chain_resolves_across_stores(tmp_path: Path):
     _seed_native_claude(tmp_path, sid=parent_id)
     # Child stored in local, fork-pointing at parent in native.
     local.create(
-        Session(id="child-of-native", tool="codex",
-                forked_from=parent_id, fork_point=2),
+        Session(
+            id="child-of-native", tool="codex", forked_from=parent_id, fork_point=2
+        ),
         [UserMessage(source="codex", text="child-1")],
     )
     chained = ChainedSessionStore(local, NativeFilesSessionStore(home=tmp_path))
@@ -304,8 +367,10 @@ def test_chained_fork_chain_in_same_local_store_does_not_duplicate(tmp_path: Pat
     )
     local.create(
         Session(id="child", tool="claude", forked_from="root", fork_point=2),
-        [UserMessage(source="claude", text="c0"),
-         UserMessage(source="claude", text="c1")],
+        [
+            UserMessage(source="claude", text="c0"),
+            UserMessage(source="claude", text="c1"),
+        ],
     )
     chained = ChainedSessionStore(local)
 

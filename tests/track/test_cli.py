@@ -237,3 +237,49 @@ def test_build_local_index_scans_native_files_into_local_store(tmp_path, monkeyp
     assert session is not None
     assert session.tool == "claude"
     assert list(local.own_events(sid))
+
+
+def test_build_local_index_indexes_native_sessions_past_first_page(
+    tmp_path, monkeypatch
+):
+    import os
+    import time
+
+    paths = TrackPaths.under(tmp_path)
+    monkeypatch.setattr(cli.TrackPaths, "default", lambda: paths)
+
+    native_dir = tmp_path / ".claude" / "projects" / "-tmp-project"
+    native_dir.mkdir(parents=True)
+    native_files = []
+    for i in range(60):
+        sid = f"00000000-0000-0000-0000-{i:012d}"
+        native_file = native_dir / f"{sid}.jsonl"
+        rows = [
+            {
+                "type": "user",
+                "uuid": f"u{i}",
+                "sessionId": sid,
+                "cwd": "/tmp/project",
+                "timestamp": "2026-05-01T00:00:00Z",
+                "message": {"role": "user", "content": f"hello {i}"},
+            }
+        ]
+        native_file.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+        native_files.append(native_file)
+
+    now = time.time()
+    for i, native_file in enumerate(native_files):
+        timestamp = now - i
+        os.utime(native_file, (timestamp, timestamp))
+
+    result = runner.invoke(cli.app, ["build-local-index", "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["indexed"] == 60
+    assert payload["skipped"] == 0
+
+    target = "00000000-0000-0000-0000-000000000059"
+    local = LocalSessionStore(paths)
+    assert local.get(target) is not None
+    assert list(local.own_events(target))
