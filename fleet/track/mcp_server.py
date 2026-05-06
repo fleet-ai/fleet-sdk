@@ -1,0 +1,251 @@
+"""FleetCode MCP server.
+
+This module intentionally keeps the `mcp` import inside `create_mcp()` so the
+base SDK and normal track tests do not require MCP dependencies. The connector
+runtime should install the `fleetcode` extra and run `fleetcode-mcp` with either
+`FLEET_API_KEY` or stored `flt login` credentials available to the process.
+"""
+
+from __future__ import annotations
+
+import sys
+from collections.abc import Mapping
+from typing import Any, Optional
+
+from .api import TrackAPIClient
+from .download import ensure_local_session
+from .paths import TrackPaths
+from .query_schema import (
+    AGGREGATE_METRICS,
+    SEARCH_FILTER_FIELDS,
+    SEARCH_FILTER_OPERATORS,
+    SEARCH_LOGICAL_OPERATORS,
+    SEARCH_TIME_FIELDS,
+)
+
+FILTERABLE_ATTRIBUTES = [field["name"] for field in SEARCH_FILTER_FIELDS]
+FILTER_OPERATORS = list(SEARCH_FILTER_OPERATORS)
+LOGICAL_OPERATORS = list(SEARCH_LOGICAL_OPERATORS)
+SEARCH_MODES = ["hybrid", "keyword", "semantic", "recent"]
+TIME_FIELDS = list(SEARCH_TIME_FIELDS)
+
+
+def fleetcode_query_guide() -> dict[str, Any]:
+    """Return the FleetCode query contract for agents."""
+    return {
+        "tools": {
+            "fleetcode_search_sessions": {
+                "purpose": "Find relevant sessions. Returns hydrated session metadata.",
+                "backend": "Turbopuffer via orchestrator",
+                "body_fields": {
+                    "query": "Natural-language search text.",
+                    "mode": SEARCH_MODES,
+                    "limit": "Maximum result count. Defaults to 50.",
+                    "filters": "Mongo-style filters over filterable attributes.",
+                    "time": "Shared time filter, e.g. {'field':'last_active','since':'7d'}.",
+                },
+            },
+            "fleetcode_aggregate_sessions": {
+                "purpose": "Summarize sessions by metadata fields. Returns grouped metrics, not sessions.",
+                "backend": "Postgres via orchestrator",
+                "body_fields": {
+                    "group_by": FILTERABLE_ATTRIBUTES,
+                    "metrics": AGGREGATE_METRICS,
+                    "filters": "Same Mongo-style filters as search.",
+                    "time": "Same time filter as search.",
+                    "time_bucket": "Optional bucket: {'field':'last_active','interval':'day'}.",
+                    "order_by": "Metric/key ordering, e.g. [{'field':'count','direction':'desc'}].",
+                    "having": "Metric filters after grouping, e.g. {'count': {'$gte': 5}}.",
+                    "limit": "Maximum number of groups. Defaults server-side.",
+                },
+            },
+            "fleetcode_download_session": {
+                "purpose": "Download one session to local cache for exact intra-session analysis.",
+                "next_step": "Use local tools such as rg, jq, sed, or Python against the returned JSONL path.",
+            },
+        },
+        "filters": {
+            "attributes": FILTERABLE_ATTRIBUTES,
+            "operators": FILTER_OPERATORS,
+            "logical_operators": LOGICAL_OPERATORS,
+            "examples": [
+                {"tool": "codex"},
+                {"event_count": {"$gte": 1000}},
+                {"repo_url": "github.com/fleet-ai/theseus", "tool": "codex"},
+                {
+                    "$or": [
+                        {"repo_url": {"$contains": "theseus"}},
+                        {"repo_url": {"$contains": "fleet-sdk"}},
+                    ]
+                },
+            ],
+        },
+        "time": {
+            "fields": TIME_FIELDS,
+            "operators": ["since", "gte", "gt", "lte", "lt"],
+            "examples": [
+                {"field": "last_active", "since": "7d"},
+                {"field": "started_at", "gte": "2026-05-01T00:00:00Z"},
+            ],
+        },
+        "examples": {
+            "search": {
+                "query": "deployment debugging",
+                "mode": "hybrid",
+                "filters": {"repo_url": {"$contains": "theseus"}},
+                "time": {"field": "last_active", "since": "30d"},
+                "limit": 25,
+            },
+            "aggregate": {
+                "group_by": ["repo_url", "tool"],
+                "metrics": ["count", "sum_event_count"],
+                "time": {"field": "last_active", "since": "30d"},
+                "time_bucket": {"field": "last_active", "interval": "day"},
+                "having": {"count": {"$gte": 5}},
+                "order_by": [{"field": "count", "direction": "desc"}],
+            },
+        },
+    }
+
+
+def _body_dict(body: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(body, Mapping):
+        raise TypeError("body must be a JSON object")
+    return dict(body)
+
+
+def _with_api(
+    api: Optional[TrackAPIClient],
+    fn,
+) -> Any:
+    if api is not None:
+        return fn(api)
+    with TrackAPIClient() as client:
+        return fn(client)
+
+
+def fleetcode_search_sessions(
+    body: Mapping[str, Any],
+    *,
+    api: Optional[TrackAPIClient] = None,
+) -> dict[str, Any]:
+    """Run structured FleetCode session search."""
+    payload = _body_dict(body)
+    if "limit" not in payload and "top_k" not in payload:
+        payload["limit"] = 50
+    return _with_api(api, lambda client: client.search_sessions(payload))
+
+
+def fleetcode_aggregate_sessions(
+    body: Mapping[str, Any],
+    *,
+    api: Optional[TrackAPIClient] = None,
+) -> dict[str, Any]:
+    """Run structured FleetCode aggregate session query."""
+    payload = _body_dict(body)
+    return _with_api(api, lambda client: client.aggregate_sessions(payload))
+
+
+def fleetcode_download_session(
+    session_id: str,
+    *,
+    force: bool = False,
+    api: Optional[TrackAPIClient] = None,
+    paths: Optional[TrackPaths] = None,
+) -> dict[str, Any]:
+    """Download a session to local cache for exact local analysis."""
+    cached = _with_api(
+        api,
+        lambda client: ensure_local_session(
+            session_id,
+            api=client,
+            paths=paths,
+            force=force,
+        ),
+    )
+    payload = cached.to_dict()
+    path = payload["path"]
+    payload["local_analysis"] = {
+        "description": "Use local tools against this canonical JSONL file.",
+        "examples": {
+            "grep": f"rg '<pattern>' {path}",
+            "json_messages": f"jq 'select(.type==\"message\")' {path}",
+        },
+    }
+    return payload
+
+
+def _mcp_install_error_message() -> str:
+    if sys.version_info < (3, 10):
+        return (
+            "FleetCode MCP requires Python 3.10+ and the MCP extra. "
+            "Run with Python 3.10+ and install with: "
+            "pip install 'fleet-python[fleetcode]'"
+        )
+    return (
+        "FleetCode MCP requires the MCP extra. "
+        "Install with: pip install 'fleet-python[fleetcode]'"
+    )
+
+
+def create_mcp():
+    try:
+        from mcp.server.fastmcp import FastMCP
+    except ImportError as exc:
+        print(_mcp_install_error_message(), file=sys.stderr)
+        raise SystemExit(1) from exc
+
+    mcp = FastMCP("fleetcode")
+    search_impl = globals()["fleetcode_search_sessions"]
+    aggregate_impl = globals()["fleetcode_aggregate_sessions"]
+    download_impl = globals()["fleetcode_download_session"]
+
+    @mcp.tool()
+    def fleetcode_query_help() -> dict[str, Any]:
+        """Return FleetCode search, aggregate, filter, and download guidance."""
+        return fleetcode_query_guide()
+
+    @mcp.tool()
+    def fleetcode_search_sessions(body: dict[str, Any]) -> dict[str, Any]:
+        """Find relevant sessions using structured FleetCode search.
+
+        Body fields: query, mode, limit, filters, and time. Modes are hybrid,
+        keyword, semantic, and recent. Filters use Mongo-style `$and`, `$or`,
+        `$not`, field operators such as `$in` and `$gte`, and the documented
+        session metadata fields.
+        """
+        return search_impl(body)
+
+    @mcp.tool()
+    def fleetcode_aggregate_sessions(body: dict[str, Any]) -> dict[str, Any]:
+        """Aggregate tracked session metadata.
+
+        Body fields: group_by, metrics, filters, time, time_bucket, order_by,
+        having, and limit. Metrics include counts, event_count summaries, and
+        distinct user/device/repo/model counts. No raw SQL is accepted.
+        """
+        return aggregate_impl(body)
+
+    @mcp.tool()
+    def fleetcode_download_session(
+        session_id: str,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Download one session to local cache for exact analysis.
+
+        Returns a canonical JSONL path. After download, use local tools such as
+        rg, jq, sed, or Python against the returned path for intra-session grep
+        or transcript analysis.
+        """
+        return download_impl(session_id, force=force)
+
+    return mcp
+
+
+def main() -> None:
+    """Run the FleetCode MCP server for connector hosts."""
+    create_mcp().run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

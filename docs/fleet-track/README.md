@@ -47,11 +47,13 @@ Cursor transcript syncing is intentionally disabled for now. `CursorSource`
 still exists for future parser work, but Cursor files are not included in the
 default daemon scan until the SDK can extract stable metadata and replay events.
 
-Authentication prefers `FLEET_API_KEY` when set and otherwise uses stored
-`flt login` browser credentials. Track requires credentials that resolve to a
-concrete Fleet user/profile so orchestrator can isolate uploaded sessions by
-`team_id`, `user_id`, and `device_id`. The orchestrator remains the control
-plane; session bytes go directly to S3 through presigned URLs.
+Authentication prefers stored `flt login` browser credentials and falls back
+to `FLEET_API_KEY` for non-interactive hosts. The API-key fallback will be
+removed in a future release; new deployments should use `flt login`. Track
+requires credentials that resolve to a concrete Fleet user/profile so
+orchestrator can isolate uploaded sessions by `team_id`, `user_id`, and
+`device_id`. The orchestrator remains the control plane; session bytes go
+directly to S3 through presigned URLs.
 
 For local use:
 
@@ -198,6 +200,49 @@ Download behavior:
   locally.
 - Repeated downloads are cache hits unless metadata such as `last_active`,
   `event_count`, `content_codec`, or byte sizes changes.
+
+### FleetCode MCP Connector
+
+The SDK ships FleetCode, a small stdio MCP server for connector hosts that have
+the Fleet SDK installed. It exposes the same three agent-facing operations as
+the CLI:
+
+- `fleetcode_search_sessions` for structured session search.
+- `fleetcode_aggregate_sessions` for grouped metadata metrics.
+- `fleetcode_download_session` for local cached JSONL downloads.
+
+It also exposes `fleetcode_query_help`, which returns filterable fields, operators,
+metrics, and examples so agents can construct valid queries.
+
+The MCP server requires Python 3.10+. If the connector machine already installs
+the SDK as `fleet-python[cli]`, the MCP dependency is included. Otherwise,
+install the smaller FleetCode extra in the environment that runs the connector:
+
+```bash
+pip install 'fleet-python[fleetcode]'
+```
+
+Then configure the connector to run:
+
+```json
+{
+  "command": "fleetcode-mcp",
+  "env": {
+    "FLEET_TRACK_BASE_URL": "https://us-west-1.fleetai.com"
+  }
+}
+```
+
+Authentication is the same as `flt track`: the MCP process prefers stored
+`flt login` credentials from the same OS user and falls back to
+`FLEET_API_KEY` for headless hosts. For a connector running under a different
+user or on a different machine, either run `flt login` in that connector
+environment or — until the API-key flow is removed — pass `FLEET_API_KEY` in
+`env`.
+
+`FLEET_TRACK_BASE_URL` is optional; the normal Fleet default is used when it is
+omitted. The MCP process keeps orchestrator as the auth boundary and downloads
+session bytes directly to the same local cache as `flt track download`.
 
 ### Compression
 
