@@ -23,7 +23,7 @@ import os
 import platform
 import socket
 from dataclasses import asdict, is_dataclass
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, Tuple, Union
 
 import httpx
 
@@ -35,8 +35,8 @@ DEFAULT_TIMEOUT = 30.0
 SERVER_UPLOAD_URL_BATCH_CAP = 100  # /v1/track/upload-urls returns 400 above this.
 
 
-# API key — None when unauthenticated.
-AuthProvider = Callable[[], Optional[str]]
+AuthInfo = Union[str, Tuple[str, str]]
+AuthProvider = Callable[[], Optional[AuthInfo]]
 
 
 class TrackAPIError(Exception):
@@ -52,9 +52,14 @@ class TrackAPIError(Exception):
         self.detail = detail
 
 
-def _default_auth_provider() -> Optional[str]:
-    """Production auth: read from FLEET_API_KEY."""
-    return os.getenv("FLEET_API_KEY")
+def _default_auth_provider() -> Optional[AuthInfo]:
+    """Production auth: prefer FLEET_API_KEY, then stored `flt login` creds."""
+    if api_key := os.getenv("FLEET_API_KEY"):
+        return api_key
+
+    from ..auth import get_valid_token
+
+    return get_valid_token()
 
 
 def _default_base_url() -> str:
@@ -240,12 +245,19 @@ class TrackAPIClient:
     # ------------------------------------------------------------------ #
 
     def _headers(self, device_id: Optional[str] = None) -> dict[str, str]:
-        api_key = self._auth()
-        if not api_key:
-            raise TrackAPIError("Not authenticated — set FLEET_API_KEY")
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-        }
+        auth_info = self._auth()
+        if not auth_info:
+            raise TrackAPIError(
+                "Not authenticated — run `flt login` or set FLEET_API_KEY"
+            )
+        if isinstance(auth_info, str):
+            headers = {"Authorization": f"Bearer {auth_info}"}
+        else:
+            access_token, team_id = auth_info
+            headers = {
+                "X-JWT-Token": access_token,
+                "X-Team-ID": team_id,
+            }
         if device_id:
             headers["X-Device-ID"] = device_id
         return headers

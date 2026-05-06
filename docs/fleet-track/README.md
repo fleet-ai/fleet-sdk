@@ -45,10 +45,25 @@ Cursor transcript syncing is intentionally disabled for now. `CursorSource`
 still exists for future parser work, but Cursor files are not included in the
 default daemon scan until the SDK can extract stable metadata and replay events.
 
-Authentication uses `FLEET_API_KEY`. Track requires an API key that resolves to
-a concrete Fleet profile so orchestrator can isolate uploaded sessions by
+Authentication prefers `FLEET_API_KEY` when set and otherwise uses stored
+`flt login` browser credentials. Track requires credentials that resolve to a
+concrete Fleet user/profile so orchestrator can isolate uploaded sessions by
 `team_id`, `user_id`, and `device_id`. The orchestrator remains the control
 plane; session bytes go directly to S3 through presigned URLs.
+
+For local use:
+
+```bash
+flt login
+flt track enable
+```
+
+For non-interactive use:
+
+```bash
+export FLEET_API_KEY="sk_your_key_here"
+flt track enable
+```
 
 ## Commands
 
