@@ -226,6 +226,41 @@ def test_upload_done_accepts_cursor_paths(tmp_path: Path):
     cache.close()
 
 
+def test_upload_done_drops_blocked_path_before_manifest_or_metadata(tmp_path: Path):
+    paths = TrackPaths.under(tmp_path)
+    paths.ensure_track_dir()
+    paths.config_file.write_text('{"blocked_session_ids":["blocked-session"]}\n')
+    queue = UploadQueue(paths)
+    cache = HashCache(paths)
+    tree = MerkleTree(cache, file_iter=[])
+    daemon = Daemon(paths, queue=queue, cache=cache, tree=tree)
+
+    rel_path = ".claude/projects/x/blocked-session.jsonl"
+    queue.enqueue(rel_path, "blocked-digest")
+    daemon._confirmed_map[rel_path] = "old-digest"
+    metadata_calls: list[tuple[str, str]] = []
+
+    def record_metadata(
+        path: str,
+        digest: str,
+        *,
+        upload_payload: UploadPayload | None = None,
+    ) -> None:
+        metadata_calls.append((path, digest))
+
+    daemon._upsert_session_metadata = record_metadata  # type: ignore[method-assign]
+
+    daemon._on_upload_done(rel_path, "blocked-digest")
+
+    assert queue.stats() == {}
+    assert rel_path not in daemon._confirmed_map
+    assert daemon._manifest_dirty is True
+    assert metadata_calls == []
+
+    queue.close()
+    cache.close()
+
+
 def test_upload_done_uses_callback_digest_instead_of_stale_cache(tmp_path: Path):
     paths = TrackPaths.under(tmp_path)
     paths.ensure_track_dir()

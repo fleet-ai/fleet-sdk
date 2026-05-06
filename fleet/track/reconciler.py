@@ -12,6 +12,7 @@ import logging
 from dataclasses import dataclass
 
 from .api import TrackAPIClient
+from .blocklist import TrackBlocklist
 from .merkle import HashCache, MerkleTree
 from .queue import UploadQueue
 
@@ -53,8 +54,15 @@ class Reconciler:
         """
         remote_map_raw = self._api.get_manifest(device_id)
         local_map_raw, _local_root_raw = self._tree.build()
-        local_map, pruned_local = _prune_unsupported_manifest_paths(local_map_raw)
-        remote_map, pruned_remote = _prune_unsupported_manifest_paths(remote_map_raw)
+        blocklist = TrackBlocklist.from_paths(self._cache._paths)
+        local_map, pruned_local = _prune_unsupported_manifest_paths(
+            local_map_raw,
+            blocklist=blocklist,
+        )
+        remote_map, pruned_remote = _prune_unsupported_manifest_paths(
+            remote_map_raw,
+            blocklist=blocklist,
+        )
         pruned_paths = tuple(sorted(set(pruned_local) | set(pruned_remote)))
         local_root = MerkleTree.compute_root(local_map)
         remote_root = MerkleTree.compute_root(remote_map)
@@ -94,16 +102,20 @@ class Reconciler:
 
 def _prune_unsupported_manifest_paths(
     file_map: dict[str, str],
+    *,
+    blocklist: TrackBlocklist | None = None,
 ) -> tuple[dict[str, str], tuple[str, ...]]:
-    """Drop legacy paths that are no longer part of default remote sync.
+    """Drop paths that are no longer part of remote sync.
 
-    This hook is intentionally empty today; keep it so future source removals
-    can prune stale manifest entries without changing reconcile flow.
+    Includes locally blocked paths so they are neither uploaded nor kept in the
+    advertised manifest.
     """
     kept: dict[str, str] = {}
     pruned: list[str] = []
     for path, digest in file_map.items():
-        if _is_unsupported_manifest_path(path):
+        if _is_unsupported_manifest_path(path) or (
+            blocklist is not None and blocklist.is_blocked_path(path)
+        ):
             pruned.append(path)
         else:
             kept[path] = digest
