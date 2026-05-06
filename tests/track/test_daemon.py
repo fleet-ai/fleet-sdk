@@ -133,6 +133,7 @@ def test_run_once_rewrites_manifest_without_legacy_cursor_paths(tmp_path: Path):
     tree = MerkleTree(cache, file_iter=[session_file])
     local_map, _ = tree.build()
     cursor_rel = ".cursor/projects/p1/agent-transcripts/t1/session.jsonl"
+    queue.enqueue(cursor_rel, "legacy-cursor-digest")
     remote_files = {**local_map, cursor_rel: "legacy-cursor-digest"}
 
     api_requests: list[tuple[str, dict]] = []
@@ -181,6 +182,7 @@ def test_run_once_rewrites_manifest_without_legacy_cursor_paths(tmp_path: Path):
     assert result.in_sync is True
     assert result.changed_paths == ()
     assert result.pruned_paths == (cursor_rel,)
+    assert queue.stats() == {}
 
     assert [url for url, _ in transport.calls] == ["https://s3.test/manifest.json"]
     manifest = json.loads(transport.calls[-1][1])
@@ -190,6 +192,35 @@ def test_run_once_rewrites_manifest_without_legacy_cursor_paths(tmp_path: Path):
     upload_url_paths = [body["paths"] for _, body in api_requests]
     assert upload_url_paths == [["manifest.json"]]
     assert len(metadata_upserts) == 1
+
+    queue.close()
+    cache.close()
+
+
+def test_upload_done_ignores_legacy_cursor_paths(tmp_path: Path):
+    paths = TrackPaths.under(tmp_path)
+    paths.ensure_track_dir()
+    queue = UploadQueue(paths)
+    cache = HashCache(paths)
+    tree = MerkleTree(cache, file_iter=[])
+    daemon = Daemon(paths, queue=queue, cache=cache, tree=tree)
+
+    rel_path = ".cursor/projects/p1/agent-transcripts/t1/session.jsonl"
+    queue.enqueue(rel_path, "cursor-digest")
+    daemon._confirmed_map[rel_path] = "old-digest"
+    metadata_calls: list[tuple[str, str]] = []
+
+    def record_metadata(path: str, digest: str) -> None:
+        metadata_calls.append((path, digest))
+
+    daemon._upsert_session_metadata = record_metadata  # type: ignore[method-assign]
+
+    daemon._on_upload_done(rel_path, "cursor-digest")
+
+    assert queue.stats() == {}
+    assert rel_path not in daemon._confirmed_map
+    assert daemon._manifest_dirty is True
+    assert metadata_calls == []
 
     queue.close()
     cache.close()

@@ -30,7 +30,7 @@ from .drainer import QueueDrainer
 from .merkle import HashCache, MerkleTree
 from .paths import TrackPaths
 from .queue import UploadQueue
-from .reconciler import Reconciler
+from .reconciler import Reconciler, _is_unsupported_manifest_path
 from .sources import source_summary
 from .status import (
     TrackStatus,
@@ -310,6 +310,7 @@ class Daemon:
         confirmed_existing: dict[str, str] = {}
         with self._confirmed_lock:
             if result.pruned_paths:
+                self._queue.delete_paths(result.pruned_paths)
                 for path in result.pruned_paths:
                     self._confirmed_map.pop(path, None)
                 self._manifest_dirty = True
@@ -383,6 +384,14 @@ class Daemon:
     # ------------------------------------------------------------------ #
 
     def _on_upload_done(self, rel_path: str, sha256: str) -> None:
+        if _is_unsupported_manifest_path(rel_path):
+            self._queue.delete_paths([rel_path])
+            with self._confirmed_lock:
+                if self._confirmed_map.pop(rel_path, None) is not None:
+                    self._manifest_dirty = True
+            log.info("ignored unsupported upload result %s", rel_path)
+            return
+
         self._queue.mark_done(rel_path, sha256)
         self._status.files_synced += 1
         # Record this file as confirmed on S3 using the hash we originally computed.
