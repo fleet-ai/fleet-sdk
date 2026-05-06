@@ -43,6 +43,7 @@ cli = [
     "rich>=10.0.0",
     "watchdog>=4.0.0",
     "textual>=0.50.0",
+    "tomlkit>=0.13.0",
     "mcp==1.24.0; python_version >= '3.10'",
 ]
 fleetcode = [
