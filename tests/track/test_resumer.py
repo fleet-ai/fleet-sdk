@@ -19,20 +19,31 @@ from fleet.track.resumer import (
     _checkout_path,
     _create_checkout,
     gc_checkouts,
+    resume_session,
 )
 from fleet.track.store import LocalSessionStore, Session
-from fleet.track.unified import AssistantMessage, UserMessage
+from fleet.track.unified import UserMessage
 
 
 def _store(tmp_path: Path) -> LocalSessionStore:
     return LocalSessionStore(TrackPaths.under(tmp_path))
 
 
-def _seed(store: LocalSessionStore, *, tool: str, id: str, n_events: int = 3,
-          forked_from=None, fork_point=None, cwd="/private/tmp/r") -> Session:
+def _seed(
+    store: LocalSessionStore,
+    *,
+    tool: str,
+    id: str,
+    n_events: int = 3,
+    forked_from=None,
+    fork_point=None,
+    cwd="/private/tmp/r",
+) -> Session:
     events = [UserMessage(source=tool, text=f"u{i}") for i in range(n_events)]
     s = Session(
-        id=id, tool=tool, cwd=cwd,
+        id=id,
+        tool=tool,
+        cwd=cwd,
         started_at="2026-04-30T00:00:00Z",
         last_active="2026-04-30T01:00:00Z",
         forked_from=forked_from,
@@ -50,7 +61,9 @@ def test_checkout_path_for_claude(tmp_path: Path):
     """Flat layout: claude requires checkouts directly under <encoded-cwd>/
     (its scanner doesn't recurse into subdirs)."""
     p = _checkout_path("claude", "/private/tmp/work", "abc-123", tmp_path)
-    assert p == tmp_path / ".claude" / "projects" / "-private-tmp-work" / "abc-123.jsonl"
+    assert (
+        p == tmp_path / ".claude" / "projects" / "-private-tmp-work" / "abc-123.jsonl"
+    )
 
 
 def test_checkout_path_for_codex(tmp_path: Path):
@@ -114,13 +127,45 @@ def test_create_checkout_claude_rows_carry_ephemeral_session_id(tmp_path: Path):
     paths = TrackPaths.under(tmp_path)
 
     info = _create_checkout(store=store, session=s, target_tool="claude", paths=paths)
-    rows = [json.loads(l) for l in info.path.read_text().splitlines() if l.strip()]
+    rows = [
+        json.loads(line) for line in info.path.read_text().splitlines() if line.strip()
+    ]
     # Skip the header row (has _fleet_meta)
     body_rows = [r for r in rows if "_fleet_meta" not in r]
     msg_rows = [r for r in body_rows if r.get("type") in ("user", "assistant")]
     assert msg_rows, "expected at least one converted message row"
     for r in msg_rows:
         assert r.get("sessionId") == info.ephemeral_id
+
+
+def test_create_checkout_claude_rewrites_same_source_raw_session_id(tmp_path: Path):
+    class Store:
+        def events(self, _id):
+            yield UserMessage(
+                source="claude",
+                id="u1",
+                text="hi",
+                raw={
+                    "type": "user",
+                    "uuid": "u1",
+                    "sessionId": "src-raw",
+                    "cwd": "/remote/repo",
+                    "timestamp": "2026-04-30T00:00:00Z",
+                    "message": {"role": "user", "content": "hi"},
+                },
+            )
+
+    s = Session(id="src-raw", tool="claude", cwd="/private/tmp/work")
+    paths = TrackPaths.under(tmp_path)
+
+    info = _create_checkout(store=Store(), session=s, target_tool="claude", paths=paths)
+    rows = [
+        json.loads(line) for line in info.path.read_text().splitlines() if line.strip()
+    ]
+    body_rows = [r for r in rows if "_fleet_meta" not in r]
+
+    assert body_rows
+    assert {r.get("sessionId") for r in body_rows} == {info.ephemeral_id}
 
 
 # ------------------------------------------------------------------ #
@@ -155,8 +200,16 @@ def test_create_checkout_codex_payload_has_required_fields(tmp_path: Path):
     first = json.loads(info.path.read_text().splitlines()[0])
     payload = first["payload"]
 
-    required = {"id", "timestamp", "cwd", "originator", "cli_version",
-                "source", "model_provider", "base_instructions"}
+    required = {
+        "id",
+        "timestamp",
+        "cwd",
+        "originator",
+        "cli_version",
+        "source",
+        "model_provider",
+        "base_instructions",
+    }
     assert set(payload.keys()) >= required
     assert isinstance(payload["base_instructions"], dict)
 
@@ -180,9 +233,15 @@ def test_checkout_includes_full_ancestor_chain(tmp_path: Path):
 
     # Full chain: 3 from A + 2 from B = 5 input events.
     # In codex output: 1 session_meta + 5 message rows = 6 rows total.
-    rows = [json.loads(l) for l in info.path.read_text().splitlines() if l.strip()]
-    msg_rows = [r for r in rows if r.get("type") == "response_item"
-                and r.get("payload", {}).get("type") == "message"]
+    rows = [
+        json.loads(line) for line in info.path.read_text().splitlines() if line.strip()
+    ]
+    msg_rows = [
+        r
+        for r in rows
+        if r.get("type") == "response_item"
+        and r.get("payload", {}).get("type") == "message"
+    ]
     assert len(msg_rows) == 5
     # Texts come from A then B in chain order.
     texts = [r["payload"]["content"][0]["text"] for r in msg_rows]
@@ -207,23 +266,106 @@ def test_checkout_resolves_symlinked_cwd(tmp_path: Path):
     assert "private" in str(info.path)
 
 
+def test_resume_same_tool_without_native_file_materializes_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    store = _store(tmp_path)
+    s = _seed(store, tool="claude", id="src-same", cwd="/private/tmp/work")
+    paths = TrackPaths.under(tmp_path)
+    calls: list[tuple[str, str, str | None]] = []
+
+    def fake_exec(tool, session_id, *, prompt, cwd=None):
+        calls.append((tool, session_id, cwd))
+        return 0
+
+    monkeypatch.setattr("fleet.track.resumer._exec_native_resume", fake_exec)
+
+    rc = resume_session(
+        store=store,
+        session=s,
+        target_tool="claude",
+        paths=paths,
+        compactor=None,
+    )
+
+    assert rc == 0
+    assert calls
+    tool, resumed_id, _cwd = calls[0]
+    assert tool == "claude"
+    assert resumed_id != "src-same"
+    checkout = next((tmp_path / ".claude" / "projects").glob(f"**/{resumed_id}.jsonl"))
+    assert checkout.exists()
+
+
+def test_resume_same_tool_uses_native_session_when_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sid = "11111111-2222-3333-4444-555555555555"
+    native_dir = tmp_path / ".claude" / "projects" / "-private-tmp-work"
+    native_dir.mkdir(parents=True)
+    (native_dir / f"{sid}.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "user",
+                "uuid": "u1",
+                "sessionId": sid,
+                "cwd": "/private/tmp/work",
+                "timestamp": "2026-04-30T00:00:00Z",
+                "message": {"role": "user", "content": "hi"},
+            }
+        )
+        + "\n"
+    )
+    store = _store(tmp_path)
+    s = _seed(store, tool="claude", id=sid, cwd="/private/tmp/work")
+    calls: list[str] = []
+
+    def fake_exec(_tool, session_id, *, prompt, cwd=None):
+        calls.append(session_id)
+        return 0
+
+    def fail_checkout(**_kwargs):
+        raise AssertionError("same-tool native resume should not create a checkout")
+
+    monkeypatch.setattr("fleet.track.resumer._exec_native_resume", fake_exec)
+    monkeypatch.setattr("fleet.track.resumer._create_checkout", fail_checkout)
+
+    rc = resume_session(
+        store=store,
+        session=s,
+        target_tool="claude",
+        paths=TrackPaths.under(tmp_path),
+        compactor=None,
+    )
+
+    assert rc == 0
+    assert calls == [sid]
+
+
 # ------------------------------------------------------------------ #
 # GC                                                                   #
 # ------------------------------------------------------------------ #
 
 
 def _fleet_meta_row() -> str:
-    return json.dumps({
-        "_fleet_meta": {"forked_from": "x", "fork_point": 0,
-                        "ephemeral_id": "e", "target_tool": "claude"},
-        "type": "system",
-        "content": "fleet-track checkout",
-    })
+    return json.dumps(
+        {
+            "_fleet_meta": {
+                "forked_from": "x",
+                "fork_point": 0,
+                "ephemeral_id": "e",
+                "target_tool": "claude",
+            },
+            "type": "system",
+            "content": "fleet-track checkout",
+        }
+    )
 
 
 def _native_row() -> str:
-    return json.dumps({"type": "user", "uuid": "u1",
-                       "message": {"role": "user", "content": "hi"}})
+    return json.dumps(
+        {"type": "user", "uuid": "u1", "message": {"role": "user", "content": "hi"}}
+    )
 
 
 def test_gc_removes_old_marked_checkouts(tmp_path: Path):
@@ -236,6 +378,7 @@ def test_gc_removes_old_marked_checkouts(tmp_path: Path):
     new.write_text(_fleet_meta_row() + "\n")
     # Backdate `old`'s mtime by 30 hours.
     import os
+
     old_mtime = time.time() - 30 * 3600
     os.utime(old, (old_mtime, old_mtime))
 
@@ -257,6 +400,7 @@ def test_gc_does_not_touch_native_sessions(tmp_path: Path):
     native = cdir / "native.jsonl"
     native.write_text(_native_row() + "\n")
     import os
+
     old = time.time() - 100 * 3600  # 100 hours old
     os.utime(native, (old, old))
 
@@ -271,16 +415,26 @@ def test_gc_recognizes_codex_session_meta_inner_marker(tmp_path: Path):
     cdir = tmp_path / ".codex" / "sessions" / "2026" / "05" / "01"
     cdir.mkdir(parents=True)
     f = cdir / "rollout-old-abc.jsonl"
-    f.write_text(json.dumps({
-        "timestamp": "x",
-        "type": "session_meta",
-        "payload": {
-            "id": "abc",
-            "_fleet_meta": {"forked_from": "src", "fork_point": 0,
-                            "ephemeral_id": "abc", "target_tool": "codex"},
-        },
-    }) + "\n")
+    f.write_text(
+        json.dumps(
+            {
+                "timestamp": "x",
+                "type": "session_meta",
+                "payload": {
+                    "id": "abc",
+                    "_fleet_meta": {
+                        "forked_from": "src",
+                        "fork_point": 0,
+                        "ephemeral_id": "abc",
+                        "target_tool": "codex",
+                    },
+                },
+            }
+        )
+        + "\n"
+    )
     import os
+
     old = time.time() - 30 * 3600
     os.utime(f, (old, old))
 
@@ -297,4 +451,3 @@ def test_gc_recognizes_codex_session_meta_inner_marker(tmp_path: Path):
 def test_supported_tools_set():
     assert "claude" in SUPPORTED_TOOLS
     assert "codex" in SUPPORTED_TOOLS
-

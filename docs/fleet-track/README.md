@@ -8,8 +8,6 @@ resuming them locally or across tools.
 The SDK scans:
 
 - `~/.claude/projects/**/*.jsonl`
-- `~/.cursor/projects/**/agent-transcripts/**/*.jsonl`
-- `~/.cursor/projects/**/agent-transcripts/**/*.txt`
 - `~/.codex/sessions/**/*.jsonl`
 - `~/.codex/archived_sessions/**/*.jsonl`
 
@@ -40,9 +38,12 @@ fleet-track-sessions/
   {team_id}/{user_id}/{device_id}/
     manifest.json
     raw/.claude/projects/...
-    raw/.cursor/projects/...
     raw/.codex/sessions/...
 ```
+
+Cursor transcript syncing is intentionally disabled for now. `CursorSource`
+still exists for future parser work, but Cursor files are not included in the
+default daemon scan until the SDK can extract stable metadata and replay events.
 
 Authentication uses `FLEET_API_KEY`. Track requires an API key that resolves to
 a concrete Fleet profile so orchestrator can isolate uploaded sessions by

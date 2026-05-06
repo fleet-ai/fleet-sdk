@@ -3,11 +3,10 @@
 The flow:
 
   1. Materialize the session's full event chain (walks `forked_from`).
-  2. If the target tool matches the source, just dispatch native
-     resume directly against the source's own native session — no
-     conversion, no checkout. Cleanest path; no pollution.
-  3. Otherwise: synthesize a fresh ephemeral session id, convert
-     events to the target's native format, write to
+  2. If the target tool matches the source and that native session file
+     exists on this machine, dispatch native resume directly.
+  3. Otherwise: synthesize a fresh ephemeral session id, convert or
+     re-materialize events to the target's native format, write to
      `~/.<target>/.../.fleet-checkouts/<ephemeral-id>.jsonl`, and
      `exec` the target's native resume command.
 
@@ -32,7 +31,7 @@ from .converter import _encode_claude_cwd
 from .paths import TrackPaths
 from .sources import ClaudeSource, CodexSource
 from .sources.base import with_synth_meta
-from .store import Session, SessionStore
+from .store import NativeFilesSessionStore, Session, SessionStore
 from .unified import Event, SessionStart
 
 log = logging.getLogger("fleet.track.resumer")
@@ -85,9 +84,11 @@ def resume_session(
 ) -> int:
     """Resume `session` in `target_tool`. Returns the target CLI's exit code.
 
-    If the target_tool matches the session's tool, dispatches the
-    native resume command against the original session (no conversion,
-    no checkout, no compaction — would be destructive of user history).
+    If the target_tool matches the session's tool and the source native
+    session file exists on this machine, dispatches the native resume
+    command against the original session. Remote/cross-machine sessions
+    still materialize a checkout because the native CLI cannot resume a
+    session id whose file is absent locally.
 
     Cross-tool: creates a checkout via the supplied `compactor` (default:
     a `TruncationCompactor` sized to the target tool/model's typical
@@ -125,7 +126,9 @@ def resume_session(
         # No repo metadata; honor the original cwd if we can.
         target_cwd_local = _resolve_cwd(session.cwd) if session.cwd else None
 
-    if session.tool == target_tool:
+    if session.tool == target_tool and _native_session_available(
+        session, home=paths.home
+    ):
         return _exec_native_resume(
             target_tool,
             session.id,
@@ -256,6 +259,12 @@ def _create_checkout(
 
     target_source = _source_for(target_tool, home=paths.home)
     target_bytes = target_source.serialize(annotated)
+    target_bytes = _rewrite_checkout_session_identity(
+        target_bytes,
+        target_tool=target_tool,
+        session_id=ephemeral_id,
+        cwd=target_cwd,
+    )
 
     # Where does it go?
     out_path = _checkout_path(target_tool, target_cwd, ephemeral_id, paths.home)
@@ -340,6 +349,15 @@ def _checkout_path(target_tool: str, cwd: str, ephemeral_id: str, home: Path) ->
     raise ValueError(f"Unknown target tool: {target_tool}")
 
 
+def _native_session_available(session: Session, *, home: Path) -> bool:
+    """True when the target tool can resume the original id from local files."""
+    try:
+        native = NativeFilesSessionStore(home=home).get(session.id)
+    except KeyError:
+        return False
+    return native is not None and native.tool == session.tool
+
+
 def _source_for(tool: str, *, home: Path):
     if tool == "claude":
         return ClaudeSource(home=home)
@@ -388,6 +406,65 @@ def _resolve_local_cwd(session: Session) -> Optional[str]:
     if resolved is None:
         return None
     return _resolve_cwd(resolved)
+
+
+def _rewrite_checkout_session_identity(
+    body: bytes,
+    *,
+    target_tool: str,
+    session_id: str,
+    cwd: str,
+) -> bytes:
+    if target_tool == "claude":
+        return _rewrite_claude_checkout_identity(body, session_id=session_id, cwd=cwd)
+    if target_tool == "codex":
+        return _rewrite_codex_checkout_identity(body, session_id=session_id, cwd=cwd)
+    return body
+
+
+def _rewrite_claude_checkout_identity(
+    body: bytes, *, session_id: str, cwd: str
+) -> bytes:
+    """Make same-source Claude checkout rows resumable under the ephemeral id."""
+    out: list[str] = []
+    for line in body.decode("utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            out.append(line)
+            continue
+        if isinstance(row, dict):
+            row["sessionId"] = session_id
+            row["cwd"] = cwd
+            line = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+        out.append(line)
+    return ("\n".join(out) + ("\n" if out else "")).encode("utf-8")
+
+
+def _rewrite_codex_checkout_identity(
+    body: bytes, *, session_id: str, cwd: str
+) -> bytes:
+    """Make same-source Codex checkout metadata point at the ephemeral id."""
+    out: list[str] = []
+    for line in body.decode("utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            out.append(line)
+            continue
+        if isinstance(row, dict) and row.get("type") == "session_meta":
+            payload = row.get("payload")
+            if isinstance(payload, dict):
+                payload["id"] = session_id
+                payload["cwd"] = cwd
+                row["payload"] = payload
+                line = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+        out.append(line)
+    return ("\n".join(out) + ("\n" if out else "")).encode("utf-8")
 
 
 def _inject_codex_checkout_meta(body: bytes, meta: dict) -> bytes:
