@@ -126,6 +126,51 @@ def test_reconcile_enqueues_cursor_transcripts(tmp_path: Path):
     queue.close()
 
 
+def test_reconcile_prunes_blocked_paths_from_local_and_remote(tmp_path: Path):
+    paths = TrackPaths.under(tmp_path)
+    paths.ensure_track_dir()
+    paths.config_file.write_text(
+        '{"blocked_session_ids":["bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]}\n'
+    )
+    queue = UploadQueue(paths)
+    cache = HashCache(paths)
+
+    blocked_rel = ".claude/projects/x/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jsonl"
+    kept_rel = ".claude/projects/x/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl"
+    blocked_file = _seed_file(tmp_path, blocked_rel, "blocked")
+    kept_file = _seed_file(tmp_path, kept_rel, "kept")
+    tree = MerkleTree(cache, file_iter=[blocked_file, kept_file])
+    raw_local_map, _ = tree.build()
+    queue.enqueue(blocked_rel, raw_local_map[blocked_rel])
+    remote_files = dict(raw_local_map)
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "root_hash": MerkleTree.compute_root(remote_files),
+                "files": remote_files,
+            },
+        )
+
+    api = TrackAPIClient(
+        client=httpx.Client(
+            transport=httpx.MockTransport(handler), base_url="http://test"
+        ),
+        auth_provider=_auth,
+    )
+
+    reconciler = Reconciler(queue=queue, cache=cache, tree=tree, api=api)
+    result = reconciler.reconcile("dev1")
+
+    assert result.in_sync is True
+    assert result.changed_paths == ()
+    assert result.pruned_paths == (blocked_rel,)
+    assert blocked_rel not in result.local_map
+    assert blocked_rel not in result.remote_map
+    queue.close()
+
+
 def test_reconcile_only_enqueues_changed_files(tmp_path: Path):
     """Remote already has one file; only the other gets enqueued."""
     paths = TrackPaths.under(tmp_path)

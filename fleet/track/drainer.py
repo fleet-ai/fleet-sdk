@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .api import TrackAPIClient, TrackAPIError
+from .blocklist import TrackBlocklist
 from .paths import TrackPaths
 from .queue import UploadQueue
 from .uploader import UploadPool
@@ -62,6 +63,17 @@ class QueueDrainer:
         items = self._queue.claim_batch(n=self._batch_size)
         if not items:
             return DrainResult(claimed=0, submitted=0, failed=0)
+        claimed_count = len(items)
+
+        blocklist = TrackBlocklist.from_paths(self._paths)
+        blocked_paths = [
+            item.path for item in items if blocklist.is_blocked_path(item.path)
+        ]
+        if blocked_paths:
+            self._queue.delete_paths(blocked_paths)
+            items = [item for item in items if not blocklist.is_blocked_path(item.path)]
+            if not items:
+                return DrainResult(claimed=claimed_count, submitted=0, failed=0)
 
         rel_paths = [item.path for item in items]
 
@@ -71,7 +83,7 @@ class QueueDrainer:
             log.warning("drain: failed to get upload URLs: %s", e)
             for item in items:
                 self._queue.mark_failed(item.path, item.sha256, str(e))
-            return DrainResult(claimed=len(items), submitted=0, failed=len(items))
+            return DrainResult(claimed=claimed_count, submitted=0, failed=len(items))
 
         home = self._paths.home
         submitted = 0
@@ -79,11 +91,13 @@ class QueueDrainer:
         for item in items:
             url = url_map.get(item.path)
             if not url:
-                self._queue.mark_failed(item.path, item.sha256, "no presigned URL returned")
+                self._queue.mark_failed(
+                    item.path, item.sha256, "no presigned URL returned"
+                )
                 failed += 1
                 continue
             abs_path: Path = home / item.path
             self._pool.submit(item.path, item.sha256, abs_path, url)
             submitted += 1
 
-        return DrainResult(claimed=len(items), submitted=submitted, failed=failed)
+        return DrainResult(claimed=claimed_count, submitted=submitted, failed=failed)

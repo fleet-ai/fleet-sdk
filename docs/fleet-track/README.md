@@ -89,8 +89,29 @@ flt track search
 flt track aggregate
 flt track download
 flt track resume
+flt track block
+flt track unblock
+flt track blocked
 flt track gc
 ```
+
+### Blocking Local Sessions
+
+Use `flt track block <session-id>...` to prevent local sessions from being
+uploaded. Blocked session ids are stored in `~/.fleet/track/config.json` under
+`blocked_session_ids`. During reconciliation, blocked paths are removed from the
+local and remote manifest view, deleted from the upload queue, and skipped by
+upload-complete callbacks.
+
+```bash
+flt track block eb174545-bce7-4d7d-901a-ccbce1df60e7
+flt track blocked
+flt track unblock eb174545-bce7-4d7d-901a-ccbce1df60e7
+```
+
+Blocking prevents future uploads and removes blocked entries from the manifest
+the next time the daemon reconciles. It does not delete already-stored S3 blobs
+or remote metadata rows; that requires a server-side purge endpoint.
 
 ### Search
 
