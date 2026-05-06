@@ -48,9 +48,10 @@ __all__ = [
 
 def default_sources(home: Optional[Path] = None) -> list[Source]:
     """The standard set of sources we sync from. Tests pass a tmp home."""
+    # CursorSource remains importable, but it is not in the default sync set
+    # until we have stable metadata extraction and event parsing for resume.
     return [
         ClaudeSource(home=home),
-        CursorSource(home=home),
         CodexSource(home=home),
     ]
 
@@ -65,7 +66,6 @@ EXCLUDE_PATTERNS = DEFAULT_EXCLUDE_PATTERNS
 # Path.home(); but exposed as a module attribute for legacy callers.
 WATCH_ROOTS = [
     Path.home() / ".claude" / "projects",
-    Path.home() / ".cursor" / "projects",
     Path.home() / ".codex",
 ]
 

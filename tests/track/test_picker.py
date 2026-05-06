@@ -55,6 +55,7 @@ def test_short_cwd_truncates_long_basenames():
 
 def test_human_when_seconds():
     from datetime import datetime, timezone, timedelta
+
     ts = (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat()
     out = _human_when(ts)
     assert "s ago" in out
@@ -62,6 +63,7 @@ def test_human_when_seconds():
 
 def test_human_when_minutes():
     from datetime import datetime, timezone, timedelta
+
     ts = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
     out = _human_when(ts)
     assert "m ago" in out
@@ -69,6 +71,7 @@ def test_human_when_minutes():
 
 def test_human_when_hours():
     from datetime import datetime, timezone, timedelta
+
     ts = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
     out = _human_when(ts)
     assert "h ago" in out
@@ -76,7 +79,12 @@ def test_human_when_hours():
 
 def test_human_when_handles_z_suffix():
     from datetime import datetime, timezone, timedelta
-    ts = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat().replace("+00:00", "Z")
+
+    ts = (
+        (datetime.now(timezone.utc) - timedelta(minutes=1))
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
     out = _human_when(ts)
     assert "ago" in out
 
@@ -124,14 +132,17 @@ def test_format_line_includes_event_count():
 
 
 def test_format_line_includes_metadata_title():
-    s = Session(id="x", tool="claude", metadata={"title": "Implementing fleet-track sidecar"})
+    s = Session(
+        id="x", tool="claude", metadata={"title": "Implementing fleet-track sidecar"}
+    )
     line = _format_line(s)
     assert "Implementing fleet-track sidecar" in line
 
 
 def test_format_line_truncates_long_titles():
     s = Session(
-        id="x", tool="claude",
+        id="x",
+        tool="claude",
         metadata={"title": "x" * 200},
     )
     line = _format_line(s)
@@ -142,7 +153,8 @@ def test_format_line_truncates_long_titles():
 def test_format_line_collapses_newlines_in_title():
     """Titles never break the fzf row — newlines and tabs collapse to spaces."""
     s = Session(
-        id="x", tool="claude",
+        id="x",
+        tool="claude",
         metadata={"title": "first line\nsecond line\twith tab"},
     )
     line = _format_line(s)
@@ -191,13 +203,13 @@ def test_installed_tools_returns_only_binaries_on_path():
 
 def test_installed_tools_canonical_order_independent_of_shutil():
     """Even if shutil reports them in a different order, the function
-    returns the canonical [claude, codex, cursor, opencode] subset."""
+    returns the canonical [claude, codex] subset."""
     found = {"opencode", "claude"}
     with mock.patch(
         "fleet.track.picker.shutil.which",
         side_effect=lambda n: "/x" if n in found else None,
     ):
-        assert installed_tools() == ["claude", "opencode"]
+        assert installed_tools() == ["claude"]
 
 
 def test_installed_tools_empty_when_nothing_on_path():
@@ -268,12 +280,10 @@ def test_pick_tool_returns_none_on_cancel():
 def test_pick_tool_lists_source_tool_first():
     """Source tool must be on the first row so it's the default highlight."""
     runner = _runner_returning("codex      cross-tool: lossy\n")
-    pick_tool("codex", available=["claude", "codex", "cursor"], runner=runner)
+    pick_tool("codex", available=["claude", "codex"], runner=runner)
     lines = runner.captured["input"].splitlines()
     assert lines[0].startswith("codex")
-    # Remaining are claude/cursor in canonical order.
     assert lines[1].startswith("claude")
-    assert lines[2].startswith("cursor")
 
 
 def test_pick_tool_falls_back_to_canonical_when_source_not_installed():

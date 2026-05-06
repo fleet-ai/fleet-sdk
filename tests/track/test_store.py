@@ -906,3 +906,87 @@ def test_remote_store_fetches_content_and_parses_events():
 
     assert [e.type for e in events] == ["session_start", "user_message"]
     assert events[1].text == "hello"
+
+
+def test_remote_store_get_resolves_unique_prefix_across_pages():
+    from fleet.track.store import RemoteSessionStore
+
+    sid = "abcdef01-2345-6789-abcd-ef0123456789"
+    calls: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append(str(req.url))
+        if req.url.path == "/v1/track/sessions/abcdef01":
+            return httpx.Response(404, json={"detail": "not found"})
+        if req.url.path == "/v1/track/sessions":
+            cursor = req.url.params.get("cursor")
+            if cursor is None:
+                return httpx.Response(
+                    200,
+                    json={
+                        "items": [
+                            {
+                                "id": "11111111-1111-1111-1111-111111111111",
+                                "tool": "claude",
+                                "cwd": "/repo",
+                            }
+                        ],
+                        "next_cursor": "next",
+                    },
+                )
+            if cursor == "next":
+                return httpx.Response(
+                    200,
+                    json={
+                        "items": [
+                            {
+                                "id": sid,
+                                "tool": "codex",
+                                "cwd": "/repo",
+                            }
+                        ],
+                        "next_cursor": None,
+                    },
+                )
+        raise AssertionError(f"unexpected request: {req.method} {req.url}")
+
+    store = RemoteSessionStore(api=_remote_api(handler))
+
+    session = store.get("abcdef01")
+
+    assert session is not None
+    assert session.id == sid
+    assert any("cursor=next" in call for call in calls)
+
+
+def test_remote_store_get_ambiguous_prefix_raises():
+    from fleet.track.store import RemoteSessionStore
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/v1/track/sessions/abcdef01":
+            return httpx.Response(404, json={"detail": "not found"})
+        if req.url.path == "/v1/track/sessions":
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "id": "abcdef01-1111-1111-1111-111111111111",
+                            "tool": "claude",
+                            "cwd": "/repo",
+                        },
+                        {
+                            "id": "abcdef01-2222-2222-2222-222222222222",
+                            "tool": "codex",
+                            "cwd": "/repo",
+                        },
+                    ],
+                    "next_cursor": None,
+                },
+            )
+        raise AssertionError(f"unexpected request: {req.method} {req.url}")
+
+    store = RemoteSessionStore(api=_remote_api(handler))
+
+    with pytest.raises(KeyError, match="Ambiguous prefix"):
+        store.get("abcdef01")

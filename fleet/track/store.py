@@ -809,8 +809,30 @@ class RemoteSessionStore:
             return _session_from_api(self._api.get_session(id))
         except Exception as e:
             if getattr(e, "status_code", None) == 404:
-                return None
-            raise
+                pass
+            else:
+                raise
+
+        if not id:
+            return None
+
+        matches: list[Session] = []
+        cursor = None
+        while True:
+            items, cursor = self.page(limit=MAX_PAGE_LIMIT, cursor=cursor)
+            for session in items:
+                if session.id.startswith(id):
+                    matches.append(session)
+                    if len(matches) > 1:
+                        raise KeyError(
+                            f"Ambiguous prefix {id!r}: matches {[m.id for m in matches]}"
+                        )
+            if cursor is None:
+                break
+
+        if matches:
+            return matches[0]
+        return None
 
     def events(self, id: str) -> Iterator[Event]:
         leaf = self.get(id)

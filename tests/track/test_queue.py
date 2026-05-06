@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import sqlite3
 import time
 from pathlib import Path
 
 from fleet.track.paths import TrackPaths
-from fleet.track.queue import MAX_ATTEMPTS, QueueItem, UploadQueue
+from fleet.track.queue import MAX_ATTEMPTS, UploadQueue
 
 
 def _q(tmp_path: Path) -> UploadQueue:
@@ -186,3 +185,17 @@ def test_separate_paths_separate_queues(tmp_path: Path):
 
     q1.close()
     q2.close()
+
+
+def test_delete_paths_removes_all_versions(tmp_path: Path):
+    q = _q(tmp_path)
+    q.enqueue(".cursor/projects/p/session.jsonl", "h1")
+    q.enqueue(".cursor/projects/p/session.jsonl", "h2")
+    q.enqueue(".codex/sessions/s.jsonl", "h3")
+
+    removed = q.delete_paths([".cursor/projects/p/session.jsonl"])
+
+    assert removed == 2
+    items = q.claim_batch(n=10)
+    assert [item.path for item in items] == [".codex/sessions/s.jsonl"]
+    q.close()

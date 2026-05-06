@@ -2,14 +2,13 @@
 
 This package handles three things:
 
-  1. **Sync** local AI session files (claude, codex, cursor, opencode)
+  1. **Sync** local AI session files (claude, codex)
      to a backing store (LocalSessionStore locally; RemoteSessionStore
      against orchestrator).
   2. **Convert** between session formats via a unified Event model so
      a session written by one CLI can be resumed in another.
-  3. **Resume** sessions — same-tool (passes through to the native CLI)
-     or cross-tool (converts via unified, drops a checkout file the
-     target CLI's resume scan finds).
+  3. **Resume** sessions — same-tool native when the file exists locally,
+     or via a Fleet checkout when conversion/materialization is needed.
 
 The public surface below is what consumers should import. Internals
 (parsers, daemon plumbing, CLI commands) live in submodules and aren't

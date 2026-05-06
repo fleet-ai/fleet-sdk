@@ -48,7 +48,7 @@ SEARCH_FILTER_FIELDS = (
     {
         "name": "tool",
         "type": "string",
-        "description": "AI tool name, for example codex, claude, cursor, or opencode.",
+        "description": "AI tool name, for example codex or claude.",
     },
     {
         "name": "cwd",
@@ -183,7 +183,7 @@ def enable() -> None:
     found = [s for s in sources if s.is_present()]
     if not found:
         console.print(
-            "[yellow]No AI tool sessions found[/yellow] (~/.claude, ~/.cursor, ~/.codex)"
+            "[yellow]No AI tool sessions found[/yellow] (~/.claude, ~/.codex)"
         )
     else:
         for s in found:
@@ -486,7 +486,7 @@ def _render_sessions_table(sessions, next_cursor: str | None) -> None:
 @app.command(name="ls")
 def list_sessions(
     tool: str = typer.Option(
-        None, "--tool", "-t", help="Filter by tool (claude/codex/cursor/opencode)"
+        None, "--tool", "-t", help="Filter by tool (claude/codex)"
     ),
     cwd: str = typer.Option(None, "--cwd", help="Filter by working directory"),
     since: str = typer.Option(
@@ -815,7 +815,7 @@ def resume(
             if not available:
                 console.print(
                     "[red]No supported AI CLIs found on PATH.[/red] "
-                    "Install one of: claude, codex, cursor, opencode."
+                    "Install one of: claude, codex."
                 )
                 raise typer.Exit(1)
             if len(available) == 1:

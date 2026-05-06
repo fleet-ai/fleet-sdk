@@ -56,8 +56,6 @@ def fzf_available() -> bool:
 _TOOL_BINARIES: list[tuple[str, str]] = [
     ("claude", "claude"),
     ("codex", "codex"),
-    ("cursor", "cursor"),
-    ("opencode", "opencode"),
 ]
 
 
@@ -65,8 +63,8 @@ def installed_tools() -> list[str]:
     """Return the names of supported AI CLIs whose binary is on `PATH`.
 
     Used by the second-stage picker to hide tools the user couldn't actually
-    launch into. Order matches `_TOOL_BINARIES` (claude, codex, cursor,
-    opencode) so the picker is deterministic regardless of $PATH ordering.
+    launch into. Order matches `_TOOL_BINARIES` so the picker is deterministic
+    regardless of $PATH ordering.
     """
     return [name for name, binary in _TOOL_BINARIES if shutil.which(binary)]
 
@@ -136,15 +134,16 @@ class PageState:
     `fleet.track._picker_page` — keep field names aligned.
     """
 
-    source: str        # `--source` value the parent picker was opened with
+    source: str  # `--source` value the parent picker was opened with
     tool: Optional[str] = None
     cwd: Optional[str] = None
     since: Optional[str] = None
     query: str = ""
     limit: int = 20
 
-    def to_state(self, *, current_index: int = 0,
-                 cursors: Optional[list] = None) -> dict:
+    def to_state(
+        self, *, current_index: int = 0, cursors: Optional[list] = None
+    ) -> dict:
         return {
             "source": self.source,
             "tool": self.tool,
@@ -211,16 +210,22 @@ def pick_session(
         # terminal so the user never has to scroll within a page.
         state_path = _make_state_file(page_state)
         helper = (
-            f'{_shell_quote(sys.executable)} -m fleet.track._picker_page '
-            f'--state-file {_shell_quote(str(state_path))}'
+            f"{_shell_quote(sys.executable)} -m fleet.track._picker_page "
+            f"--state-file {_shell_quote(str(state_path))}"
         )
-        args.extend([
-            "--disabled",
-            "--bind", f"change:reload({helper} --direction query --query {{q}})",
-            "--bind", f"right:reload({helper} --direction next)",
-            "--bind", f"left:reload({helper} --direction prev)",
-            "--bind", f"alt-h:reload({helper} --direction first)",
-        ])
+        args.extend(
+            [
+                "--disabled",
+                "--bind",
+                f"change:reload({helper} --direction query --query {{q}})",
+                "--bind",
+                f"right:reload({helper} --direction next)",
+                "--bind",
+                f"left:reload({helper} --direction prev)",
+                "--bind",
+                f"alt-h:reload({helper} --direction first)",
+            ]
+        )
 
     try:
         result = subprocess.run(
@@ -303,7 +308,9 @@ def _format_line(s: Session) -> str:
     when = _human_when(s.last_active or s.started_at)
     cwd_short = _short_cwd(s.cwd)
     fork_marker = " ↳" if s.forked_from else "  "
-    title = _short_title(s.metadata.get("title") if isinstance(s.metadata, dict) else None)
+    title = _short_title(
+        s.metadata.get("title") if isinstance(s.metadata, dict) else None
+    )
     line = f"{short_id}  {tool}  {when:>14}  {cwd_short:<30}{fork_marker} {s.event_count:>4}e  {title}"
     return line.rstrip()  # no trailing whitespace; keeps stream-compare tests honest
 
