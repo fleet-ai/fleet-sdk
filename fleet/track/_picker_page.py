@@ -14,7 +14,7 @@ Invoked by `pick_session` via fzf's `--bind` reload triggers:
 State file (JSON):
 
     {
-      "source":         "stub" | "native" | "remote" | "auto",
+      "source":         "remote" | "local" | "stub" | "native" | "auto",
       "tool":           Optional[str],
       "cwd":            Optional[str],
       "since":          Optional[str],
@@ -50,7 +50,7 @@ def _save_state(path: Path, state: dict[str, Any]) -> None:
 def _resolve_store(source: str):
     # Lazy-import so this script stays fast to start. Reuses the CLI's
     # store-resolution so behavior is consistent with the rest of `flt
-    # track` (auto chains, native filters, etc.).
+    # track` (remote default, local chains, native filters, etc.).
     from .cli import _resolve_session_store
 
     return _resolve_session_store(source)
