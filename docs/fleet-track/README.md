@@ -63,10 +63,19 @@ flt track resume
 flt track gc
 ```
 
-### Agent Search
+### Search
 
-`flt track search <query>` emits JSON by default for agent workflows. For
-structured search, agents can pass a Turbopuffer-shaped JSON body through
+`flt track ls` lists deterministic session metadata from the orchestrator's
+Postgres store. `flt track search` is Turbopuffer-only and emits JSON by default
+for agent workflows.
+
+Simple query mode sends the query to the orchestrator-managed hybrid index:
+
+```bash
+flt track search "bugbot local index"
+```
+
+For structured search, agents can pass a Turbopuffer-shaped JSON body through
 orchestrator:
 
 ```bash
