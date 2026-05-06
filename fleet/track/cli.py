@@ -15,6 +15,7 @@ from rich.table import Table
 
 from .api import TrackAPIClient, TrackAPIError
 from .blocklist import (
+    TrackBlocklist,
     add_blocked_session_ids,
     read_track_config,
     remove_blocked_session_ids,
@@ -140,6 +141,7 @@ def status() -> None:
     paths = TrackPaths.default()
     running = is_running(paths)
     s = read_status(paths)
+    blocklist_summary = _blocklist_summary(read_track_config(paths))
 
     if not running:
         console.print("[yellow]Daemon not running.[/yellow]", end=" ")
@@ -149,10 +151,18 @@ def status() -> None:
             console.print("Service installed but not alive — check logs.")
         if s:
             console.print(f"  Last sync: {s.last_sync or 'never'}")
+        if blocklist_summary:
+            console.print(
+                f"  Blocked: {blocklist_summary} [dim](run flt track blocked)[/dim]"
+            )
         return
 
     if not s:
         console.print("[yellow]Daemon running but no status yet.[/yellow]")
+        if blocklist_summary:
+            console.print(
+                f"  Blocked: {blocklist_summary} [dim](run flt track blocked)[/dim]"
+            )
         return
 
     state_color = {"idle": "green", "syncing": "yellow", "error": "red"}.get(
@@ -174,6 +184,10 @@ def status() -> None:
     console.print(
         f"  Queue: [yellow]{pending}[/yellow] pending  [cyan]{in_flight}[/cyan] uploading  [green]{done}[/green] done  [red]{failed}[/red] failed"
     )
+    if blocklist_summary:
+        console.print(
+            f"  Blocked: {blocklist_summary} [dim](run flt track blocked)[/dim]"
+        )
 
     # Sources table
     if s.sources:
@@ -192,6 +206,24 @@ def status() -> None:
             console.print(f"  {err}")
 
     console.print(f"\n  Logs: {paths.log_file}")
+
+
+def _blocklist_summary(config: dict) -> str | None:
+    blocklist = TrackBlocklist.from_config(config)
+    parts = [
+        _count_label(len(blocklist.session_ids), "session id"),
+        _count_label(len(blocklist.paths), "path"),
+        _count_label(len(blocklist.path_globs), "path glob"),
+    ]
+    parts = [p for p in parts if p]
+    return ", ".join(parts) if parts else None
+
+
+def _count_label(count: int, label: str) -> str | None:
+    if count == 0:
+        return None
+    suffix = "" if count == 1 else "s"
+    return f"{count} {label}{suffix}"
 
 
 @app.command()

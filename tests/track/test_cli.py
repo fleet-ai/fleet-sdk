@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 from fleet.track import cli
 from fleet.track.api import TrackAPIError
 from fleet.track.paths import TrackPaths
+from fleet.track.status import TrackStatus
 from fleet.track.store import LocalSessionStore, RemoteSessionStore, Session
 
 
@@ -73,6 +74,41 @@ def test_resolve_session_store_only_accepts_remote_or_local(tmp_path, monkeypatc
     for source in ("auto", "stub", "native"):
         with pytest.raises(typer.BadParameter):
             cli._resolve_session_store(source)
+
+
+def test_status_shows_blocklist_summary(tmp_path, monkeypatch):
+    paths = TrackPaths.under(tmp_path)
+    paths.ensure_track_dir()
+    paths.config_file.write_text(
+        json.dumps(
+            {
+                "blocked_session_ids": ["s1", "s2"],
+                "blocked_paths": [".cursor/projects/p/session.jsonl"],
+                "blocked_path_globs": [".claude/projects/private/*.jsonl"],
+            }
+        )
+    )
+
+    monkeypatch.setattr(cli.TrackPaths, "default", lambda: paths)
+    monkeypatch.setattr(cli, "is_running", lambda p: True)
+    monkeypatch.setattr(
+        cli,
+        "read_status",
+        lambda p: TrackStatus(
+            pid=123,
+            state="idle",
+            last_sync="2026-05-06T00:00:00Z",
+        ),
+    )
+
+    result = runner.invoke(cli.app, ["status"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "Blocked:" in result.stdout
+    assert "2 session ids" in result.stdout
+    assert "1 path" in result.stdout
+    assert "1 path glob" in result.stdout
+    assert "flt track blocked" in result.stdout
 
 
 def test_track_ls_defaults_remote_and_forwards_query(monkeypatch):
