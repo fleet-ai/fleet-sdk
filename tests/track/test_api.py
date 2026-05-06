@@ -187,6 +187,48 @@ def test_list_sessions_sends_filters_and_returns_json():
     assert out["next_cursor"] == "next"
 
 
+def test_search_sessions_raw_posts_turbopuffer_body_and_returns_json():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["url"] = str(request.url)
+        captured["headers"] = dict(request.headers)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": "s1",
+                        "tool": "codex",
+                        "last_active": "2026-05-05T00:00:00Z",
+                    }
+                ],
+                "next_cursor": None,
+            },
+        )
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    out = api.search_sessions_raw(
+        {
+            "query": "bugbot local index",
+            "filters": [
+                "And",
+                [["repo_url", "Eq", "git@github.com:fleet-ai/fleet-sdk.git"]],
+            ],
+            "top_k": 10,
+        }
+    )
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == "http://test/v1/track/sessions/search"
+    assert captured["headers"]["authorization"] == "Bearer test-api-key"
+    assert captured["body"]["query"] == "bugbot local index"
+    assert captured["body"]["top_k"] == 10
+    assert out["items"][0]["id"] == "s1"
+
+
 def test_download_session_content_uses_presigned_url_without_auth_headers():
     seen: list[tuple[str, str | None]] = []
 

@@ -58,9 +58,26 @@ flt track status
 flt track daemon --once
 flt track logs
 flt track ls
+flt track search
 flt track resume
 flt track gc
 ```
+
+### Agent Search
+
+`flt track search <query>` emits JSON by default for agent workflows. For
+structured search, agents can pass a Turbopuffer-shaped JSON body through
+orchestrator:
+
+```bash
+flt track search --tpuf '{"query":"bugbot local index","top_k":20}'
+flt track search --tpuf @search.json
+flt track search --tpuf -
+```
+
+The raw body supports `query`, `rank_by`, `filters`, and `top_k`, matching
+`POST /v1/track/sessions/search`. Orchestrator injects the team boundary and
+hydrates the ranked results back to Fleet session metadata.
 
 ## Design Notes
 

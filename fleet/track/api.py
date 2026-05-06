@@ -8,6 +8,7 @@ Upload endpoints:
 Metadata endpoints:
   POST /v1/track/sessions/{id}         → upsert one session metadata row
   GET  /v1/track/sessions              → list/search remote sessions
+  POST /v1/track/sessions/search       → raw Turbopuffer-shaped search
   GET  /v1/track/sessions/{id}         → fetch one session metadata row
   GET  /v1/track/sessions/{id}/content → get a presigned S3 GET URL
 
@@ -187,6 +188,22 @@ class TrackAPIClient:
         resp = self._client.get(
             "/v1/track/sessions",
             params=params,
+            headers=self._headers(),
+        )
+        _raise(resp)
+        return resp.json()
+
+    def search_sessions_raw(self, body: Mapping[str, Any]) -> dict:
+        """Run agent-facing raw Turbopuffer-shaped session search.
+
+        The body is forwarded to orchestrator's
+        `POST /v1/track/sessions/search`. Orchestrator owns auth, team-scope
+        wrapping, server-side embeddings for `query`, and hydration back to
+        Fleet session metadata.
+        """
+        resp = self._client.post(
+            "/v1/track/sessions/search",
+            json=dict(body),
             headers=self._headers(),
         )
         _raise(resp)
