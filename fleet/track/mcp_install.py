@@ -196,7 +196,7 @@ def _install_json(client: str, path: Path, spec: CommandSpec) -> InstallResult:
         return InstallResult(client, path, "unchanged")
     action = "updated" if prior is not None else "added"
     servers[ENTRY_NAME] = new_entry
-    _atomic_write(path, json.dumps(existing, indent=2) + "\n")
+    _atomic_write(path, _dump_json(existing))
     return InstallResult(client, path, action)
 
 
@@ -210,8 +210,18 @@ def _uninstall_json(client: str, path: Path) -> InstallResult:
     servers.pop(ENTRY_NAME)
     if not servers:
         existing.pop("mcpServers", None)
-    _atomic_write(path, json.dumps(existing, indent=2) + "\n")
+    _atomic_write(path, _dump_json(existing))
     return InstallResult(client, path, "removed")
+
+
+def _dump_json(data: dict) -> str:
+    """Serialize JSON without escaping non-ASCII characters.
+
+    `ensure_ascii=True` (Python's default) replaces `—` with `\\u2014`
+    everywhere in the file, producing a noisy diff against any config
+    Claude Code or Claude Desktop wrote with `ensure_ascii=False`.
+    """
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
 def _read_json(path: Path) -> dict:
