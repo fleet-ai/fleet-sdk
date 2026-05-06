@@ -16,11 +16,22 @@ class AuthenticatedWrapperMixin:
         self,
         *,
         api_key: Optional[str],
+        jwt: Optional[str] = None,
+        team_id: Optional[str] = None,
         base_url: Optional[str],
     ) -> None:
-        if not api_key:
-            raise ValueError("Provide api_key")
+        if not api_key and not (jwt and team_id):
+            from .auth import get_valid_token
+
+            token_info = get_valid_token()
+            if token_info:
+                jwt, team_id = token_info
+
+        if not api_key and not (jwt and team_id):
+            raise ValueError("Provide api_key, provide jwt/team_id, or run `flt login`")
         self.api_key = api_key
+        self.jwt = jwt
+        self.team_id = team_id
         self.base_url = base_url or GLOBAL_BASE_URL
 
     def get_headers(self, request_id: Optional[str] = None) -> Dict[str, str]:
@@ -28,11 +39,15 @@ class AuthenticatedWrapperMixin:
             "X-Fleet-SDK-Language": "Python",
             "X-Fleet-SDK-Version": __version__,
         }
-        if not self.api_key:
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        elif self.jwt and self.team_id:
+            headers["X-JWT-Token"] = self.jwt
+            headers["X-Team-ID"] = self.team_id
+        else:
             raise self._authentication_error_cls(
-                "API-key auth was selected at init but api_key is no longer set"
+                "Authentication is not configured; set FLEET_API_KEY or run `flt login`"
             )
-        headers["Authorization"] = f"Bearer {self.api_key}"
 
         if request_id:
             headers["X-Request-ID"] = request_id

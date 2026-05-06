@@ -28,15 +28,28 @@ To install a specific alpha version:
 pip install fleet-python==0.2.64-alpha1
 ```
 
-## API Key Setup
+## Authentication
 
-Fleet requires an API key for authentication. You can obtain one from the [Fleet Platform](https://fleetai.com/dashboard/api-keys).
+Fleet supports browser login for local CLI use and API keys for scripts,
+services, and CI.
 
-Set your API key as an environment variable:
+For local CLI use:
+
+```bash
+flt login
+```
+
+The CLI stores browser-login credentials in `~/.fleet/credentials.json` and
+sends JWT auth headers scoped to the selected team.
+
+For API-key auth, obtain a key from the
+[Fleet Platform](https://fleetai.com/dashboard/api-keys) and set:
 
 ```bash
 export FLEET_API_KEY="sk_your_key_here"
 ```
+
+When both are present, `FLEET_API_KEY` takes precedence.
 
 ## Basic Usage
 

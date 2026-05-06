@@ -19,6 +19,10 @@ def _auth() -> Optional[str]:
     return "test-api-key"
 
 
+def _jwt_auth() -> tuple[str, str]:
+    return ("jwt-token", "team-1")
+
+
 def _no_auth() -> Optional[str]:
     return None
 
@@ -49,6 +53,24 @@ def test_provision_sends_expected_payload_and_headers():
     assert captured["body"]["device_id"] == "dev1"
     assert "hostname" in captured["body"]
     assert "platform" in captured["body"]
+
+
+def test_provision_supports_browser_login_headers():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["headers"] = dict(request.headers)
+        return httpx.Response(
+            200,
+            json={"device_id": "dev1", "team_id": "team-1", "user_id": "user-1"},
+        )
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_jwt_auth)
+    api.provision("dev1")
+
+    assert captured["headers"]["x-jwt-token"] == "jwt-token"
+    assert captured["headers"]["x-team-id"] == "team-1"
+    assert "authorization" not in captured["headers"]
 
 
 def test_get_manifest_returns_files_dict():
