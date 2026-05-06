@@ -244,6 +244,36 @@ environment or — until the API-key flow is removed — pass `FLEET_API_KEY` in
 omitted. The MCP process keeps orchestrator as the auth boundary and downloads
 session bytes directly to the same local cache as `flt track download`.
 
+#### One-shot install for local agent clients
+
+`flt track install-mcp` writes the FleetCode MCP entry into local agent
+client configs in stdio mode using `flt login` auth. Three clients are
+supported:
+
+| Client          | Config path                                                       |
+|-----------------|-------------------------------------------------------------------|
+| Claude Code     | `~/.claude.json`                                                  |
+| Claude Desktop  | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Codex           | `~/.codex/config.toml`                                            |
+
+```bash
+flt track install-mcp                       # detect and write to all installed clients
+flt track install-mcp --client claude-code  # one specific client
+flt track install-mcp --all                 # write to every supported client, even if not detected
+flt track install-mcp --print               # print the config snippet, do not write
+flt track uninstall-mcp [--client ...]      # remove
+```
+
+The command resolves the MCP server binary in this order: `fleetcode-mcp`
+co-located with the running `flt` (same venv), then on `PATH`, then a fallback
+to `uv run --directory <fleet-sdk-checkout> --extra fleetcode fleetcode-mcp`
+if a dev checkout is detectable. No `FLEET_API_KEY` is set in the spawned
+environment; the MCP process uses your stored `flt login` credentials.
+
+Writes are idempotent and atomic, and unrelated keys (other `mcpServers`
+entries, app preferences, Codex `[projects.*]` blocks, etc.) are preserved
+verbatim. Restart each app after installing to pick up the new server.
+
 ### Compression
 
 Uploads are raw by default for safe rollout. To store new uploaded session blobs
