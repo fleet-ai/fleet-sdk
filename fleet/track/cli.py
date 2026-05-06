@@ -479,6 +479,16 @@ def search_sessions(
     and returns hydrated Fleet session metadata.
 
     \b
+    Filterable attributes:
+
+      session_id, user_id, device_id, tool, cwd, repo_url, git_branch,
+      model, forked_from, event_count, started_at, last_active
+
+    `team_id` is always injected by orchestrator. Use Turbopuffer filter arrays,
+    for example ["tool","Eq","codex"], ["last_active","Gte","2026-05-01T00:00:00Z"],
+    or ["And",[[...],[...]]].
+
+    \b
     Example raw filter body:
 
       {"query":"deployment debugging",

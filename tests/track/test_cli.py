@@ -298,6 +298,11 @@ def test_track_search_help_documents_agent_tpuf_mode():
     assert "Turbopuffer-shaped JSON" in result.stdout
     assert "rank_by" in result.stdout
     assert "filters" in result.stdout
+    assert "Filterable attributes" in result.stdout
+    assert "repo_url" in result.stdout
+    assert "last_active" in result.stdout
+    assert "event_count" in result.stdout
+    assert "team_id" in result.stdout
 
 
 def test_build_local_index_scans_native_files_into_local_store(tmp_path, monkeypatch):
