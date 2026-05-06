@@ -47,11 +47,13 @@ Cursor transcript syncing is intentionally disabled for now. `CursorSource`
 still exists for future parser work, but Cursor files are not included in the
 default daemon scan until the SDK can extract stable metadata and replay events.
 
-Authentication prefers `FLEET_API_KEY` when set and otherwise uses stored
-`flt login` browser credentials. Track requires credentials that resolve to a
-concrete Fleet user/profile so orchestrator can isolate uploaded sessions by
-`team_id`, `user_id`, and `device_id`. The orchestrator remains the control
-plane; session bytes go directly to S3 through presigned URLs.
+Authentication prefers stored `flt login` browser credentials and falls back
+to `FLEET_API_KEY` for non-interactive hosts. The API-key fallback will be
+removed in a future release; new deployments should use `flt login`. Track
+requires credentials that resolve to a concrete Fleet user/profile so
+orchestrator can isolate uploaded sessions by `team_id`, `user_id`, and
+`device_id`. The orchestrator remains the control plane; session bytes go
+directly to S3 through presigned URLs.
 
 For local use:
 
@@ -231,11 +233,12 @@ Then configure the connector to run:
 }
 ```
 
-Authentication is the same as `flt track`: `FLEET_API_KEY` is preferred when
-set, otherwise the MCP process uses stored `flt login` credentials from the
-same OS user. For a connector running under a different user or on a different
-machine, either run `flt login` in that connector environment or pass
-`FLEET_API_KEY` in `env`.
+Authentication is the same as `flt track`: the MCP process prefers stored
+`flt login` credentials from the same OS user and falls back to
+`FLEET_API_KEY` for headless hosts. For a connector running under a different
+user or on a different machine, either run `flt login` in that connector
+environment or — until the API-key flow is removed — pass `FLEET_API_KEY` in
+`env`.
 
 `FLEET_TRACK_BASE_URL` is optional; the normal Fleet default is used when it is
 omitted. The MCP process keeps orchestrator as the auth boundary and downloads

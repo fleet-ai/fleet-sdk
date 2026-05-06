@@ -412,3 +412,37 @@ def test_context_manager_closes_owned_client():
     # Injected client was NOT owned by the API; should still be usable.
     assert not injected.is_closed
     injected.close()
+
+
+def test_default_auth_provider_prefers_flt_login_over_api_key(monkeypatch):
+    """flt login is the canonical auth path; FLEET_API_KEY is a fallback."""
+    from fleet import auth as auth_module
+    from fleet.track import api as api_module
+
+    monkeypatch.setenv("FLEET_API_KEY", "sk_should_be_ignored")
+    monkeypatch.setattr(
+        auth_module, "get_valid_token", lambda: ("jwt-token", "team-1")
+    )
+
+    assert api_module._default_auth_provider() == ("jwt-token", "team-1")
+
+
+def test_default_auth_provider_falls_back_to_api_key(monkeypatch):
+    """Without flt login creds, FLEET_API_KEY still works for headless hosts."""
+    from fleet import auth as auth_module
+    from fleet.track import api as api_module
+
+    monkeypatch.setenv("FLEET_API_KEY", "sk_fallback")
+    monkeypatch.setattr(auth_module, "get_valid_token", lambda: None)
+
+    assert api_module._default_auth_provider() == "sk_fallback"
+
+
+def test_default_auth_provider_returns_none_when_unauthenticated(monkeypatch):
+    from fleet import auth as auth_module
+    from fleet.track import api as api_module
+
+    monkeypatch.delenv("FLEET_API_KEY", raising=False)
+    monkeypatch.setattr(auth_module, "get_valid_token", lambda: None)
+
+    assert api_module._default_auth_provider() is None

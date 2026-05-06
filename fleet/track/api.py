@@ -54,13 +54,21 @@ class TrackAPIError(Exception):
 
 
 def _default_auth_provider() -> Optional[AuthInfo]:
-    """Production auth: prefer FLEET_API_KEY, then stored `flt login` creds."""
+    """Production auth: prefer stored `flt login` creds, then FLEET_API_KEY.
+
+    `flt login` is the canonical user-bound auth path for Track. FLEET_API_KEY
+    remains a fallback for non-interactive hosts (CI, headless connectors)
+    and will be removed in a future release.
+    """
+    from ..auth import get_valid_token
+
+    if token := get_valid_token():
+        return token
+
     if api_key := os.getenv("FLEET_API_KEY"):
         return api_key
 
-    from ..auth import get_valid_token
-
-    return get_valid_token()
+    return None
 
 
 def _default_base_url() -> str:
