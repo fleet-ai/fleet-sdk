@@ -22,6 +22,14 @@ import uuid
 app = typer.Typer(help="Track local AI coding sessions", no_args_is_help=True)
 console = Console()
 
+DEFAULT_SESSION_SOURCE = "remote"
+LOCAL_SESSION_SOURCE = "local"
+SOURCE_HELP = (
+    "Where to read sessions from: remote (default, orchestrator/Turbopuffer), "
+    "local (native+stub; auto alias), native (~/.claude, ~/.codex), "
+    "stub (LocalSessionStore)."
+)
+
 
 def _write_config(paths: TrackPaths, config: dict) -> None:
     paths.ensure_track_dir()
@@ -231,12 +239,12 @@ def _resolve_session_store(source: str):
     """Build the SessionStore the CLI reads from based on `--source`.
 
     Modes:
-      - `auto` (default): chained Native + Stub. What you actually want
-        for testing the picker — shows native session files on disk
+      - `remote` (default): orchestrator-backed metadata/search index.
+      - `local`: chained Native + Stub. Shows native session files on disk
         AND anything explicitly ingested into the stub.
+      - `auto`: backwards-compatible alias for `local`.
       - `native`: only the read-only view of `~/.claude` / `~/.codex`.
       - `stub`: only the LocalSessionStore (the dev stub).
-      - `remote`: orchestrator-backed metadata index.
     """
     from .store import (
         ChainedSessionStore,
@@ -245,6 +253,7 @@ def _resolve_session_store(source: str):
         RemoteSessionStore,
     )
 
+    source = _normalize_source(source)
     paths = TrackPaths.default()
     if source == "stub":
         return LocalSessionStore(paths)
@@ -252,7 +261,7 @@ def _resolve_session_store(source: str):
         return NativeFilesSessionStore()
     if source == "remote":
         return RemoteSessionStore()
-    if source == "auto":
+    if source in {LOCAL_SESSION_SOURCE, "auto"}:
         # LocalSessionStore first so explicitly-ingested rows shadow native
         # ones with the same id (e.g. forks re-stored after resume).
         return ChainedSessionStore(
@@ -262,89 +271,47 @@ def _resolve_session_store(source: str):
     raise typer.BadParameter(f"Unknown --source value: {source!r}")
 
 
-@app.command(name="ls")
-def list_sessions(
-    tool: str = typer.Option(
-        None, "--tool", "-t", help="Filter by tool (claude/codex/cursor/opencode)"
-    ),
-    cwd: str = typer.Option(None, "--cwd", help="Filter by working directory"),
-    since: str = typer.Option(
-        None, "--since", help="Only sessions active since (ISO-8601 or natural)"
-    ),
-    limit: int = typer.Option(50, "--limit", "-n", help="Max rows per page (1..200)"),
-    cursor: str = typer.Option(
-        None,
-        "--cursor",
-        help="Opaque cursor from a prior `next_cursor:` line. Drives paged scripting.",
-    ),
-    json_out: bool = typer.Option(False, "--json", help="Emit JSON for scripting"),
-    source: str = typer.Option(
-        "auto",
-        "--source",
-        help="Where to read sessions from: auto (native+stub), native (~/.claude, ~/.codex), stub (LocalSessionStore), remote (orchestrator).",
-    ),
+def _normalize_source(source: str) -> str:
+    return (source or DEFAULT_SESSION_SOURCE).strip().lower()
+
+
+def _validate_cursor_for_source(source: str, cursor: str | None) -> None:
+    if not cursor or _normalize_source(source) == "remote":
+        return
+    from .store import _decode_cursor
+
+    try:
+        _decode_cursor(cursor)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
+
+def _session_dicts(sessions) -> list[dict]:
+    from dataclasses import asdict
+
+    return [asdict(s) for s in sessions]
+
+
+def _print_sessions_json(
+    *,
+    query: str | None,
+    source: str,
+    sessions,
+    next_cursor: str | None,
 ) -> None:
-    """List sessions across all tracked AI tools.
-
-    Sort is fixed at recency-first (`last_active DESC, id DESC`) — same
-    on every backend so cursors are interchangeable.
-
-    Pagination is cursor-based. Pass `--cursor <token>` from a previous
-    `next_cursor:` line to fetch the next page. The cursor format is
-    byte-compatible with the orchestrator's `/v1/track/sessions` endpoint
-    so scripting against either side uses the same opaque tokens.
-    """
-    from .store import _decode_cursor, ChainedSessionStore  # noqa: F401
-
-    store = _resolve_session_store(source)
-
-    # `--cursor` requires a single backing store; chained stores don't
-    # support pagination (see ChainedSessionStore.page).
-    if cursor and isinstance(store, ChainedSessionStore):
-        raise typer.BadParameter(
-            "--cursor requires --source native | stub | remote; the default "
-            "`auto` chains multiple backends and can't paginate across them."
+    console.print_json(
+        json.dumps(
+            {
+                "query": query,
+                "source": _normalize_source(source),
+                "items": _session_dicts(sessions),
+                "next_cursor": next_cursor,
+            }
         )
-    # Fail fast on malformed cursors so the user sees a clear error.
-    if cursor:
-        try:
-            _decode_cursor(cursor)
-        except ValueError as e:
-            raise typer.BadParameter(str(e))
+    )
 
-    if cursor or json_out:
-        # Paged scripting flow — any caller who passed --cursor wants the
-        # next_cursor surfaced; --json shape promises {items, next_cursor}.
-        sessions, next_cursor = store.page(
-            tool=tool,
-            cwd=cwd,
-            since=since,
-            limit=limit,
-            cursor=cursor,
-        )
-    else:
-        # Interactive flow — keep the existing flat-list shape.
-        sessions = store.list(tool=tool, cwd=cwd, since=since, limit=limit)
-        next_cursor = None
 
-    if json_out:
-        from dataclasses import asdict
-
-        console.print_json(
-            json.dumps(
-                {
-                    "items": [asdict(s) for s in sessions],
-                    "next_cursor": next_cursor,
-                }
-            )
-        )
-        return
-
-    if not sessions:
-        console.print("[dim]No sessions found.[/dim]")
-        console.print("  Run [bold]flt track enable[/bold] to start syncing.")
-        return
-
+def _render_sessions_table(sessions, next_cursor: str | None) -> None:
     table = Table(show_header=True, header_style="bold")
     table.add_column("ID")
     table.add_column("Tool")
@@ -370,6 +337,154 @@ def list_sessions(
         console.print(f"[dim]next_cursor:[/dim] {next_cursor}")
 
 
+@app.command(name="ls")
+def list_sessions(
+    tool: str = typer.Option(
+        None, "--tool", "-t", help="Filter by tool (claude/codex/cursor/opencode)"
+    ),
+    cwd: str = typer.Option(None, "--cwd", help="Filter by working directory"),
+    since: str = typer.Option(
+        None, "--since", help="Only sessions active since (ISO-8601 or natural)"
+    ),
+    limit: int = typer.Option(50, "--limit", "-n", help="Max rows per page (1..200)"),
+    cursor: str = typer.Option(
+        None,
+        "--cursor",
+        help="Opaque cursor from a prior `next_cursor:` line. Drives paged scripting.",
+    ),
+    query: str = typer.Option(
+        None,
+        "--query",
+        "-q",
+        help="Search remote sessions. With --source remote, forwards the query to the server search index.",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON for scripting"),
+    source: str = typer.Option(
+        DEFAULT_SESSION_SOURCE,
+        "--source",
+        help=SOURCE_HELP,
+    ),
+) -> None:
+    """List sessions across all tracked AI tools.
+
+    Sort is fixed at recency-first (`last_active DESC, id DESC`) — same
+    on every backend so cursors are interchangeable.
+
+    Pagination is cursor-based. Pass `--cursor <token>` from a previous
+    `next_cursor:` line to fetch the next page. The cursor format is
+    byte-compatible with the orchestrator's `/v1/track/sessions` endpoint
+    so scripting against either side uses the same opaque tokens.
+    """
+    from .store import ChainedSessionStore
+
+    store = _resolve_session_store(source)
+
+    # `--cursor` requires a single backing store; chained stores don't
+    # support pagination (see ChainedSessionStore.page).
+    if cursor and isinstance(store, ChainedSessionStore):
+        raise typer.BadParameter(
+            "--cursor requires --source native | stub | remote; `local` chains "
+            "multiple backends and can't paginate across them."
+        )
+    _validate_cursor_for_source(source, cursor)
+
+    sessions, next_cursor = store.page(
+        tool=tool,
+        cwd=cwd,
+        since=since,
+        query=query,
+        limit=limit,
+        cursor=cursor,
+    )
+
+    if json_out:
+        _print_sessions_json(
+            query=query,
+            source=source,
+            sessions=sessions,
+            next_cursor=next_cursor,
+        )
+        return
+
+    if not sessions:
+        console.print("[dim]No sessions found.[/dim]")
+        console.print("  Run [bold]flt track enable[/bold] to start syncing.")
+        return
+
+    _render_sessions_table(sessions, next_cursor)
+
+
+@app.command(name="search")
+def search_sessions(
+    query: str = typer.Argument(..., help="Search query to send to the session index"),
+    tool: str = typer.Option(
+        None, "--tool", "-t", help="Filter by tool (claude/codex/cursor/opencode)"
+    ),
+    cwd: str = typer.Option(None, "--cwd", help="Filter by working directory"),
+    since: str = typer.Option(
+        None, "--since", help="Only sessions active since (ISO-8601)"
+    ),
+    limit: int = typer.Option(50, "--limit", "-n", help="Max rows per page (1..200)"),
+    cursor: str = typer.Option(
+        None,
+        "--cursor",
+        help="Opaque cursor from a prior search response.",
+    ),
+    json_out: bool = typer.Option(
+        True,
+        "--json/--table",
+        help="Emit agent-friendly JSON by default; use --table for a human table.",
+    ),
+    source: str = typer.Option(
+        DEFAULT_SESSION_SOURCE,
+        "--source",
+        help=SOURCE_HELP,
+    ),
+) -> None:
+    """Search tracked sessions.
+
+    With the default remote source, the query is forwarded to the orchestrator
+    search endpoint, which uses Turbopuffer. Use `--source local` for the old
+    on-disk substring search.
+    """
+    if not query.strip():
+        raise typer.BadParameter("query must not be empty")
+
+    from .store import ChainedSessionStore
+
+    store = _resolve_session_store(source)
+    if cursor and isinstance(store, ChainedSessionStore):
+        raise typer.BadParameter(
+            "--cursor requires --source native | stub | remote; `local` chains "
+            "multiple backends and can't paginate across them."
+        )
+    _validate_cursor_for_source(source, cursor)
+
+    sessions, next_cursor = store.page(
+        tool=tool,
+        cwd=cwd,
+        since=since,
+        query=query,
+        limit=limit,
+        cursor=cursor,
+    )
+
+    if json_out:
+        _print_sessions_json(
+            query=query,
+            source=source,
+            sessions=sessions,
+            next_cursor=next_cursor,
+        )
+        return
+
+    if not sessions:
+        console.print("[dim]No sessions found.[/dim]")
+        return
+
+    _render_sessions_table(sessions, next_cursor)
+
+
 @app.command()
 def resume(
     session_id: str = typer.Argument(
@@ -383,9 +498,9 @@ def resume(
         None, "--prompt", "-p", help="Initial prompt to send to the resumed CLI"
     ),
     source: str = typer.Option(
-        "auto",
+        DEFAULT_SESSION_SOURCE,
         "--source",
-        help="Where to read sessions from: auto (native+stub), native, stub, remote.",
+        help=SOURCE_HELP,
     ),
     compact: bool = typer.Option(
         True,
