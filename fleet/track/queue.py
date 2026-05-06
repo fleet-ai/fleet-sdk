@@ -105,12 +105,23 @@ class UploadQueue:
             self._conn.commit()
 
     def enqueue_batch(self, items: list[tuple[str, str]]) -> None:
+        # Reset any existing row for the same (path, sha256) back to pending.
+        # The reconciler only calls this for files the remote manifest is
+        # missing, so any prior `done`/`failed`/`in_flight` state is a lie we
+        # need to overrule — otherwise INSERT OR IGNORE would let stale `done`
+        # rows block re-upload indefinitely.
         now = int(time.time())
         with self._lock:
             self._conn.executemany(
                 """
-                INSERT OR IGNORE INTO queue (path, sha256, status, next_attempt_at, enqueued_at, updated_at)
+                INSERT INTO queue (path, sha256, status, next_attempt_at, enqueued_at, updated_at)
                 VALUES (?, ?, 'pending', 0, ?, ?)
+                ON CONFLICT(path, sha256) DO UPDATE SET
+                    status = 'pending',
+                    next_attempt_at = 0,
+                    attempts = 0,
+                    last_error = NULL,
+                    updated_at = excluded.updated_at
                 """,
                 [(path, sha256, now, now) for path, sha256 in items],
             )
