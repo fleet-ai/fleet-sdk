@@ -90,9 +90,10 @@ def resume_session(
     still materialize a checkout because the native CLI cannot resume a
     session id whose file is absent locally.
 
-    Cross-tool: creates a checkout via the supplied `compactor` (default:
-    a `TruncationCompactor` sized to the target tool/model's typical
-    context window). Dispatches on the new ephemeral id.
+    Same-tool remote/cross-machine restores materialize the full source
+    history into a checkout. Cross-tool creates a checkout via the supplied
+    `compactor` (default: a `TruncationCompactor` sized to the target
+    tool/model's typical context window). Dispatches on the new ephemeral id.
 
     Future strategies (LLM summarization, recall-tool injection) plug
     in by passing a different `compactor`. The interface is the seam.
@@ -136,11 +137,18 @@ def resume_session(
             cwd=target_cwd_local,
         )
 
+    same_tool_materialized = session.tool == target_tool
+
     # Cross-tool: pick a default compactor sized to the target. Pass an
     # `emission_estimator` so the compactor can verify post-serialization
     # size against the budget — per-event estimation is imprecise because
     # the cross-source synthesizer's wrapper overhead varies by target.
-    if compactor is None:
+    #
+    # Same-tool materialized restores intentionally skip compaction even if
+    # the CLI default supplied one: native same-tool resume preserves the whole
+    # file, so the remote/cross-machine path must do the same.
+    checkout_compactor = None if same_tool_materialized else compactor
+    if checkout_compactor is None and not same_tool_materialized:
         from .compactor import estimate_tokens
 
         target_source = _source_for(target_tool, home=paths.home)
@@ -155,7 +163,7 @@ def resume_session(
                 # over-budget so the compactor keeps trimming.
                 return 10_000_000
 
-        compactor = TruncationCompactor(
+        checkout_compactor = TruncationCompactor(
             budget=budget_for(target_tool, target_model),
             emission_estimator=_emission_tokens,
         )
@@ -165,7 +173,7 @@ def resume_session(
         session=session,
         target_tool=target_tool,
         paths=paths,
-        compactor=compactor,
+        compactor=checkout_compactor,
     )
     # The checkout file lives under the resolved-target-cwd's project dir
     # (see `_checkout_path`); launch the CLI from there so its project

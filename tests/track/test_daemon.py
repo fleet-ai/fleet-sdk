@@ -114,6 +114,87 @@ def test_run_once_reconciles_uploads_file_and_manifest(tmp_path: Path):
     cache.close()
 
 
+def test_run_once_rewrites_manifest_without_legacy_cursor_paths(tmp_path: Path):
+    paths = TrackPaths.under(tmp_path)
+    paths.ensure_track_dir()
+
+    rel_path = (
+        ".codex/sessions/"
+        "rollout-2026-05-05T00-00-00-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb.jsonl"
+    )
+    session_file = tmp_path / rel_path
+    session_file.parent.mkdir(parents=True)
+    session_file.write_text(
+        '{"type":"session_meta","payload":{"id":"s2","cwd":"/tmp"}}\n'
+    )
+
+    queue = UploadQueue(paths)
+    cache = HashCache(paths)
+    tree = MerkleTree(cache, file_iter=[session_file])
+    local_map, _ = tree.build()
+    cursor_rel = ".cursor/projects/p1/agent-transcripts/t1/session.jsonl"
+    remote_files = {**local_map, cursor_rel: "legacy-cursor-digest"}
+
+    api_requests: list[tuple[str, dict]] = []
+    metadata_upserts: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "GET" and req.url.path.endswith("/v1/track/manifest"):
+            return httpx.Response(
+                200,
+                json={
+                    "root_hash": MerkleTree.compute_root(remote_files),
+                    "files": remote_files,
+                },
+            )
+        if req.method == "POST" and req.url.path.endswith("/v1/track/upload-urls"):
+            body = json.loads(req.content)
+            api_requests.append((req.url.path, body))
+            return httpx.Response(
+                200,
+                json={"urls": {p: f"https://s3.test/{p}" for p in body["paths"]}},
+            )
+        if req.method == "POST" and "/v1/track/sessions/" in req.url.path:
+            metadata_upserts.append(json.loads(req.content))
+            return httpx.Response(204)
+        raise AssertionError(f"unexpected request: {req.method} {req.url}")
+
+    api = TrackAPIClient(
+        client=httpx.Client(
+            transport=httpx.MockTransport(handler), base_url="http://test"
+        ),
+        auth_provider=_auth,
+    )
+    transport = RecordingTransport()
+
+    daemon = Daemon(
+        paths,
+        queue=queue,
+        cache=cache,
+        tree=tree,
+        api=api,
+        upload_transport=transport,
+    )
+
+    result = daemon.run_once(device_id="dev1")
+
+    assert result.in_sync is True
+    assert result.changed_paths == ()
+    assert result.pruned_paths == (cursor_rel,)
+
+    assert [url for url, _ in transport.calls] == ["https://s3.test/manifest.json"]
+    manifest = json.loads(transport.calls[-1][1])
+    assert manifest["files"] == local_map
+    assert cursor_rel not in daemon._confirmed_map
+
+    upload_url_paths = [body["paths"] for _, body in api_requests]
+    assert upload_url_paths == [["manifest.json"]]
+    assert len(metadata_upserts) == 1
+
+    queue.close()
+    cache.close()
+
+
 def test_upload_done_uses_callback_digest_instead_of_stale_cache(tmp_path: Path):
     paths = TrackPaths.under(tmp_path)
     paths.ensure_track_dir()

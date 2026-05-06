@@ -297,6 +297,35 @@ def test_resume_same_tool_without_native_file_materializes_checkout(
     assert checkout.exists()
 
 
+def test_resume_same_tool_materialized_checkout_ignores_compactor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    class FailingCompactor:
+        def compact(self, _events):
+            raise AssertionError("same-tool restore must preserve full history")
+
+    store = _store(tmp_path)
+    s = _seed(store, tool="claude", id="src-full", cwd="/private/tmp/work")
+    calls: list[str] = []
+
+    def fake_exec(_tool, session_id, *, prompt, cwd=None):
+        calls.append(session_id)
+        return 0
+
+    monkeypatch.setattr("fleet.track.resumer._exec_native_resume", fake_exec)
+
+    rc = resume_session(
+        store=store,
+        session=s,
+        target_tool="claude",
+        paths=TrackPaths.under(tmp_path),
+        compactor=FailingCompactor(),
+    )
+
+    assert rc == 0
+    assert calls and calls[0] != "src-full"
+
+
 def test_resume_same_tool_uses_native_session_when_present(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
