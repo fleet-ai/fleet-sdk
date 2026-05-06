@@ -47,6 +47,7 @@ def test_run_oversight_uses_api_key_auth(monkeypatch):
     _FakeOversightClient.request = None
     monkeypatch.setenv("FLEET_API_KEY", "test-api-key")
     monkeypatch.setenv("FLEET_BASE_URL", "https://api.example.com")
+    monkeypatch.setattr("fleet.auth.get_valid_token", lambda: None)
     monkeypatch.setattr(httpx, "Client", _FakeOversightClient)
 
     _run_oversight("job-1")
@@ -69,10 +70,25 @@ def test_run_oversight_uses_api_key_auth(monkeypatch):
     }
 
 
-def test_run_oversight_skips_without_api_key(monkeypatch):
+def test_run_oversight_uses_browser_login_auth(monkeypatch):
     _FakeOversightClient.request = None
     monkeypatch.delenv("FLEET_API_KEY", raising=False)
     monkeypatch.setenv("FLEET_BASE_URL", "https://api.example.com")
+    monkeypatch.setattr("fleet.auth.get_valid_token", lambda: ("jwt-token", "team-1"))
+    monkeypatch.setattr(httpx, "Client", _FakeOversightClient)
+
+    _run_oversight("job-1")
+
+    assert _FakeOversightClient.request["headers"]["X-JWT-Token"] == "jwt-token"
+    assert _FakeOversightClient.request["headers"]["X-Team-ID"] == "team-1"
+    assert "Authorization" not in _FakeOversightClient.request["headers"]
+
+
+def test_run_oversight_skips_without_auth(monkeypatch):
+    _FakeOversightClient.request = None
+    monkeypatch.delenv("FLEET_API_KEY", raising=False)
+    monkeypatch.setenv("FLEET_BASE_URL", "https://api.example.com")
+    monkeypatch.setattr("fleet.auth.get_valid_token", lambda: None)
     monkeypatch.setattr(httpx, "Client", _FakeOversightClient)
 
     _run_oversight("job-1")

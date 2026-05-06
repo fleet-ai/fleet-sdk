@@ -38,10 +38,14 @@ class BaseWrapper(AuthenticatedWrapperMixin):
         self,
         *,
         api_key: Optional[str],
+        jwt: Optional[str] = None,
+        team_id: Optional[str] = None,
         base_url: Optional[str],
     ):
         self._init_auth(
             api_key=api_key,
+            jwt=jwt,
+            team_id=team_id,
             base_url=base_url,
         )
 

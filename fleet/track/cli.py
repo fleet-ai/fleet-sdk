@@ -136,9 +136,11 @@ def enable() -> None:
     """Scan this machine for AI sessions and start syncing."""
     paths = TrackPaths.default()
 
-    if not os.getenv("FLEET_API_KEY"):
+    from ..auth import get_valid_token
+
+    if not os.getenv("FLEET_API_KEY") and not get_valid_token():
         console.print(
-            "[red]Not authenticated.[/red] Set [bold]FLEET_API_KEY[/bold] first."
+            "[red]Not authenticated.[/red] Run [bold]flt login[/bold] or set [bold]FLEET_API_KEY[/bold] first."
         )
         raise typer.Exit(1)
 

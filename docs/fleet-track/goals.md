@@ -4,7 +4,7 @@
 
 FleetTrack now has a usable v1 product path:
 
-- API-key authentication through `FLEET_API_KEY`.
+- Authentication through `FLEET_API_KEY` or stored `flt login` credentials.
 - `flt track enable/status/daemon/logs/ls/resume/gc`.
 - Local source discovery for Claude and Codex. Cursor discovery code exists, but
   default syncing is disabled until metadata extraction and event replay are
