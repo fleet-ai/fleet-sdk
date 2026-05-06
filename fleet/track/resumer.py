@@ -464,11 +464,15 @@ def _rewrite_codex_checkout_identity(
         except json.JSONDecodeError:
             out.append(line)
             continue
-        if isinstance(row, dict) and row.get("type") == "session_meta":
+        if isinstance(row, dict) and row.get("type") in {
+            "session_meta",
+            "turn_context",
+        }:
             payload = row.get("payload")
             if isinstance(payload, dict):
-                payload["id"] = session_id
                 payload["cwd"] = cwd
+                if row.get("type") == "session_meta":
+                    payload["id"] = session_id
                 row["payload"] = payload
                 line = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
         out.append(line)

@@ -22,7 +22,7 @@ from fleet.track.resumer import (
     resume_session,
 )
 from fleet.track.store import LocalSessionStore, Session
-from fleet.track.unified import UserMessage
+from fleet.track.unified import SessionStart, TurnStart, UserMessage
 
 
 def _store(tmp_path: Path) -> LocalSessionStore:
@@ -212,6 +212,65 @@ def test_create_checkout_codex_payload_has_required_fields(tmp_path: Path):
     }
     assert set(payload.keys()) >= required
     assert isinstance(payload["base_instructions"], dict)
+
+
+def test_create_checkout_codex_rewrites_same_source_turn_context_cwd(
+    tmp_path: Path,
+):
+    local_cwd = str((tmp_path / "work").resolve(strict=False))
+
+    class Store:
+        def events(self, _id):
+            yield SessionStart(
+                source="codex",
+                id="meta-row",
+                cwd="/remote/repo",
+                raw={
+                    "timestamp": "2026-04-30T00:00:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": "src-codex",
+                        "timestamp": "2026-04-30T00:00:00Z",
+                        "cwd": "/remote/repo",
+                        "originator": "codex_cli_rs",
+                        "cli_version": "1.0.0",
+                        "source": "cli",
+                        "model_provider": "openai",
+                        "base_instructions": {"text": "You are an assistant."},
+                    },
+                },
+            )
+            yield TurnStart(
+                source="codex",
+                id="turn-row",
+                turn_id="turn-1",
+                cwd="/remote/repo",
+                raw={
+                    "timestamp": "2026-04-30T00:01:00Z",
+                    "type": "turn_context",
+                    "payload": {
+                        "turn_id": "turn-1",
+                        "cwd": "/remote/repo",
+                        "model": "gpt-5",
+                    },
+                },
+            )
+
+    s = Session(id="src-codex", tool="codex", cwd=local_cwd)
+    info = _create_checkout(
+        store=Store(),
+        session=s,
+        target_tool="codex",
+        paths=TrackPaths.under(tmp_path),
+    )
+    rows = [
+        json.loads(line) for line in info.path.read_text().splitlines() if line.strip()
+    ]
+    by_type = {row["type"]: row for row in rows}
+
+    assert by_type["session_meta"]["payload"]["id"] == info.ephemeral_id
+    assert by_type["session_meta"]["payload"]["cwd"] == local_cwd
+    assert by_type["turn_context"]["payload"]["cwd"] == local_cwd
 
 
 # ------------------------------------------------------------------ #
