@@ -142,11 +142,11 @@ def test_track_ls_honors_explicit_local_source(monkeypatch):
     assert json.loads(result.stdout)["source"] == "local"
 
 
-def test_track_search_posts_inline_json_to_raw_remote_search(monkeypatch):
+def test_track_search_posts_inline_json_to_remote_search(monkeypatch):
     calls: list[dict] = []
 
     class FakeAPI:
-        def search_sessions_raw(self, body):
+        def search_sessions(self, body):
             calls.append(body)
             return {
                 "items": [
@@ -170,16 +170,16 @@ def test_track_search_posts_inline_json_to_raw_remote_search(monkeypatch):
             json.dumps(
                 {
                     "query": "who worked on turbopuffer indexing",
-                    "top_k": 5,
+                    "limit": 5,
                 }
             ),
         ],
     )
 
     assert result.exit_code == 0, result.stdout
-    assert calls == [{"query": "who worked on turbopuffer indexing", "top_k": 5}]
+    assert calls == [{"query": "who worked on turbopuffer indexing", "limit": 5}]
     payload = json.loads(result.stdout)
-    assert payload["mode"] == "tpuf"
+    assert payload["mode"] == "hybrid"
     assert payload["source"] == "remote"
     assert payload["query"] == "who worked on turbopuffer indexing"
     assert payload["items"][0]["metadata"]["title"] == "Turbopuffer indexing"
@@ -208,7 +208,7 @@ def test_track_search_requires_json_object(monkeypatch):
     result = runner.invoke(cli.app, ["search", json.dumps(["not", "an", "object"])])
 
     assert result.exit_code != 0
-    assert "search body must be a JSON object" in (result.stdout + result.stderr)
+    assert "body must be a JSON object" in (result.stdout + result.stderr)
 
 
 def test_track_search_requires_body_unless_listing_filters(monkeypatch):
@@ -237,22 +237,24 @@ def test_track_search_filters_outputs_catalog_json(monkeypatch):
 
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
-    assert payload["docs_url"] == "https://turbopuffer.com/docs/query#filtering"
+    assert "Structured Fleet session filters" in payload["description"]
     assert {field["name"] for field in payload["filterable_attributes"]} >= {
         "tool",
         "repo_url",
         "event_count",
         "last_active",
     }
-    assert "Eq" in payload["operators"]
-    assert "ContainsAnyToken" in payload["operators"]
+    assert "gte/$gte" in payload["operators"]
+    assert "contains/$contains" in payload["operators"]
+    assert "$or" in payload["logical_operators"]
+    assert "time_bucket" in payload["aggregate_features"]
 
 
 def test_track_search_applies_default_top_k(monkeypatch):
     calls: list[dict] = []
 
     class FakeAPI:
-        def search_sessions_raw(self, body):
+        def search_sessions(self, body):
             calls.append(body)
             return {"items": [], "next_cursor": None}
 
@@ -262,15 +264,15 @@ def test_track_search_applies_default_top_k(monkeypatch):
         cli.app,
         [
             "search",
-            json.dumps({"filters": ["tool", "Eq", "claude"]}),
+            json.dumps({"filters": {"tool": "claude"}}),
         ],
     )
 
     assert result.exit_code == 0, result.stdout
     assert calls == [
         {
-            "filters": ["tool", "Eq", "claude"],
-            "top_k": 50,
+            "filters": {"tool": "claude"},
+            "limit": 50,
         }
     ]
 
@@ -279,20 +281,17 @@ def test_track_search_posts_json_file_to_remote_api(tmp_path, monkeypatch):
     calls: list[dict] = []
     spec = {
         "query": "bugbot local index",
-        "filters": [
-            "And",
-            [
-                ["repo_url", "Eq", "git@github.com:fleet-ai/fleet-sdk.git"],
-                ["tool", "Eq", "codex"],
-            ],
-        ],
-        "top_k": 10,
+        "filters": {
+            "repo_url": "github.com/fleet-ai/fleet-sdk",
+            "tool": "codex",
+        },
+        "limit": 10,
     }
     spec_path = tmp_path / "search.json"
     spec_path.write_text(json.dumps(spec))
 
     class FakeAPI:
-        def search_sessions_raw(self, body):
+        def search_sessions(self, body):
             calls.append(body)
             return {
                 "items": [
@@ -314,7 +313,7 @@ def test_track_search_posts_json_file_to_remote_api(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.stdout
     assert calls == [spec]
     payload = json.loads(result.stdout)
-    assert payload["mode"] == "tpuf"
+    assert payload["mode"] == "hybrid"
     assert payload["source"] == "remote"
     assert payload["query"] == "bugbot local index"
     assert payload["items"][0]["id"] == "session-raw"
@@ -324,7 +323,7 @@ def test_track_search_reads_json_from_stdin(monkeypatch):
     calls: list[dict] = []
 
     class FakeAPI:
-        def search_sessions_raw(self, body):
+        def search_sessions(self, body):
             calls.append(body)
             return {"items": [], "next_cursor": None}
 
@@ -333,11 +332,11 @@ def test_track_search_reads_json_from_stdin(monkeypatch):
     result = runner.invoke(
         cli.app,
         ["search", "-"],
-        input=json.dumps({"rank_by": ["last_active", "desc"], "top_k": 25}),
+        input=json.dumps({"mode": "recent", "limit": 25}),
     )
 
     assert result.exit_code == 0, result.stdout
-    assert calls == [{"rank_by": ["last_active", "desc"], "top_k": 25}]
+    assert calls == [{"mode": "recent", "limit": 25}]
 
 
 def test_track_search_help_documents_json_body_mode():
@@ -346,10 +345,9 @@ def test_track_search_help_documents_json_body_mode():
     assert result.exit_code == 0, result.stdout
     assert "JSON search body" in result.stdout
     assert "flt track search @search.json" in result.stdout
-    assert "https://turbopuffer.com/docs/query#filtering" in result.stdout
-    assert "rank_by" in result.stdout
+    assert "mode" in result.stdout
     assert "filters" in result.stdout
-    assert "top_k" in result.stdout
+    assert "limit" in result.stdout
     assert "Filterable attributes" in result.stdout
     assert "repo_url" in result.stdout
     assert "last_active" in result.stdout
@@ -363,6 +361,66 @@ def test_track_search_help_documents_json_body_mode():
     assert "--since" not in result.stdout
     assert "--cursor" not in result.stdout
     assert "--source" not in result.stdout
+
+
+def test_track_aggregate_posts_json_to_aggregate_api(monkeypatch):
+    calls: list[dict] = []
+
+    class FakeAPI:
+        def aggregate_sessions(self, body):
+            calls.append(body)
+            return {
+                "backend": "postgres",
+                "groups": [{"key": {"tool": "codex"}, "count": 2}],
+                "row_count": 2,
+                "total_groups": 1,
+                "truncated": False,
+            }
+
+    monkeypatch.setattr(cli, "TrackAPIClient", FakeAPI)
+
+    body = {"group_by": ["tool"], "metrics": ["count"]}
+    result = runner.invoke(cli.app, ["aggregate", json.dumps(body)])
+
+    assert result.exit_code == 0, result.stdout
+    assert calls == [body]
+    payload = json.loads(result.stdout)
+    assert payload["backend"] == "postgres"
+    assert payload["groups"][0]["count"] == 2
+
+
+def test_track_download_outputs_cached_session_json(monkeypatch):
+    from fleet.track import download as download_mod
+
+    class FakeCached:
+        def to_dict(self):
+            return {
+                "session_id": "s1",
+                "path": "/tmp/session.jsonl",
+                "metadata_path": "/tmp/metadata.json",
+                "cache_status": "downloaded",
+                "content_codec": "gzip",
+                "raw_bytes": 1000,
+                "stored_bytes": 200,
+                "event_count": 10,
+                "last_active": "2026-05-06T00:00:00Z",
+            }
+
+    calls: list[tuple[str, bool]] = []
+
+    def fake_ensure(session_id, *, force=False):
+        calls.append((session_id, force))
+        return FakeCached()
+
+    monkeypatch.setattr(download_mod, "ensure_local_session", fake_ensure)
+
+    result = runner.invoke(cli.app, ["download", "s1", "--force"])
+
+    assert result.exit_code == 0, result.stdout
+    assert calls == [("s1", True)]
+    payload = json.loads(result.stdout)
+    assert payload["path"] == "/tmp/session.jsonl"
+    assert payload["cache_status"] == "downloaded"
 
 
 def test_build_local_index_scans_native_files_into_local_store(tmp_path, monkeypatch):

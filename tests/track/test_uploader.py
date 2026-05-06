@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+import gzip
 from pathlib import Path
 from typing import Optional
 
@@ -14,6 +15,7 @@ from fleet.track.uploader import (
     Transport,
     UploadPool,
     _read_safe,
+    prepare_upload_payload,
     upload_one,
 )
 
@@ -95,6 +97,22 @@ def test_upload_one_scrubs_secrets(tmp_path: Path):
     assert b"REDACTED" in body
 
 
+def test_prepare_upload_payload_can_gzip_scrubbed_content(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("FLEET_TRACK_UPLOAD_CODEC", "gzip")
+    f = tmp_path / "x.jsonl"
+    f.write_text('{"key": "AKIAIOSFODNN7EXAMPLE"}\n')
+
+    payload = prepare_upload_payload(f)
+
+    assert payload is not None
+    assert payload.content_codec == "gzip"
+    decoded = gzip.decompress(payload.content)
+    assert b"AKIAIOSFODNN7EXAMPLE" not in decoded
+    assert b"REDACTED" in decoded
+    assert payload.raw_bytes == len(decoded)
+    assert payload.stored_bytes == len(payload.content)
+
+
 def test_upload_one_returns_false_on_4xx(tmp_path: Path):
     f = tmp_path / "x.jsonl"
     f.write_text("hi")
@@ -124,10 +142,12 @@ def test_pool_calls_on_done_for_success(tmp_path: Path):
     f = tmp_path / "x.jsonl"
     f.write_text("ok")
 
-    done: list[tuple[str, str]] = []
+    done: list[tuple[str, str, str, int, int]] = []
     failed: list[tuple[str, str, str]] = []
     pool = UploadPool(
-        on_done=lambda p, s: done.append((p, s)),
+        on_done=lambda p, s, payload: done.append(
+            (p, s, payload.content_codec, payload.raw_bytes, payload.stored_bytes)
+        ),
         on_failed=lambda p, s, e: failed.append((p, s, e)),
         transport=RecordingTransport(),
     )
@@ -136,7 +156,7 @@ def test_pool_calls_on_done_for_success(tmp_path: Path):
     pool.drain(timeout=5)
     pool.shutdown()
 
-    assert done == [("rel/x.jsonl", "h1")]
+    assert done == [("rel/x.jsonl", "h1", "raw", 2, 2)]
     assert failed == []
 
 
@@ -147,7 +167,7 @@ def test_pool_calls_on_failed_for_4xx(tmp_path: Path):
     done: list = []
     failed: list = []
     pool = UploadPool(
-        on_done=lambda p, s: done.append((p, s)),
+        on_done=lambda p, s, _payload: done.append((p, s)),
         on_failed=lambda p, s, e: failed.append((p, s, e)),
         transport=RecordingTransport(status_for_url={"https://s3/x": 403}),
     )

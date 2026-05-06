@@ -39,7 +39,7 @@ from .status import (
     write_status,
 )
 from .store import session_from_native_path
-from .uploader import HttpxTransport, Transport, UploadPool
+from .uploader import HttpxTransport, Transport, UploadPayload, UploadPool
 
 if TYPE_CHECKING:
     from .reconciler import ReconcileResult
@@ -383,7 +383,12 @@ class Daemon:
     # Upload callbacks                                                     #
     # ------------------------------------------------------------------ #
 
-    def _on_upload_done(self, rel_path: str, sha256: str) -> None:
+    def _on_upload_done(
+        self,
+        rel_path: str,
+        sha256: str,
+        upload_payload: UploadPayload | None = None,
+    ) -> None:
         if _is_unsupported_manifest_path(rel_path):
             self._queue.delete_paths([rel_path])
             with self._confirmed_lock:
@@ -398,7 +403,7 @@ class Daemon:
         with self._confirmed_lock:
             self._confirmed_map[rel_path] = sha256
         self._manifest_dirty = True
-        self._upsert_session_metadata(rel_path, sha256)
+        self._upsert_session_metadata(rel_path, sha256, upload_payload=upload_payload)
 
     def _on_upload_failed(self, rel_path: str, sha256: str, error: str) -> None:
         self._queue.mark_failed(rel_path, sha256, error)
@@ -416,13 +421,23 @@ class Daemon:
         for rel_path, digest in file_map.items():
             self._upsert_session_metadata(rel_path, digest)
 
-    def _upsert_session_metadata(self, rel_path: str, sha256: str) -> None:
+    def _upsert_session_metadata(
+        self,
+        rel_path: str,
+        sha256: str,
+        *,
+        upload_payload: UploadPayload | None = None,
+    ) -> None:
         """Best-effort metadata index update for a confirmed S3 object.
 
         The v1 syncer's correctness still comes from S3 bytes + manifest. The
         metadata index is a read-side accelerator for listing/resume, so a
         transient failure here should be retried on a later reconcile rather
         than marking the file upload failed.
+
+        `upload_payload` is only present immediately after this process uploads
+        the file. For files merely confirmed by the remote manifest, omit
+        content metadata so orchestrator preserves the known S3 codec/size.
         """
         if rel_path == "manifest.json":
             return
@@ -435,11 +450,20 @@ class Daemon:
         if session is None:
             return
 
+        kwargs = {"include_content_metadata": False}
+        if upload_payload is not None:
+            kwargs = {
+                "content_codec": upload_payload.content_codec,
+                "raw_bytes": upload_payload.raw_bytes,
+                "stored_bytes": upload_payload.stored_bytes,
+            }
+
         try:
             self._api.upsert_session(
                 device_id=self._device_id,
                 path=rel_path,
                 session=session,
+                **kwargs,
             )
         except Exception as e:
             log.warning("metadata upsert failed %s: %s", rel_path, e)

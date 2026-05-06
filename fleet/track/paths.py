@@ -27,6 +27,7 @@ class TrackPaths:
     pid_file: Path
     log_file: Path
     config_file: Path
+    cache_dir: Path
 
     @classmethod
     def default(cls) -> "TrackPaths":
@@ -50,6 +51,7 @@ class TrackPaths:
             pid_file=track_dir / "daemon.pid",
             log_file=track_dir / "daemon.log",
             config_file=track_dir / "config.json",
+            cache_dir=track_dir / "cache",
         )
 
     def ensure_track_dir(self) -> None:
