@@ -26,6 +26,7 @@ import uuid
 from typing import TYPE_CHECKING, Optional
 
 from .api import TrackAPIClient, TrackAPIError
+from .blocklist import TrackBlocklist
 from .drainer import QueueDrainer
 from .merkle import HashCache, MerkleTree
 from .paths import TrackPaths
@@ -389,7 +390,9 @@ class Daemon:
         sha256: str,
         upload_payload: UploadPayload | None = None,
     ) -> None:
-        if _is_unsupported_manifest_path(rel_path):
+        if _is_unsupported_manifest_path(rel_path) or TrackBlocklist.from_paths(
+            self._paths
+        ).is_blocked_path(rel_path):
             self._queue.delete_paths([rel_path])
             with self._confirmed_lock:
                 if self._confirmed_map.pop(rel_path, None) is not None:

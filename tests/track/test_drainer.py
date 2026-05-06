@@ -79,6 +79,58 @@ def test_drain_submits_each_item_with_its_url(tmp_path: Path):
     queue.close()
 
 
+def test_drain_deletes_blocked_items_without_requesting_urls(tmp_path: Path):
+    requests: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        requests.append(req)
+        return httpx.Response(200, json={"urls": {}})
+
+    drainer, queue, pool, paths = _build(tmp_path, handler)
+    paths.config_file.write_text('{"blocked_session_ids":["blocked-session"]}\n')
+    queue.enqueue(".claude/projects/x/blocked-session.jsonl", "h1")
+
+    result = drainer.drain_once("dev1")
+
+    assert result.claimed == 1
+    assert result.submitted == 0
+    assert result.failed == 0
+    assert pool.submissions == []
+    assert requests == []
+    assert queue.stats() == {}
+    queue.close()
+
+
+def test_drain_skips_blocked_items_but_submits_allowed_items(tmp_path: Path):
+    requested_paths: list[list[str]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        import json as j
+
+        body = j.loads(req.content)
+        requested_paths.append(body["paths"])
+        return httpx.Response(
+            200,
+            json={"urls": {p: f"https://s3/{p}?sig=x" for p in body["paths"]}},
+        )
+
+    drainer, queue, pool, paths = _build(tmp_path, handler)
+    paths.config_file.write_text('{"blocked_session_ids":["blocked-session"]}\n')
+    queue.enqueue(".claude/projects/x/blocked-session.jsonl", "h1")
+    queue.enqueue(".claude/projects/x/allowed-session.jsonl", "h2")
+
+    result = drainer.drain_once("dev1")
+
+    assert result.claimed == 2
+    assert result.submitted == 1
+    assert result.failed == 0
+    assert requested_paths == [[".claude/projects/x/allowed-session.jsonl"]]
+    assert [s[0] for s in pool.submissions] == [
+        ".claude/projects/x/allowed-session.jsonl"
+    ]
+    queue.close()
+
+
 def test_drain_marks_failed_when_no_url_returned(tmp_path: Path):
     """Server returns an empty url map → every claimed item is marked failed."""
 

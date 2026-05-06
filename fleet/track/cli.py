@@ -14,6 +14,11 @@ from rich.console import Console
 from rich.table import Table
 
 from .api import TrackAPIClient, TrackAPIError
+from .blocklist import (
+    add_blocked_session_ids,
+    read_track_config,
+    remove_blocked_session_ids,
+)
 from .daemon import main as daemon_main
 from .install import install, is_installed, uninstall
 from .paths import TrackPaths
@@ -235,6 +240,64 @@ def logs() -> None:
     import subprocess
 
     subprocess.run(["tail", "-f", str(log_path)])
+
+
+@app.command("block")
+def block_sessions(
+    session_ids: list[str] = typer.Argument(
+        ...,
+        help="Session id(s) to exclude from FleetTrack uploads.",
+    ),
+) -> None:
+    """Block local session ids from upload."""
+    added = add_blocked_session_ids(TrackPaths.default(), session_ids)
+    if added:
+        console.print(f"[green]✓[/green] Blocked {len(added)} session id(s).")
+    else:
+        console.print("[dim]No changes; those session ids were already blocked.[/dim]")
+    console.print(
+        "[dim]Blocked sessions are pruned on the next daemon reconcile.[/dim]"
+    )
+
+
+@app.command("unblock")
+def unblock_sessions(
+    session_ids: list[str] = typer.Argument(
+        ...,
+        help="Session id(s) to allow for FleetTrack uploads again.",
+    ),
+) -> None:
+    """Remove local session ids from the upload blocklist."""
+    removed = remove_blocked_session_ids(TrackPaths.default(), session_ids)
+    if removed:
+        console.print(f"[green]✓[/green] Unblocked {len(removed)} session id(s).")
+    else:
+        console.print("[dim]No changes; those session ids were not blocked.[/dim]")
+
+
+@app.command("blocked")
+def list_blocked_sessions() -> None:
+    """List locally blocked upload ids and paths."""
+    config = read_track_config(TrackPaths.default())
+    session_ids = config.get("blocked_session_ids") or []
+    paths = config.get("blocked_paths") or []
+    globs = config.get("blocked_path_globs") or []
+    if not session_ids and not paths and not globs:
+        console.print("[dim]No FleetTrack upload blocks configured.[/dim]")
+        return
+
+    if session_ids:
+        console.print("[bold]Blocked session ids[/bold]")
+        for session_id in session_ids:
+            console.print(f"  {session_id}")
+    if paths:
+        console.print("[bold]Blocked paths[/bold]")
+        for path in paths:
+            console.print(f"  {path}")
+    if globs:
+        console.print("[bold]Blocked path globs[/bold]")
+        for pattern in globs:
+            console.print(f"  {pattern}")
 
 
 # ------------------------------------------------------------------ #
@@ -899,7 +962,9 @@ def install_mcp(
         False, "--all", help="Install for every supported client, even if not detected."
     ),
     print_only: bool = typer.Option(
-        False, "--print", help="Print the config snippet that would be written; do not write."
+        False,
+        "--print",
+        help="Print the config snippet that would be written; do not write.",
     ),
 ) -> None:
     """Install the FleetCode MCP server into local agent client configs.
@@ -979,8 +1044,6 @@ def uninstall_mcp(
     for r in results:
         label = _MCP_CLIENT_LABEL[r.client]
         if r.action == "removed":
-            console.print(
-                f"[green]✓[/green] {label}: removed [dim]({r.path})[/dim]"
-            )
+            console.print(f"[green]✓[/green] {label}: removed [dim]({r.path})[/dim]")
         else:
             console.print(f"[dim]·[/dim] {label}: skipped ({r.detail})")
