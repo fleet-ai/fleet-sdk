@@ -17,6 +17,8 @@ re-exported here.
 
 from __future__ import annotations
 
+from .api import TrackSessionSearchRequest, TrackTextMatch
+
 # --- Unified event model + format conversion --- #
 from .compactor import (
     Compactor,
@@ -78,6 +80,8 @@ from .unified import (
 __all__ = [
     # Paths
     "TrackPaths",
+    "TrackSessionSearchRequest",
+    "TrackTextMatch",
     # Unified format
     "Event",
     "SessionStart",

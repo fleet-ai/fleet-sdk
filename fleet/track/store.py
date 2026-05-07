@@ -272,6 +272,11 @@ class Session:
     `metadata` — open-ended bag conforming to `SessionMetadata`.
         Validated lazily via `metadata_typed()`; stored as dict so
         callers can read/write known keys directly.
+
+    `content_endpoint` / `search_match` — server-returned read-side metadata.
+        `content_endpoint` is the relative API path for content download.
+        `search_match` is present on search results and identifies the indexed
+        fields and rank sources that matched the query.
     """
 
     id: str
@@ -283,6 +288,8 @@ class Session:
     forked_from: Optional[str] = None
     fork_point: Optional[int] = None
     origin_device: Optional[str] = None
+    content_endpoint: Optional[str] = None
+    search_match: Optional[dict] = None
     metadata: dict = field(default_factory=dict)
 
     def metadata_typed(self) -> SessionMetadata:

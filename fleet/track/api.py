@@ -23,7 +23,7 @@ import os
 import platform
 import socket
 import gzip
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Callable, Mapping, Optional, Tuple, Union
 
 import httpx
@@ -38,6 +38,37 @@ SERVER_UPLOAD_URL_BATCH_CAP = 100  # /v1/track/upload-urls returns 400 above thi
 
 AuthInfo = Union[str, Tuple[str, str]]
 AuthProvider = Callable[[], Optional[AuthInfo]]
+SearchMode = str
+TextMatchOperator = str
+
+
+@dataclass(frozen=True)
+class TrackTextMatch:
+    """Full-text match filter for indexed FleetCode session text.
+
+    Operators mirror orchestrator's Turbopuffer-backed search API:
+    `all_tokens`, `any_token`, `phrase`, `prefix`, `glob`, `iglob`, and `regex`.
+    """
+
+    query: str
+    operator: TextMatchOperator = "all_tokens"
+    field: str = "search_text"
+    negate: bool = False
+
+
+@dataclass(frozen=True)
+class TrackSessionSearchRequest:
+    """Structured body for `POST /v1/track/sessions/search`."""
+
+    query: Optional[str] = None
+    mode: SearchMode = "hybrid"
+    last_as_prefix: bool = False
+    text_match: Optional[TrackTextMatch] = None
+    rank_by: Optional[list[Any]] = None
+    filters: Optional[Any] = None
+    time: Optional[Mapping[str, Any]] = None
+    limit: Optional[int] = None
+    top_k: int = 50
 
 
 class TrackAPIError(Exception):
@@ -220,16 +251,16 @@ class TrackAPIClient:
         _raise(resp)
         return resp.json()
 
-    def _post_session_search(self, body: Mapping[str, Any]) -> dict:
+    def _post_session_search(self, body: Any) -> dict:
         resp = self._client.post(
             "/v1/track/sessions/search",
-            json=dict(body),
+            json=_json_body(body),
             headers=self._headers(),
         )
         _raise(resp)
         return resp.json()
 
-    def search_sessions_raw(self, body: Mapping[str, Any]) -> dict:
+    def search_sessions_raw(self, body: Any) -> dict:
         """Run legacy/debug raw Turbopuffer-shaped session search.
 
         The body is forwarded to orchestrator's
@@ -240,13 +271,14 @@ class TrackAPIClient:
         """
         return self._post_session_search(body)
 
-    def search_sessions(self, body: Mapping[str, Any]) -> dict:
+    def search_sessions(self, body: Any) -> dict:
         """Run structured session search.
 
         This posts the stable Fleet search shape to the same orchestrator route
         as the legacy raw Turbopuffer body. Prefer this for agents and CLI use:
-        filters are objects, `time` is shared with aggregate queries, and the
-        server compiles the request to Turbopuffer.
+        filters are objects, `time` is shared with aggregate queries,
+        `text_match` exposes Turbopuffer token/phrase/prefix/glob/regex
+        filtering, and the server compiles the request to Turbopuffer.
         """
         return self._post_session_search(body)
 
@@ -361,6 +393,14 @@ def _session_payload(session: Any) -> dict[str, Any]:
     if isinstance(session, Mapping):
         return dict(session)
     raise TypeError(f"Unsupported session payload type: {type(session)!r}")
+
+
+def _json_body(body: Any) -> dict[str, Any]:
+    if is_dataclass(body):
+        return asdict(body)
+    if isinstance(body, Mapping):
+        return dict(body)
+    raise TypeError(f"Unsupported JSON body type: {type(body)!r}")
 
 
 def _session_id(session: Any) -> str:

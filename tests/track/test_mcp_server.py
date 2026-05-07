@@ -56,7 +56,17 @@ def test_fleetcode_query_guide_describes_query_contract():
     assert "fleetcode_aggregate_sessions" in guide["tools"]
     assert "fleetcode_download_session" in guide["tools"]
     assert "repo_url" in guide["filters"]["attributes"]
+    assert "search_text" in guide["filters"]["search_filter_attributes"]
     assert "gte/$gte" in guide["filters"]["operators"]
+    assert "prefix/$prefix" in guide["filters"]["search_text_operators"]
+    assert (
+        "text_match"
+        in guide["tools"]["fleetcode_search_sessions"]["body_fields"]
+    )
+    assert (
+        "items[].search_match"
+        in guide["tools"]["fleetcode_search_sessions"]["response_fields"]
+    )
     assert "$or" in guide["filters"]["logical_operators"]
     assert (
         "avg_event_count"
@@ -100,6 +110,20 @@ def test_fleetcode_search_sessions_preserves_explicit_limit():
     mcp_server.fleetcode_search_sessions({"query": "deployment", "limit": 5}, api=api)
 
     assert api.search_bodies == [{"query": "deployment", "limit": 5}]
+
+
+def test_fleetcode_search_sessions_preserves_text_match_fields():
+    api = FakeAPI()
+    body = {
+        "text_match": {"query": "database schema", "operator": "phrase"},
+        "last_as_prefix": True,
+        "filters": {"search_text": {"$prefix": "database schem"}},
+        "limit": 10,
+    }
+
+    mcp_server.fleetcode_search_sessions(body, api=api)
+
+    assert api.search_bodies == [body]
 
 
 def test_fleetcode_aggregate_sessions_calls_api():

@@ -854,6 +854,14 @@ def test_remote_store_pages_with_query_and_origin_device():
                         "last_active": "2026-05-05T00:00:00Z",
                         "event_count": 7,
                         "device_id": "laptop-abc12345",
+                        "content_endpoint": "/v1/track/sessions/s1/content",
+                        "search_match": {
+                            "query": "fleet",
+                            "mode": "hybrid",
+                            "matched_fields": ["search_text"],
+                            "filter_fields": [],
+                            "rank_sources": ["bm25:search_text"],
+                        },
                         "metadata": {"title": "FleetTrack"},
                     }
                 ],
@@ -868,6 +876,14 @@ def test_remote_store_pages_with_query_and_origin_device():
     assert captured["params"]["limit"] == "10"
     assert cursor == "next"
     assert items[0].origin_device == "laptop-abc12345"
+    assert items[0].content_endpoint == "/v1/track/sessions/s1/content"
+    assert items[0].search_match == {
+        "query": "fleet",
+        "mode": "hybrid",
+        "matched_fields": ["search_text"],
+        "filter_fields": [],
+        "rank_sources": ["bm25:search_text"],
+    }
     assert items[0].metadata["title"] == "FleetTrack"
 
 
