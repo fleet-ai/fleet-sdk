@@ -30,6 +30,9 @@ WORKERS = 8
 # large JSONL files on slow connections.
 DEFAULT_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=300.0, pool=10.0)
 SUPPORTED_CONTENT_CODECS = {"raw", "gzip"}
+SUPPORTED_UPLOAD_CODEC_MODES = SUPPORTED_CONTENT_CODECS | {"auto"}
+TRUE_VALUES = {"1", "true", "yes", "on"}
+FALSE_VALUES = {"0", "false", "no", "off"}
 
 
 @dataclass(frozen=True)
@@ -102,27 +105,33 @@ def _read_safe(path: Path) -> Optional[bytes]:
 
 
 def upload_content_codec() -> str:
-    """Return the configured S3 storage codec for session uploads.
+    """Return the configured S3 storage codec mode for session uploads.
 
-    Defaults to raw for safe rollout. Set FLEET_TRACK_UPLOAD_CODEC=gzip or
-    FLEET_TRACK_COMPRESS_UPLOADS=1 to store scrubbed session JSONL compressed
-    in S3. Downloads use orchestrator metadata to decode transparently.
+    Defaults to auto: gzip when it shrinks the scrubbed JSONL, raw otherwise.
+    Set FLEET_TRACK_UPLOAD_CODEC=raw|gzip|auto to force a mode. The legacy
+    FLEET_TRACK_COMPRESS_UPLOADS=1 flag maps to gzip; false-like values map
+    to raw. Downloads use orchestrator metadata to decode transparently.
     """
     explicit = os.getenv("FLEET_TRACK_UPLOAD_CODEC")
     if explicit:
         codec = explicit.strip().lower()
-    elif os.getenv("FLEET_TRACK_COMPRESS_UPLOADS", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }:
-        codec = "gzip"
+    elif (compress_uploads := os.getenv("FLEET_TRACK_COMPRESS_UPLOADS")) is not None:
+        normalized = compress_uploads.strip().lower()
+        if normalized in TRUE_VALUES:
+            codec = "gzip"
+        elif normalized in FALSE_VALUES:
+            codec = "raw"
+        else:
+            log.warning(
+                "unsupported FLEET_TRACK_COMPRESS_UPLOADS value %r; using auto",
+                compress_uploads,
+            )
+            codec = "auto"
     else:
-        codec = "raw"
-    if codec not in SUPPORTED_CONTENT_CODECS:
-        log.warning("unsupported track upload codec %r; falling back to raw", codec)
-        return "raw"
+        codec = "auto"
+    if codec not in SUPPORTED_UPLOAD_CODEC_MODES:
+        log.warning("unsupported track upload codec %r; falling back to auto", codec)
+        return "auto"
     return codec
 
 
@@ -133,11 +142,18 @@ def prepare_upload_payload(path: Path) -> Optional[UploadPayload]:
         return None
 
     scrubbed = scrub_bytes(data)
-    codec = upload_content_codec()
-    if codec == "gzip":
-        content = gzip.compress(scrubbed, compresslevel=6)
-    else:
+    codec_mode = upload_content_codec()
+    if codec_mode == "raw":
+        codec = "raw"
         content = scrubbed
+    else:
+        compressed = gzip.compress(scrubbed, compresslevel=6)
+        if codec_mode == "gzip" or len(compressed) < len(scrubbed):
+            codec = "gzip"
+            content = compressed
+        else:
+            codec = "raw"
+            content = scrubbed
     return UploadPayload(
         content=content,
         content_codec=codec,
