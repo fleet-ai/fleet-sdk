@@ -126,6 +126,7 @@ stdin:
 ```bash
 flt track search '{"query":"bugbot local index","limit":20}'
 flt track search '{"mode":"keyword","query":"schema error","filters":{"tool":"codex"}}'
+flt track search '{"text_match":{"query":"database schema","operator":"phrase"},"limit":10}'
 flt track search @search.json
 flt track search -
 flt track search --filters
@@ -136,6 +137,8 @@ The JSON body supports:
 ```text
 query    string   Natural-language search text.
 mode     string   hybrid (default), keyword, semantic, or recent.
+last_as_prefix boolean  Treat the final BM25 query token as a prefix.
+text_match object Full-text filter over indexed session text.
 limit    integer  Maximum ranked results to return. Defaults to 50.
 filters  object   Mongo-style exact/range/boolean filters.
 time     object   Shared time filter, e.g. {"field":"last_active","since":"7d"}.
@@ -149,7 +152,7 @@ Filterable attributes are:
 
 ```text
 session_id, user_id, device_id, tool, cwd, repo_url, git_branch, model,
-forked_from, event_count, started_at, last_active
+forked_from, event_count, started_at, last_active, search_text
 ```
 
 `team_id` is always injected by orchestrator. Filters support direct equality,
@@ -158,13 +161,17 @@ Mongo-style field operators, and boolean operators:
 ```json
 {"tool": "codex"}
 {"event_count": {"$gte": 1000}}
+{"search_text": {"$prefix": "database migr"}}
 {"$or": [{"repo_url": {"$contains": "theseus"}}, {"repo_url": {"$contains": "fleet-sdk"}}]}
 ```
 
 Supported field operators are `eq/$eq`, `ne/$ne`, `in/$in`, `nin/$nin`,
 `gt/$gt`, `gte/$gte`, `lt/$lt`, `lte/$lte`, `contains/$contains`,
-`glob/$glob`, and `regex/$regex`. Supported boolean operators are `$and`,
-`$or`, `$not`, and `$nor`.
+`glob/$glob`, `iglob/$iglob`, and `regex/$regex`. `search_text` additionally
+supports `$all_tokens`, `$any_token`, `$phrase`, and `$prefix`. The top-level
+`text_match` helper supports `all_tokens`, `any_token`, `phrase`, `prefix`,
+`glob`, `iglob`, and `regex`. Supported boolean operators are `$and`, `$or`,
+`$not`, and `$nor`.
 
 Example body:
 
@@ -180,6 +187,11 @@ Example body:
   "limit": 25
 }
 ```
+
+Search results may include `content_endpoint` and `search_match` on each item.
+`content_endpoint` points at the API route used by `flt track download`, and
+`search_match` identifies matched text fields and ranking sources such as
+`bm25:search_text`, `bm25:user_messages_text`, `vector`, or `last_active`.
 
 ### Aggregate
 

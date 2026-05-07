@@ -20,13 +20,19 @@ from .query_schema import (
     SEARCH_FILTER_FIELDS,
     SEARCH_FILTER_OPERATORS,
     SEARCH_LOGICAL_OPERATORS,
+    SEARCH_TEXT_FILTER_OPERATORS,
+    SEARCH_TEXT_FIELD,
     SEARCH_TIME_FIELDS,
+    TEXT_MATCH_OPERATORS,
 )
 
 FILTERABLE_ATTRIBUTES = [field["name"] for field in SEARCH_FILTER_FIELDS]
+SEARCH_FILTERABLE_ATTRIBUTES = FILTERABLE_ATTRIBUTES + [SEARCH_TEXT_FIELD["name"]]
 FILTER_OPERATORS = list(SEARCH_FILTER_OPERATORS)
 LOGICAL_OPERATORS = list(SEARCH_LOGICAL_OPERATORS)
 SEARCH_MODES = ["hybrid", "keyword", "semantic", "recent"]
+SEARCH_TEXT_OPERATORS = list(SEARCH_TEXT_FILTER_OPERATORS)
+TEXT_MATCH_OPERATORS_LIST = list(TEXT_MATCH_OPERATORS)
 TIME_FIELDS = list(SEARCH_TIME_FIELDS)
 
 
@@ -40,9 +46,24 @@ def fleetcode_query_guide() -> dict[str, Any]:
                 "body_fields": {
                     "query": "Natural-language search text.",
                     "mode": SEARCH_MODES,
+                    "last_as_prefix": "Treat the final BM25 query token as a prefix.",
+                    "text_match": {
+                        "purpose": "Full-text filter over indexed session text.",
+                        "operators": TEXT_MATCH_OPERATORS_LIST,
+                        "shape": {
+                            "query": "Text to match.",
+                            "operator": "Defaults to all_tokens.",
+                            "field": "search_text",
+                            "negate": False,
+                        },
+                    },
                     "limit": "Maximum result count. Defaults to 50.",
-                    "filters": "Mongo-style filters over filterable attributes.",
+                    "filters": "Mongo-style filters over search_filter_attributes.",
                     "time": "Shared time filter, e.g. {'field':'last_active','since':'7d'}.",
+                },
+                "response_fields": {
+                    "items[].content_endpoint": "Relative content URL endpoint for the download tool/API.",
+                    "items[].search_match": "Diagnostics: matched_fields, filter_fields, rank_sources, query, mode, and text_match.",
                 },
             },
             "fleetcode_aggregate_sessions": {
@@ -66,11 +87,15 @@ def fleetcode_query_guide() -> dict[str, Any]:
         },
         "filters": {
             "attributes": FILTERABLE_ATTRIBUTES,
+            "search_filter_attributes": SEARCH_FILTERABLE_ATTRIBUTES,
+            "search_text_field": dict(SEARCH_TEXT_FIELD),
             "operators": FILTER_OPERATORS,
+            "search_text_operators": SEARCH_TEXT_OPERATORS,
             "logical_operators": LOGICAL_OPERATORS,
             "examples": [
                 {"tool": "codex"},
                 {"event_count": {"$gte": 1000}},
+                {"search_text": {"$prefix": "database migr"}},
                 {"repo_url": "github.com/fleet-ai/theseus", "tool": "codex"},
                 {
                     "$or": [
@@ -95,6 +120,11 @@ def fleetcode_query_guide() -> dict[str, Any]:
                 "filters": {"repo_url": {"$contains": "theseus"}},
                 "time": {"field": "last_active", "since": "30d"},
                 "limit": 25,
+            },
+            "text_match": {
+                "text_match": {"query": "database schema", "operator": "phrase"},
+                "filters": {"tool": "codex"},
+                "limit": 10,
             },
             "aggregate": {
                 "group_by": ["repo_url", "tool"],
@@ -209,10 +239,11 @@ def create_mcp():
     def fleetcode_search_sessions(body: dict[str, Any]) -> dict[str, Any]:
         """Find relevant sessions using structured FleetCode search.
 
-        Body fields: query, mode, limit, filters, and time. Modes are hybrid,
-        keyword, semantic, and recent. Filters use Mongo-style `$and`, `$or`,
-        `$not`, field operators such as `$in` and `$gte`, and the documented
-        session metadata fields.
+        Body fields: query, mode, last_as_prefix, text_match, limit, filters,
+        and time. Modes are hybrid, keyword, semantic, and recent. `text_match`
+        supports all_tokens, any_token, phrase, prefix, glob, iglob, and regex
+        over search_text. Results include content_endpoint and search_match
+        when the server returns match diagnostics.
         """
         return search_impl(body)
 

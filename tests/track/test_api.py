@@ -13,6 +13,8 @@ from fleet.track.api import (
     SERVER_UPLOAD_URL_BATCH_CAP,
     TrackAPIClient,
     TrackAPIError,
+    TrackSessionSearchRequest,
+    TrackTextMatch,
 )
 
 
@@ -305,6 +307,40 @@ def test_search_sessions_posts_structured_body_and_returns_json():
     assert captured["url"] == "http://test/v1/track/sessions/search"
     assert captured["body"]["filters"] == {"tool": "codex"}
     assert out["items"] == []
+
+
+def test_search_sessions_accepts_typed_text_match_request():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"items": [], "next_cursor": None})
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    api.search_sessions(
+        TrackSessionSearchRequest(
+            query="schema migr",
+            mode="keyword",
+            last_as_prefix=True,
+            text_match=TrackTextMatch(query="database schema", operator="phrase"),
+            filters={"search_text": {"$prefix": "database schem"}},
+            limit=5,
+        )
+    )
+
+    assert captured["url"] == "http://test/v1/track/sessions/search"
+    assert captured["body"]["mode"] == "keyword"
+    assert captured["body"]["last_as_prefix"] is True
+    assert captured["body"]["text_match"] == {
+        "query": "database schema",
+        "operator": "phrase",
+        "field": "search_text",
+        "negate": False,
+    }
+    assert captured["body"]["filters"] == {
+        "search_text": {"$prefix": "database schem"}
+    }
 
 
 def test_aggregate_sessions_posts_body_and_returns_json():
