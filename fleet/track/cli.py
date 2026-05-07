@@ -106,10 +106,12 @@ def enable() -> None:
         for s in found:
             console.print(f"  [green]✓[/green] Found {s.name} at {s.root}")
 
-    # Install and start daemon
-    if is_installed() and is_running(paths):
-        console.print("[yellow]Daemon already running.[/yellow] Restarting...")
-        uninstall()
+    # Install and restart daemon. The installer reloads the service definition
+    # so users who upgrade fleet-python do not keep the old daemon process.
+    if is_installed():
+        console.print(
+            "[yellow]Daemon service already installed.[/yellow] Restarting..."
+        )
 
     console.print("Installing daemon service...")
     try:
