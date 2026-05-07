@@ -260,6 +260,26 @@ class TrackAPIClient:
         _raise(resp)
         return resp.json()
 
+    def search_fabric(self, body: Mapping[str, Any]) -> dict:
+        """Run structured Fabric entry search."""
+        resp = self._client.post(
+            "/v1/fabric/entries/search",
+            json=dict(body),
+            headers=self._headers(),
+        )
+        _raise(resp)
+        return resp.json()
+
+    def aggregate_fabric(self, body: Mapping[str, Any]) -> dict:
+        """Run structured Fabric entry aggregates."""
+        resp = self._client.post(
+            "/v1/fabric/entries/aggregate",
+            json=dict(body),
+            headers=self._headers(),
+        )
+        _raise(resp)
+        return resp.json()
+
     def get_session(self, session_id: str) -> dict:
         resp = self._client.get(
             f"/v1/track/sessions/{session_id}",

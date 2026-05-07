@@ -28,6 +28,21 @@ FILTER_OPERATORS = list(SEARCH_FILTER_OPERATORS)
 LOGICAL_OPERATORS = list(SEARCH_LOGICAL_OPERATORS)
 SEARCH_MODES = ["hybrid", "keyword", "semantic", "recent"]
 TIME_FIELDS = list(SEARCH_TIME_FIELDS)
+FABRIC_SOURCES = ["slack", "linear", "github"]
+FABRIC_GROUP_BY = [
+    "source",
+    "day",
+    "hour",
+    "channel",
+    "author",
+    "identifier",
+    "state",
+    "linear_team",
+    "linear_project",
+    "linear_state_type",
+    "github_repo",
+    "github_author",
+]
 
 
 def fleetcode_query_guide() -> dict[str, Any]:
@@ -56,6 +71,30 @@ def fleetcode_query_guide() -> dict[str, Any]:
                     "time_bucket": "Optional bucket: {'field':'last_active','interval':'day'}.",
                     "order_by": "Metric/key ordering, e.g. [{'field':'count','direction':'desc'}].",
                     "having": "Metric filters after grouping, e.g. {'count': {'$gte': 5}}.",
+                    "limit": "Maximum number of groups. Defaults server-side.",
+                },
+            },
+            "fleetcode_search_fabric": {
+                "purpose": "Search FleetCode Fabric activity across Slack, Linear, and GitHub.",
+                "backend": "Postgres Fabric tables via orchestrator",
+                "body_fields": {
+                    "q": "Natural-language search text.",
+                    "sources": FABRIC_SOURCES,
+                    "time": "Fabric time filter, e.g. {'since':'7d'} or {'gte':'2026-05-01T00:00:00Z'}.",
+                    "limit": "Maximum result count. Defaults server-side.",
+                    "cursor": "Opaque pagination cursor returned as next_cursor.",
+                },
+            },
+            "fleetcode_aggregate_fabric": {
+                "purpose": "Summarize FleetCode Fabric activity by source, time, and source-specific fields.",
+                "backend": "Postgres Fabric tables via orchestrator",
+                "body_fields": {
+                    "q": "Optional natural-language search text to constrain aggregated entries.",
+                    "sources": FABRIC_SOURCES,
+                    "time": "Same Fabric time filter as search.",
+                    "group_by": FABRIC_GROUP_BY,
+                    "metrics": ["count"],
+                    "order_by": "Metric/key ordering, e.g. [{'field':'count','direction':'desc'}].",
                     "limit": "Maximum number of groups. Defaults server-side.",
                 },
             },
@@ -104,6 +143,21 @@ def fleetcode_query_guide() -> dict[str, Any]:
                 "having": {"count": {"$gte": 5}},
                 "order_by": [{"field": "count", "direction": "desc"}],
             },
+            "fabric_search": {
+                "q": "deployment incident",
+                "sources": ["slack", "github"],
+                "time": {"since": "14d"},
+                "limit": 25,
+            },
+            "fabric_aggregate": {
+                "q": "deployment incident",
+                "sources": ["linear", "github"],
+                "group_by": ["source", "day", "state"],
+                "metrics": ["count"],
+                "time": {"since": "30d"},
+                "order_by": [{"field": "count", "direction": "desc"}],
+                "limit": 50,
+            },
         },
     }
 
@@ -144,6 +198,26 @@ def fleetcode_aggregate_sessions(
     """Run structured FleetCode aggregate session query."""
     payload = _body_dict(body)
     return _with_api(api, lambda client: client.aggregate_sessions(payload))
+
+
+def fleetcode_search_fabric(
+    body: Mapping[str, Any],
+    *,
+    api: Optional[TrackAPIClient] = None,
+) -> dict[str, Any]:
+    """Run structured FleetCode Fabric search."""
+    payload = _body_dict(body)
+    return _with_api(api, lambda client: client.search_fabric(payload))
+
+
+def fleetcode_aggregate_fabric(
+    body: Mapping[str, Any],
+    *,
+    api: Optional[TrackAPIClient] = None,
+) -> dict[str, Any]:
+    """Run structured FleetCode Fabric aggregate query."""
+    payload = _body_dict(body)
+    return _with_api(api, lambda client: client.aggregate_fabric(payload))
 
 
 def fleetcode_download_session(
@@ -198,6 +272,8 @@ def create_mcp():
     mcp = FastMCP("fleetcode")
     search_impl = globals()["fleetcode_search_sessions"]
     aggregate_impl = globals()["fleetcode_aggregate_sessions"]
+    fabric_search_impl = globals()["fleetcode_search_fabric"]
+    fabric_aggregate_impl = globals()["fleetcode_aggregate_fabric"]
     download_impl = globals()["fleetcode_download_session"]
 
     @mcp.tool()
@@ -225,6 +301,26 @@ def create_mcp():
         distinct user/device/repo/model counts. No raw SQL is accepted.
         """
         return aggregate_impl(body)
+
+    @mcp.tool()
+    def fleetcode_search_fabric(body: dict[str, Any]) -> dict[str, Any]:
+        """Search FleetCode Fabric activity.
+
+        Body fields: q, sources, time, limit, and cursor. Sources are slack,
+        linear, and github. No raw SQL is accepted.
+        """
+        return fabric_search_impl(body)
+
+    @mcp.tool()
+    def fleetcode_aggregate_fabric(body: dict[str, Any]) -> dict[str, Any]:
+        """Aggregate FleetCode Fabric activity.
+
+        Body fields: q, sources, time, group_by, metrics, order_by, and limit.
+        Metrics currently support count. Group by source, day, hour, channel,
+        author, identifier, state, and source-specific Linear or GitHub fields.
+        No raw SQL is accepted.
+        """
+        return fabric_aggregate_impl(body)
 
     @mcp.tool()
     def fleetcode_download_session(
