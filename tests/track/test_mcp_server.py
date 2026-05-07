@@ -11,6 +11,8 @@ class FakeAPI:
     def __init__(self):
         self.search_bodies = []
         self.aggregate_bodies = []
+        self.fabric_search_bodies = []
+        self.fabric_aggregate_bodies = []
 
     def search_sessions(self, body):
         self.search_bodies.append(body)
@@ -19,6 +21,14 @@ class FakeAPI:
     def aggregate_sessions(self, body):
         self.aggregate_bodies.append(body)
         return {"groups": [{"key": {"tool": "codex"}, "count": 1}]}
+
+    def search_fabric(self, body):
+        self.fabric_search_bodies.append(body)
+        return {"items": [{"source": "slack", "identifier": "C123"}]}
+
+    def aggregate_fabric(self, body):
+        self.fabric_aggregate_bodies.append(body)
+        return {"groups": [{"key": {"source": "github"}, "count": 2}]}
 
 
 @dataclass(frozen=True)
@@ -53,6 +63,26 @@ def test_fleetcode_query_guide_describes_query_contract():
         in guide["tools"]["fleetcode_aggregate_sessions"]["body_fields"]["metrics"]
     )
     assert "time_bucket" in guide["tools"]["fleetcode_aggregate_sessions"]["body_fields"]
+    assert "fleetcode_search_fabric" in guide["tools"]
+    assert "fleetcode_aggregate_fabric" in guide["tools"]
+    assert (
+        "github"
+        in guide["tools"]["fleetcode_search_fabric"]["body_fields"]["sources"]
+    )
+    assert (
+        "linear_team"
+        in guide["tools"]["fleetcode_aggregate_fabric"]["body_fields"]["group_by"]
+    )
+    assert "q" in guide["tools"]["fleetcode_search_fabric"]["body_fields"]
+    assert "filters" not in guide["tools"]["fleetcode_search_fabric"]["body_fields"]
+    assert "q" in guide["tools"]["fleetcode_aggregate_fabric"]["body_fields"]
+    assert "filters" not in guide["tools"]["fleetcode_aggregate_fabric"]["body_fields"]
+    assert "fabric_search" in guide["examples"]
+    assert "fabric_aggregate" in guide["examples"]
+    assert "q" in guide["examples"]["fabric_search"]
+    assert "filters" not in guide["examples"]["fabric_search"]
+    assert "q" in guide["examples"]["fabric_aggregate"]
+    assert "filters" not in guide["examples"]["fabric_aggregate"]
 
 
 def test_fleetcode_search_sessions_defaults_limit_and_calls_api():
@@ -80,6 +110,30 @@ def test_fleetcode_aggregate_sessions_calls_api():
 
     assert out["groups"][0]["count"] == 1
     assert api.aggregate_bodies == [body]
+
+
+def test_fleetcode_search_fabric_calls_api():
+    api = FakeAPI()
+    body = {"q": "deployment", "sources": ["slack"], "limit": 5}
+
+    out = mcp_server.fleetcode_search_fabric(body, api=api)
+
+    assert out["items"][0]["source"] == "slack"
+    assert api.fabric_search_bodies == [body]
+
+
+def test_fleetcode_aggregate_fabric_calls_api():
+    api = FakeAPI()
+    body = {
+        "q": "deployment",
+        "sources": ["github"],
+        "group_by": ["source", "github_repo"],
+    }
+
+    out = mcp_server.fleetcode_aggregate_fabric(body, api=api)
+
+    assert out["groups"][0]["count"] == 2
+    assert api.fabric_aggregate_bodies == [body]
 
 
 def test_fleetcode_download_session_returns_path_and_local_guidance(monkeypatch):
@@ -114,6 +168,15 @@ def test_fleetcode_download_session_returns_path_and_local_guidance(monkeypatch)
 def test_fleetcode_tools_reject_non_object_body():
     with pytest.raises(TypeError, match="body must be a JSON object"):
         mcp_server.fleetcode_search_sessions(["not", "an", "object"])  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [mcp_server.fleetcode_search_fabric, mcp_server.fleetcode_aggregate_fabric],
+)
+def test_fleetcode_fabric_tools_reject_non_object_body(tool):
+    with pytest.raises(TypeError, match="body must be a JSON object"):
+        tool(["not", "an", "object"])  # type: ignore[arg-type]
 
 
 def test_mcp_install_error_mentions_python_requirement(monkeypatch):

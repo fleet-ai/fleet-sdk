@@ -332,6 +332,74 @@ def test_aggregate_sessions_posts_body_and_returns_json():
     assert out["groups"][0]["count"] == 2
 
 
+def test_search_fabric_posts_body_headers_and_returns_json():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["url"] = str(request.url)
+        captured["headers"] = dict(request.headers)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "items": [{"id": "entry-1", "kind": "note"}],
+                "next_cursor": None,
+            },
+        )
+
+    body = {
+        "q": "deployment plan",
+        "sources": ["slack", "github"],
+        "time": {"field": "occurred_at", "since": "7d"},
+        "limit": 5,
+    }
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    out = api.search_fabric(body)
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == "http://test/v1/fabric/entries/search"
+    assert captured["headers"]["authorization"] == "Bearer test-api-key"
+    assert captured["body"] == body
+    assert out["items"][0]["id"] == "entry-1"
+
+
+def test_aggregate_fabric_posts_body_headers_and_returns_json():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["method"] = request.method
+        captured["url"] = str(request.url)
+        captured["headers"] = dict(request.headers)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "backend": "postgres",
+                "groups": [{"key": {"kind": "note"}, "count": 3}],
+                "row_count": 3,
+                "total_groups": 1,
+                "truncated": False,
+            },
+        )
+
+    body = {
+        "q": "deployment plan",
+        "sources": ["linear", "github"],
+        "time": {"field": "occurred_at", "since": "14d"},
+        "group_by": ["source", "day"],
+        "metrics": ["count"],
+    }
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    out = api.aggregate_fabric(body)
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == "http://test/v1/fabric/entries/aggregate"
+    assert captured["headers"]["authorization"] == "Bearer test-api-key"
+    assert captured["body"] == body
+    assert out["groups"][0]["count"] == 3
+
+
 def test_download_session_content_uses_presigned_url_without_auth_headers():
     seen: list[tuple[str, str | None]] = []
 
