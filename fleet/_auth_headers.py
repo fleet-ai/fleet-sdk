@@ -20,12 +20,14 @@ class AuthenticatedWrapperMixin:
         team_id: Optional[str] = None,
         base_url: Optional[str],
     ) -> None:
+        self._uses_stored_login_auth = False
         if not api_key and not (jwt and team_id):
             from .auth import get_valid_token
 
             token_info = get_valid_token()
             if token_info:
                 jwt, team_id = token_info
+                self._uses_stored_login_auth = True
 
         if not api_key and not (jwt and team_id):
             raise ValueError("Provide api_key, provide jwt/team_id, or run `flt login`")
@@ -42,6 +44,15 @@ class AuthenticatedWrapperMixin:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         elif self.jwt and self.team_id:
+            if getattr(self, "_uses_stored_login_auth", False):
+                from .auth import get_valid_token
+
+                token_info = get_valid_token()
+                if not token_info:
+                    raise self._authentication_error_cls(
+                        "Stored login credentials are expired; run `flt login` again"
+                    )
+                self.jwt, self.team_id = token_info
             headers["X-JWT-Token"] = self.jwt
             headers["X-Team-ID"] = self.team_id
         else:
