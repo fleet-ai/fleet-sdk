@@ -67,6 +67,22 @@ def test_render_launchd_plist_includes_api_key_when_set(tmp_path: Path, monkeypa
     assert "sk_test" in body
 
 
+def test_render_launchd_plist_includes_compression_overrides(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.delenv("FLEET_API_KEY", raising=False)
+    monkeypatch.delenv("FLEET_TRACK_BASE_URL", raising=False)
+    monkeypatch.setenv("FLEET_TRACK_UPLOAD_CODEC", "raw")
+    monkeypatch.setenv("FLEET_TRACK_COMPRESS_UPLOADS", "0")
+
+    body = render_launchd_plist(_paths(tmp_path), flt_path="/usr/local/bin/flt")
+
+    assert "FLEET_TRACK_UPLOAD_CODEC" in body
+    assert "raw" in body
+    assert "FLEET_TRACK_COMPRESS_UPLOADS" in body
+    assert ">0<" in body
+
+
 def test_render_systemd_unit_has_required_directives(tmp_path: Path):
     body = render_systemd_unit(_paths(tmp_path), flt_path="/usr/local/bin/flt")
 
@@ -103,6 +119,20 @@ def test_render_systemd_unit_includes_api_key_when_set(tmp_path: Path, monkeypat
     monkeypatch.delenv("FLEET_TRACK_BASE_URL", raising=False)
     body = render_systemd_unit(_paths(tmp_path), flt_path="/usr/local/bin/flt")
     assert 'Environment="FLEET_API_KEY=sk_test"' in body
+
+
+def test_render_systemd_unit_includes_compression_overrides(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.delenv("FLEET_API_KEY", raising=False)
+    monkeypatch.delenv("FLEET_TRACK_BASE_URL", raising=False)
+    monkeypatch.setenv("FLEET_TRACK_UPLOAD_CODEC", "raw")
+    monkeypatch.setenv("FLEET_TRACK_COMPRESS_UPLOADS", "0")
+
+    body = render_systemd_unit(_paths(tmp_path), flt_path="/usr/local/bin/flt")
+
+    assert 'Environment="FLEET_TRACK_UPLOAD_CODEC=raw"' in body
+    assert 'Environment="FLEET_TRACK_COMPRESS_UPLOADS=0"' in body
 
 
 def test_render_systemd_unit_escapes_percent_specifiers(tmp_path: Path, monkeypatch):

@@ -16,6 +16,7 @@ from fleet.track.uploader import (
     UploadPool,
     _read_safe,
     prepare_upload_payload,
+    upload_content_codec,
     upload_one,
 )
 
@@ -111,6 +112,41 @@ def test_prepare_upload_payload_can_gzip_scrubbed_content(tmp_path: Path, monkey
     assert b"REDACTED" in decoded
     assert payload.raw_bytes == len(decoded)
     assert payload.stored_bytes == len(payload.content)
+
+
+def test_prepare_upload_payload_auto_gzips_when_smaller(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("FLEET_TRACK_UPLOAD_CODEC", raising=False)
+    monkeypatch.delenv("FLEET_TRACK_COMPRESS_UPLOADS", raising=False)
+    f = tmp_path / "x.jsonl"
+    f.write_text('{"message": "' + ("same text " * 2_000) + '"}\n')
+
+    payload = prepare_upload_payload(f)
+
+    assert payload is not None
+    assert payload.content_codec == "gzip"
+    assert gzip.decompress(payload.content).startswith(b'{"message": "same text')
+    assert payload.stored_bytes < payload.raw_bytes
+
+
+def test_prepare_upload_payload_raw_override_disables_auto_gzip(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("FLEET_TRACK_UPLOAD_CODEC", "raw")
+    f = tmp_path / "x.jsonl"
+    f.write_text('{"message": "' + ("same text " * 2_000) + '"}\n')
+
+    payload = prepare_upload_payload(f)
+
+    assert payload is not None
+    assert payload.content_codec == "raw"
+    assert payload.content == f.read_bytes()
+
+
+def test_upload_content_codec_legacy_false_flag_maps_to_raw(monkeypatch):
+    monkeypatch.delenv("FLEET_TRACK_UPLOAD_CODEC", raising=False)
+    monkeypatch.setenv("FLEET_TRACK_COMPRESS_UPLOADS", "0")
+
+    assert upload_content_codec() == "raw"
 
 
 def test_upload_one_returns_false_on_4xx(tmp_path: Path):
