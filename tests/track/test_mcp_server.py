@@ -77,12 +77,14 @@ def test_fleetcode_query_guide_describes_query_contract():
     assert "filters" not in guide["tools"]["fleetcode_search_fabric"]["body_fields"]
     assert "q" in guide["tools"]["fleetcode_aggregate_fabric"]["body_fields"]
     assert "filters" not in guide["tools"]["fleetcode_aggregate_fabric"]["body_fields"]
+    assert "metrics" not in guide["tools"]["fleetcode_aggregate_fabric"]["body_fields"]
     assert "fabric_search" in guide["examples"]
     assert "fabric_aggregate" in guide["examples"]
     assert "q" in guide["examples"]["fabric_search"]
     assert "filters" not in guide["examples"]["fabric_search"]
     assert "q" in guide["examples"]["fabric_aggregate"]
     assert "filters" not in guide["examples"]["fabric_aggregate"]
+    assert "metrics" not in guide["examples"]["fabric_aggregate"]
 
 
 def test_fleetcode_search_sessions_defaults_limit_and_calls_api():

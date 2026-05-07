@@ -388,7 +388,6 @@ def test_aggregate_fabric_posts_body_headers_and_returns_json():
         "sources": ["linear", "github"],
         "time": {"field": "occurred_at", "since": "14d"},
         "group_by": ["source", "day"],
-        "metrics": ["count"],
     }
     api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
     out = api.aggregate_fabric(body)
