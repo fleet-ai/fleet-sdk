@@ -23,7 +23,7 @@ STATUS_SCHEMA_VERSION = 1
 @dataclass
 class TrackStatus:
     pid: int = 0
-    state: str = "idle"          # idle | syncing | error
+    state: str = "idle"  # idle | syncing | error
     last_sync: Optional[str] = None
     queue_depth: int = 0
     files_total: int = 0
@@ -41,7 +41,14 @@ def write_pid(paths: TrackPaths) -> None:
 
 
 def clear_pid(paths: TrackPaths) -> None:
-    paths.pid_file.unlink(missing_ok=True)
+    try:
+        pid = int(paths.pid_file.read_text().strip())
+    except FileNotFoundError:
+        return
+    except ValueError:
+        return
+    if pid == os.getpid():
+        paths.pid_file.unlink(missing_ok=True)
 
 
 def is_running(paths: TrackPaths) -> bool:

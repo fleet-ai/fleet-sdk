@@ -36,6 +36,16 @@ def test_clear_pid_no_file_is_noop(tmp_path: Path):
     clear_pid(paths)  # must not raise
 
 
+def test_clear_pid_preserves_newer_daemon_pid(tmp_path: Path):
+    paths = _paths(tmp_path)
+    paths.ensure_track_dir()
+    paths.pid_file.write_text(str(os.getpid() + 1))
+
+    clear_pid(paths)
+
+    assert paths.pid_file.read_text() == str(os.getpid() + 1)
+
+
 def test_is_running_no_pid_file(tmp_path: Path):
     assert is_running(_paths(tmp_path)) is False
 
