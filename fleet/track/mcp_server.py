@@ -93,7 +93,6 @@ def fleetcode_query_guide() -> dict[str, Any]:
                     "sources": FABRIC_SOURCES,
                     "time": "Same Fabric time filter as search.",
                     "group_by": FABRIC_GROUP_BY,
-                    "metrics": ["count"],
                     "order_by": "Metric/key ordering, e.g. [{'field':'count','direction':'desc'}].",
                     "limit": "Maximum number of groups. Defaults server-side.",
                 },
@@ -153,7 +152,6 @@ def fleetcode_query_guide() -> dict[str, Any]:
                 "q": "deployment incident",
                 "sources": ["linear", "github"],
                 "group_by": ["source", "day", "state"],
-                "metrics": ["count"],
                 "time": {"since": "30d"},
                 "order_by": [{"field": "count", "direction": "desc"}],
                 "limit": 50,
@@ -315,10 +313,10 @@ def create_mcp():
     def fleetcode_aggregate_fabric(body: dict[str, Any]) -> dict[str, Any]:
         """Aggregate FleetCode Fabric activity.
 
-        Body fields: q, sources, time, group_by, metrics, order_by, and limit.
-        Metrics currently support count. Group by source, day, hour, channel,
-        author, identifier, state, and source-specific Linear or GitHub fields.
-        No raw SQL is accepted.
+        Body fields: q, sources, time, group_by, order_by, and limit. Groups
+        return count values. Group by source, day, hour, channel, author,
+        identifier, state, and source-specific Linear or GitHub fields. No raw
+        SQL is accepted.
         """
         return fabric_aggregate_impl(body)
 
