@@ -4,7 +4,14 @@ import base64
 import json
 import time
 
+import pytest
+
 from fleet import auth
+from fleet._auth_headers import AuthenticatedWrapperMixin
+
+
+class _Wrapper(AuthenticatedWrapperMixin):
+    pass
 
 
 def _jwt(exp: int) -> str:
@@ -61,6 +68,57 @@ def test_get_valid_token_refreshes_expired_token(tmp_path, monkeypatch):
     stored = auth.load_credentials()
     assert stored["access_token"] == new_token
     assert stored["refresh_token"] == "refresh-next"
+
+
+def test_stored_login_auth_refreshes_headers_per_request(monkeypatch):
+    tokens = iter(
+        [
+            ("initial-token", "team-1"),
+            ("refreshed-token", "team-1"),
+        ]
+    )
+
+    monkeypatch.setattr(auth, "get_valid_token", lambda: next(tokens))
+
+    wrapper = _Wrapper()
+    wrapper._init_auth(api_key=None, base_url=None)
+
+    headers = wrapper.get_headers()
+
+    assert headers["X-JWT-Token"] == "refreshed-token"
+    assert headers["X-Team-ID"] == "team-1"
+
+
+def test_explicit_jwt_auth_does_not_refresh_headers(monkeypatch):
+    monkeypatch.setattr(
+        auth,
+        "get_valid_token",
+        lambda: pytest.fail("explicit JWT auth should not read stored login"),
+    )
+
+    wrapper = _Wrapper()
+    wrapper._init_auth(
+        api_key=None,
+        jwt="explicit-token",
+        team_id="team-1",
+        base_url=None,
+    )
+
+    headers = wrapper.get_headers()
+
+    assert headers["X-JWT-Token"] == "explicit-token"
+    assert headers["X-Team-ID"] == "team-1"
+
+
+def test_stored_login_auth_raises_when_refresh_fails(monkeypatch):
+    tokens = iter([("initial-token", "team-1"), None])
+    monkeypatch.setattr(auth, "get_valid_token", lambda: next(tokens))
+
+    wrapper = _Wrapper()
+    wrapper._init_auth(api_key=None, base_url=None)
+
+    with pytest.raises(RuntimeError, match="Stored login credentials are expired"):
+        wrapper.get_headers()
 
 
 def test_clear_credentials_removes_file(tmp_path, monkeypatch):
