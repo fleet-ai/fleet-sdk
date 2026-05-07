@@ -80,7 +80,9 @@ def is_installed() -> bool:
 # ------------------------------------------------------------------ #
 
 
-def render_launchd_plist(paths: TrackPaths, flt_path: str, env_path: str = "/usr/local/bin:/usr/bin:/bin") -> str:
+def render_launchd_plist(
+    paths: TrackPaths, flt_path: str, env_path: str = "/usr/local/bin:/usr/bin:/bin"
+) -> str:
     """Return the plist XML body. Pure: no filesystem side-effects."""
     extra_env = "\n".join(
         f"        <key>{key}</key>\n        <string>{escape(value)}</string>"
@@ -120,7 +122,9 @@ def render_launchd_plist(paths: TrackPaths, flt_path: str, env_path: str = "/usr
 """
 
 
-def render_systemd_unit(paths: TrackPaths, flt_path: str, env_path: str = "/usr/local/bin:/usr/bin:/bin") -> str:
+def render_systemd_unit(
+    paths: TrackPaths, flt_path: str, env_path: str = "/usr/local/bin:/usr/bin:/bin"
+) -> str:
     """Return the systemd service unit body. Pure: no filesystem side-effects."""
     extra_env = "\n".join(
         f'Environment="{key}={_escape_systemd_env_value(value)}"'
@@ -177,6 +181,58 @@ def _launchd_plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{PLIST_LABEL}.plist"
 
 
+def _launchd_user_domain() -> str:
+    return f"gui/{os.getuid()}"
+
+
+def _launchd_service_target() -> str:
+    return f"{_launchd_user_domain()}/{PLIST_LABEL}"
+
+
+def _stop_launchd_service(plist_path: Path) -> None:
+    """Best-effort stop for both modern launchd and legacy loaded jobs."""
+    subprocess.run(
+        ["launchctl", "bootout", _launchd_service_target()],
+        capture_output=True,
+    )
+    subprocess.run(
+        ["launchctl", "bootout", _launchd_user_domain(), str(plist_path)],
+        capture_output=True,
+    )
+    subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+
+
+def _bootstrap_launchd_service(plist_path: Path) -> None:
+    result = subprocess.run(
+        ["launchctl", "bootstrap", _launchd_user_domain(), str(plist_path)],
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        return
+
+    legacy = subprocess.run(["launchctl", "load", str(plist_path)], capture_output=True)
+    if legacy.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+
+
+def _kickstart_launchd_service() -> None:
+    result = subprocess.run(
+        ["launchctl", "kickstart", "-k", _launchd_service_target()],
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        return
+
+    # Older launchctl implementations may not have kickstart. The loaded plist
+    # has RunAtLoad=true, and this legacy start gives those systems a nudge.
+    subprocess.run(["launchctl", "start", PLIST_LABEL], capture_output=True)
+
+
 def _install_launchd(paths: TrackPaths) -> None:
     paths.ensure_track_dir()
     body = render_launchd_plist(
@@ -186,16 +242,17 @@ def _install_launchd(paths: TrackPaths) -> None:
     )
     plist_path = _launchd_plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
+    _stop_launchd_service(plist_path)
     _write_private_text(plist_path, body)
 
-    subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
-    subprocess.run(["launchctl", "load", str(plist_path)], check=True)
+    _bootstrap_launchd_service(plist_path)
+    _kickstart_launchd_service()
 
 
 def _uninstall_launchd() -> None:
     plist_path = _launchd_plist_path()
     if plist_path.exists():
-        subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+        _stop_launchd_service(plist_path)
         plist_path.unlink()
 
 
@@ -220,10 +277,14 @@ def _install_systemd(paths: TrackPaths) -> None:
     _write_private_text(service_path, body)
 
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-    subprocess.run(["systemctl", "--user", "enable", "--now", SYSTEMD_SERVICE], check=True)
+    subprocess.run(["systemctl", "--user", "enable", SYSTEMD_SERVICE], check=True)
+    subprocess.run(["systemctl", "--user", "restart", SYSTEMD_SERVICE], check=True)
 
 
 def _uninstall_systemd() -> None:
-    subprocess.run(["systemctl", "--user", "disable", "--now", SYSTEMD_SERVICE], capture_output=True)
+    subprocess.run(
+        ["systemctl", "--user", "disable", "--now", SYSTEMD_SERVICE],
+        capture_output=True,
+    )
     _systemd_service_path().unlink(missing_ok=True)
     subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
