@@ -34,6 +34,7 @@ log = logging.getLogger("fleet.track.api")
 
 DEFAULT_TIMEOUT = 30.0
 SERVER_UPLOAD_URL_BATCH_CAP = 100  # /v1/track/upload-urls returns 400 above this.
+SERVER_BULK_UPSERT_BATCH_CAP = 100  # /v1/track/sessions/bulk; chunk to match.
 
 
 AuthInfo = Union[str, Tuple[str, str]]
@@ -54,6 +55,22 @@ class TrackTextMatch:
     operator: TextMatchOperator = "all_tokens"
     field: str = "search_text"
     negate: bool = False
+
+
+@dataclass(frozen=True)
+class BulkSessionUpsert:
+    """One item in a /v1/track/sessions/bulk request.
+
+    Mirrors the per-arg shape of `upsert_session`. `content_codec`,
+    `raw_bytes`, `stored_bytes` are only sent when this row carries
+    a fresh upload (i.e. include_content_metadata=True equivalent).
+    """
+
+    path: str
+    session: Any
+    content_codec: Optional[str] = None
+    raw_bytes: Optional[int] = None
+    stored_bytes: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +99,26 @@ class TrackAPIError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.detail = detail
+
+
+class BulkUpsertPartialFailure(TrackAPIError):
+    """Raised when one chunk of `upsert_sessions_bulk` fails after earlier
+    chunks succeeded. `unsent_items` is the failing chunk plus everything
+    after it; everything before it is already committed server-side. Lets
+    the caller re-enqueue only what hasn't been sent, avoiding repeat
+    sends of already-committed rows on the next flush.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        unsent_items: list["BulkSessionUpsert"],
+        status_code: Optional[int] = None,
+        detail: Any = None,
+    ) -> None:
+        super().__init__(message, status_code=status_code, detail=detail)
+        self.unsent_items = unsent_items
 
 
 def _default_auth_provider() -> Optional[AuthInfo]:
@@ -222,6 +259,56 @@ class TrackAPIClient:
             headers=self._headers(),
         )
         _raise(resp)
+
+    def upsert_sessions_bulk(
+        self,
+        *,
+        device_id: str,
+        items: list["BulkSessionUpsert"],
+    ) -> None:
+        """Bulk-register metadata for many sessions in one request.
+
+        Server reuses the single-row upsert translation logic per item, so
+        path → s3_key conversion and validation behave identically. Empty
+        list is a no-op. Chunks at SERVER_BULK_UPSERT_BATCH_CAP to match
+        the server cap.
+
+        On partial failure (some chunk succeeds, a later one doesn't),
+        raises `BulkUpsertPartialFailure` carrying the unsent tail —
+        already-committed earlier chunks are left server-side and the
+        caller should only retry the unsent portion.
+        """
+        if not items:
+            return
+        for chunk_start in range(0, len(items), SERVER_BULK_UPSERT_BATCH_CAP):
+            chunk = items[chunk_start : chunk_start + SERVER_BULK_UPSERT_BATCH_CAP]
+            body = {
+                "device_id": device_id,
+                "items": [_bulk_item_payload(item) for item in chunk],
+            }
+            try:
+                resp = self._client.post(
+                    "/v1/track/sessions/bulk",
+                    json=body,
+                    headers=self._headers(),
+                )
+                _raise(resp)
+            except TrackAPIError as e:
+                unsent = items[chunk_start:]
+                raise BulkUpsertPartialFailure(
+                    str(e),
+                    unsent_items=unsent,
+                    status_code=e.status_code,
+                    detail=e.detail,
+                ) from e
+            except Exception as e:
+                # Network errors etc. — same partial-failure semantics: this
+                # chunk and everything after it didn't reach the server.
+                unsent = items[chunk_start:]
+                raise BulkUpsertPartialFailure(
+                    str(e),
+                    unsent_items=unsent,
+                ) from e
 
     def list_sessions(
         self,
@@ -393,6 +480,20 @@ def _session_payload(session: Any) -> dict[str, Any]:
     if isinstance(session, Mapping):
         return dict(session)
     raise TypeError(f"Unsupported session payload type: {type(session)!r}")
+
+
+def _bulk_item_payload(item: "BulkSessionUpsert") -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "path": item.path,
+        "session": _session_payload(item.session),
+    }
+    if item.content_codec is not None:
+        out["content_codec"] = item.content_codec
+    if item.raw_bytes is not None:
+        out["raw_bytes"] = item.raw_bytes
+    if item.stored_bytes is not None:
+        out["stored_bytes"] = item.stored_bytes
+    return out
 
 
 def _json_body(body: Any) -> dict[str, Any]:

@@ -25,7 +25,12 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from .api import TrackAPIClient, TrackAPIError
+from .api import (
+    BulkSessionUpsert,
+    BulkUpsertPartialFailure,
+    TrackAPIClient,
+    TrackAPIError,
+)
 from .blocklist import TrackBlocklist
 from .drainer import QueueDrainer
 from .merkle import HashCache, MerkleTree
@@ -141,6 +146,11 @@ class Daemon:
         # in the orchestrator metadata index.
         self._metadata_indexed: dict[str, str] = {}
         self._metadata_lock = threading.Lock()
+        # Workers append confirmed uploads here; the main loop flushes via
+        # the bulk endpoint each iteration. Buffering halves orchestrator
+        # round trips and avoids workers blocking on per-file POSTs.
+        self._metadata_buffer: list[tuple[str, str, BulkSessionUpsert]] = []
+        self._metadata_buffer_lock = threading.Lock()
 
     # ------------------------------------------------------------------ #
     # Public entry points                                                  #
@@ -187,6 +197,7 @@ class Daemon:
 
         # Wait for in-flight uploads.
         self._pool.drain(timeout=60)
+        self._flush_metadata_buffer()
         if self._manifest_dirty:
             self._upload_manifest()
             self._manifest_dirty = False
@@ -248,6 +259,7 @@ class Daemon:
                 last_queue_reset = now
 
             self._drain_queue()
+            self._flush_metadata_buffer()
             # Persist manifest opportunistically when the queue is idle, but
             # also at least every MANIFEST_FLUSH_INTERVAL seconds so a daemon
             # that stays continuously busy still publishes progress. The
@@ -269,6 +281,7 @@ class Daemon:
         if self._pool:
             self._pool.drain(timeout=60)
             self._pool.shutdown()
+        self._flush_metadata_buffer()
         if self._manifest_dirty:
             self._upload_manifest()
         self._queue.close()
@@ -375,10 +388,18 @@ class Daemon:
     # ------------------------------------------------------------------ #
 
     def _drain_queue(self) -> None:
-        """Delegate to QueueDrainer; one pass."""
+        """Drain pending work into the upload pool until the queue is empty.
+
+        Tight-loops drain_once so dispatch isn't capped by the main loop's
+        10s sleep. The thread pool's worker count is the real concurrency
+        ceiling; this just keeps it fed.
+        """
         if self._drainer is None:
             return
-        self._drainer.drain_once(self._device_id)
+        while not self._stop.is_set():
+            result = self._drainer.drain_once(self._device_id)
+            if result.claimed == 0:
+                break
 
     # ------------------------------------------------------------------ #
     # Upload callbacks                                                     #
@@ -431,12 +452,13 @@ class Daemon:
         *,
         upload_payload: UploadPayload | None = None,
     ) -> None:
-        """Best-effort metadata index update for a confirmed S3 object.
+        """Buffer a metadata upsert for the next bulk flush.
 
-        The v1 syncer's correctness still comes from S3 bytes + manifest. The
-        metadata index is a read-side accelerator for listing/resume, so a
-        transient failure here should be retried on a later reconcile rather
-        than marking the file upload failed.
+        Workers call this synchronously from upload-completion callbacks;
+        the actual HTTP roundtrip happens later in `_flush_metadata_buffer`,
+        which the daemon main loop invokes after each drain pass and on
+        graceful shutdown. Buffering halves orchestrator round trips and
+        keeps workers off the network for metadata writes.
 
         `upload_payload` is only present immediately after this process uploads
         the file. For files merely confirmed by the remote manifest, omit
@@ -453,27 +475,72 @@ class Daemon:
         if session is None:
             return
 
-        kwargs = {"include_content_metadata": False}
         if upload_payload is not None:
-            kwargs = {
-                "content_codec": upload_payload.content_codec,
-                "raw_bytes": upload_payload.raw_bytes,
-                "stored_bytes": upload_payload.stored_bytes,
-            }
-
-        try:
-            self._api.upsert_session(
-                device_id=self._device_id,
+            item = BulkSessionUpsert(
                 path=rel_path,
                 session=session,
-                **kwargs,
+                content_codec=upload_payload.content_codec,
+                raw_bytes=upload_payload.raw_bytes,
+                stored_bytes=upload_payload.stored_bytes,
+            )
+        else:
+            item = BulkSessionUpsert(path=rel_path, session=session)
+
+        with self._metadata_buffer_lock:
+            # Drop any prior buffered entry for this path; the latest sha wins.
+            self._metadata_buffer = [
+                (p, s, i) for p, s, i in self._metadata_buffer if p != rel_path
+            ]
+            self._metadata_buffer.append((rel_path, sha256, item))
+
+    def _flush_metadata_buffer(self) -> None:
+        """Send buffered metadata upserts to the orchestrator in one bulk call.
+
+        Best-effort: a transient failure leaves only the unsent entries in
+        the buffer for the next flush. The bulk client raises
+        `BulkUpsertPartialFailure` when a later chunk fails after earlier
+        chunks succeeded — we use that to avoid re-sending items the server
+        already has. If the daemon dies, the next reconcile re-queues
+        anything missing, so we tolerate buffer loss.
+        """
+        with self._metadata_buffer_lock:
+            if not self._metadata_buffer:
+                return
+            pending = self._metadata_buffer
+            self._metadata_buffer = []
+
+        try:
+            self._api.upsert_sessions_bulk(
+                device_id=self._device_id,
+                items=[item for _, _, item in pending],
+            )
+            sent = pending
+            unsent: list[tuple[str, str, BulkSessionUpsert]] = []
+        except BulkUpsertPartialFailure as e:
+            unsent_set = {id(it) for it in e.unsent_items}
+            sent = [t for t in pending if id(t[2]) not in unsent_set]
+            unsent = [t for t in pending if id(t[2]) in unsent_set]
+            log.warning(
+                "bulk metadata upsert partial failure: %d sent, %d unsent: %s",
+                len(sent),
+                len(unsent),
+                e,
             )
         except Exception as e:
-            log.warning("metadata upsert failed %s: %s", rel_path, e)
-            return
+            log.warning("bulk metadata upsert failed (%d items): %s", len(pending), e)
+            sent = []
+            unsent = pending
 
-        with self._metadata_lock:
-            self._metadata_indexed[rel_path] = sha256
+        if unsent:
+            with self._metadata_buffer_lock:
+                # Put unsent items back at the front so they're retried first;
+                # newer items appended during the flush stay in order.
+                self._metadata_buffer = unsent + self._metadata_buffer
+
+        if sent:
+            with self._metadata_lock:
+                for rel_path, sha256, _ in sent:
+                    self._metadata_indexed[rel_path] = sha256
 
     # ------------------------------------------------------------------ #
     # Status                                                               #

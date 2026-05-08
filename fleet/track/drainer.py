@@ -26,7 +26,7 @@ log = logging.getLogger("fleet.track.drainer")
 
 # Server caps /v1/track/upload-urls at 100 paths per request. Match it
 # here to avoid a 400 if a single drain claims more.
-DEFAULT_BATCH_SIZE = 32
+DEFAULT_BATCH_SIZE = 100
 
 
 @dataclass(frozen=True)
