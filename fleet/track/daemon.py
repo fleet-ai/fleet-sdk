@@ -25,7 +25,12 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from .api import BulkSessionUpsert, TrackAPIClient, TrackAPIError
+from .api import (
+    BulkSessionUpsert,
+    BulkUpsertPartialFailure,
+    TrackAPIClient,
+    TrackAPIError,
+)
 from .blocklist import TrackBlocklist
 from .drainer import QueueDrainer
 from .merkle import HashCache, MerkleTree
@@ -491,8 +496,11 @@ class Daemon:
     def _flush_metadata_buffer(self) -> None:
         """Send buffered metadata upserts to the orchestrator in one bulk call.
 
-        Best-effort: a transient failure leaves entries in the buffer for
-        the next flush. If the daemon dies, the next reconcile re-queues
+        Best-effort: a transient failure leaves only the unsent entries in
+        the buffer for the next flush. The bulk client raises
+        `BulkUpsertPartialFailure` when a later chunk fails after earlier
+        chunks succeeded — we use that to avoid re-sending items the server
+        already has. If the daemon dies, the next reconcile re-queues
         anything missing, so we tolerate buffer loss.
         """
         with self._metadata_buffer_lock:
@@ -506,17 +514,33 @@ class Daemon:
                 device_id=self._device_id,
                 items=[item for _, _, item in pending],
             )
+            sent = pending
+            unsent: list[tuple[str, str, BulkSessionUpsert]] = []
+        except BulkUpsertPartialFailure as e:
+            unsent_set = {id(it) for it in e.unsent_items}
+            sent = [t for t in pending if id(t[2]) not in unsent_set]
+            unsent = [t for t in pending if id(t[2]) in unsent_set]
+            log.warning(
+                "bulk metadata upsert partial failure: %d sent, %d unsent: %s",
+                len(sent),
+                len(unsent),
+                e,
+            )
         except Exception as e:
             log.warning("bulk metadata upsert failed (%d items): %s", len(pending), e)
-            with self._metadata_buffer_lock:
-                # Put failed items back at the front so they're retried first;
-                # newer items appended during the flush stay in order.
-                self._metadata_buffer = pending + self._metadata_buffer
-            return
+            sent = []
+            unsent = pending
 
-        with self._metadata_lock:
-            for rel_path, sha256, _ in pending:
-                self._metadata_indexed[rel_path] = sha256
+        if unsent:
+            with self._metadata_buffer_lock:
+                # Put unsent items back at the front so they're retried first;
+                # newer items appended during the flush stay in order.
+                self._metadata_buffer = unsent + self._metadata_buffer
+
+        if sent:
+            with self._metadata_lock:
+                for rel_path, sha256, _ in sent:
+                    self._metadata_indexed[rel_path] = sha256
 
     # ------------------------------------------------------------------ #
     # Status                                                               #

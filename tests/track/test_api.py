@@ -11,6 +11,7 @@ import pytest
 
 from fleet.track.api import (
     BulkSessionUpsert,
+    BulkUpsertPartialFailure,
     SERVER_BULK_UPSERT_BATCH_CAP,
     SERVER_UPLOAD_URL_BATCH_CAP,
     TrackAPIClient,
@@ -264,6 +265,53 @@ def test_upsert_sessions_bulk_chunks_above_server_cap():
         SERVER_BULK_UPSERT_BATCH_CAP,
         7,
     ]
+
+
+def test_upsert_sessions_bulk_partial_failure_carries_unsent_tail():
+    """If chunk N fails after chunks 0..N-1 succeed, the raised exception
+    must expose only the unsent tail so the caller doesn't re-send items
+    the server already accepted."""
+    call_count = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return httpx.Response(204)  # first chunk succeeds
+        return httpx.Response(503, text="boom")  # second chunk fails
+
+    items = [
+        BulkSessionUpsert(path=f"{i}.jsonl", session={"id": f"s{i}"})
+        for i in range(SERVER_BULK_UPSERT_BATCH_CAP + 5)
+    ]
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    with pytest.raises(BulkUpsertPartialFailure) as exc:
+        api.upsert_sessions_bulk(device_id="dev1", items=items)
+
+    # The first SERVER_BULK_UPSERT_BATCH_CAP items were sent successfully;
+    # only the last 5 should be reported unsent.
+    assert len(exc.value.unsent_items) == 5
+    assert exc.value.unsent_items == items[SERVER_BULK_UPSERT_BATCH_CAP:]
+    assert exc.value.status_code == 503
+
+
+def test_upsert_sessions_bulk_first_chunk_failure_marks_all_unsent():
+    """If the very first chunk fails, every item is unsent — no work was
+    committed server-side."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, text="boom")
+
+    items = [
+        BulkSessionUpsert(path=f"{i}.jsonl", session={"id": f"s{i}"})
+        for i in range(10)
+    ]
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    with pytest.raises(BulkUpsertPartialFailure) as exc:
+        api.upsert_sessions_bulk(device_id="dev1", items=items)
+
+    assert exc.value.unsent_items == items
 
 
 def test_upsert_session_can_omit_content_metadata():

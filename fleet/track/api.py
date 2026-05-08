@@ -101,6 +101,26 @@ class TrackAPIError(Exception):
         self.detail = detail
 
 
+class BulkUpsertPartialFailure(TrackAPIError):
+    """Raised when one chunk of `upsert_sessions_bulk` fails after earlier
+    chunks succeeded. `unsent_items` is the failing chunk plus everything
+    after it; everything before it is already committed server-side. Lets
+    the caller re-enqueue only what hasn't been sent, avoiding repeat
+    sends of already-committed rows on the next flush.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        unsent_items: list["BulkSessionUpsert"],
+        status_code: Optional[int] = None,
+        detail: Any = None,
+    ) -> None:
+        super().__init__(message, status_code=status_code, detail=detail)
+        self.unsent_items = unsent_items
+
+
 def _default_auth_provider() -> Optional[AuthInfo]:
     """Production auth: prefer stored `flt login` creds, then FLEET_API_KEY.
 
@@ -252,6 +272,11 @@ class TrackAPIClient:
         path → s3_key conversion and validation behave identically. Empty
         list is a no-op. Chunks at SERVER_BULK_UPSERT_BATCH_CAP to match
         the server cap.
+
+        On partial failure (some chunk succeeds, a later one doesn't),
+        raises `BulkUpsertPartialFailure` carrying the unsent tail —
+        already-committed earlier chunks are left server-side and the
+        caller should only retry the unsent portion.
         """
         if not items:
             return
@@ -261,12 +286,29 @@ class TrackAPIClient:
                 "device_id": device_id,
                 "items": [_bulk_item_payload(item) for item in chunk],
             }
-            resp = self._client.post(
-                "/v1/track/sessions/bulk",
-                json=body,
-                headers=self._headers(),
-            )
-            _raise(resp)
+            try:
+                resp = self._client.post(
+                    "/v1/track/sessions/bulk",
+                    json=body,
+                    headers=self._headers(),
+                )
+                _raise(resp)
+            except TrackAPIError as e:
+                unsent = items[chunk_start:]
+                raise BulkUpsertPartialFailure(
+                    str(e),
+                    unsent_items=unsent,
+                    status_code=e.status_code,
+                    detail=e.detail,
+                ) from e
+            except Exception as e:
+                # Network errors etc. — same partial-failure semantics: this
+                # chunk and everything after it didn't reach the server.
+                unsent = items[chunk_start:]
+                raise BulkUpsertPartialFailure(
+                    str(e),
+                    unsent_items=unsent,
+                ) from e
 
     def list_sessions(
         self,
