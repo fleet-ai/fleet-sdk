@@ -121,7 +121,8 @@ def scrub(text: str, rules: Iterable[Rule] = DEFAULT_RULES) -> ScrubResult:
 
     Hits are recorded against the *original* text's line numbers so that
     `flt track inspect` can point at the line the user can find in their
-    on-disk session file.
+    on-disk session file. The upload path uses `scrub_text` instead since
+    it doesn't need hits — see scrub_bytes.
     """
     rule_list: Sequence[Rule] = tuple(rules)
     hits: list[Hit] = []
@@ -133,14 +134,22 @@ def scrub(text: str, rules: Iterable[Rule] = DEFAULT_RULES) -> ScrubResult:
             line = text.count("\n", 0, m.start()) + 1
             hits.append(Hit(rule=rule.name, line=line, matched=m.group(0)))
 
-    # Second pass: actual substitution. We re-run regexes here rather than
-    # building offsets, because subs in earlier rules can change later
-    # rules' match positions (e.g. a long secret becoming "[REDACTED]"
-    # could expose a substring that looks like another secret).
-    for rule in rule_list:
-        text = rule.pattern.sub(rule.replacement, text)
+    return ScrubResult(text=scrub_text(text, rule_list), hits=tuple(hits))
 
-    return ScrubResult(text=text, hits=tuple(hits))
+
+def scrub_text(text: str, rules: Iterable[Rule] = DEFAULT_RULES) -> str:
+    """Apply substitution rules in order; return scrubbed text only.
+
+    Half the work of `scrub` — skips the hit-enumeration pass. Used by
+    the upload path, which discards hits anyway. Re-runs regexes for
+    substitution rather than building offsets, because subs in earlier
+    rules can change later rules' match positions (e.g. a long secret
+    becoming "[REDACTED]" could expose a substring that looks like
+    another secret).
+    """
+    for rule in rules:
+        text = rule.pattern.sub(rule.replacement, text)
+    return text
 
 
 def scrub_bytes(data: bytes, rules: Iterable[Rule] = DEFAULT_RULES) -> bytes:
@@ -148,6 +157,6 @@ def scrub_bytes(data: bytes, rules: Iterable[Rule] = DEFAULT_RULES) -> bytes:
     wrapper for the upload path that just wants the scrubbed payload."""
     try:
         text = data.decode("utf-8", errors="replace")
-        return scrub(text, rules).text.encode("utf-8")
+        return scrub_text(text, rules).encode("utf-8")
     except Exception:
         return data
