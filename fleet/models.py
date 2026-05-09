@@ -52,6 +52,7 @@ class Instance(BaseModel):
     region: str = Field(..., title="Region")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     run_id: Optional[str] = Field(None, title="Run Id")
+    multi_env_list: Optional[List[str]] = Field(None, title="Multi Env List")
 
 
 class InstanceRequest(BaseModel):
@@ -369,6 +370,7 @@ class InstanceResponse(BaseModel):
     profile_id: Optional[str] = Field(None, title="Profile Id")
     heartbeat_interval: Optional[int] = Field(None, title="Heartbeat Interval")
     heartbeat_region: Optional[str] = Field(None, title="Heartbeat Region")
+    multi_env_list: Optional[List[str]] = Field(None, title="Multi Env List")
 
 
 class Run(BaseModel):
