@@ -26,7 +26,7 @@ load_dotenv()
 client = AsyncAnthropic()
 
 
-MODEL = "claude-opus-4-6"
+MODEL = "claude-opus-4-7"
 
 
 def save_to_tmp(content: str, prefix: str = "output", extension: str = "txt") -> str:
