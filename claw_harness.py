@@ -510,7 +510,7 @@ async def wait_for_mcp(
 
 async def main():
     tasks = await fleet.load_tasks_async(
-        keys=["task_x4zukk7uk6sj_n_1776210959854_ixm2x50h2_bash"]
+        keys=["task_s2ttghbmpwpy_n_1776197545848_lf64q819a_bash"]
     )
     task = tasks[0]
 
