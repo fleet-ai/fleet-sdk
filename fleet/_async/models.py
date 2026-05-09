@@ -51,6 +51,7 @@ class Instance(BaseModel):
     team_id: str = Field(..., title="Team Id")
     region: str = Field(..., title="Region")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
+    multi_env_list: Optional[List[str]] = Field(None, title="Multi Env List")
 
 
 class InstanceRequest(BaseModel):
@@ -357,6 +358,7 @@ class InstanceResponse(BaseModel):
     data_version: Optional[str] = Field(None, title="Data Version")
     urls: Optional[InstanceURLs] = Field(None, title="Urls")
     health: Optional[bool] = Field(None, title="Health")
+    multi_env_list: Optional[List[str]] = Field(None, title="Multi Env List")
 
 
 class AccountResponse(BaseModel):
