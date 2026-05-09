@@ -48,18 +48,6 @@ def convert_tool_format(tool: Tool) -> ToolParam:
     }
 
 
-# ─────────────────── OpenClaw skills + memory integration ───────────────────
-#
-# Mirrors what `theseus/orchestrator/temporal` does for tasks that ship an
-# `INSTANCE_SKILLS_ROOT` and/or `INSTANCE_MEMORY_ROOT` env var. We talk to the
-# env's runner FS directly over HTTP (`/fs/list`, `/fs/file/text`) and inject
-# skill descriptions + memory contents into the system prompt, plus three
-# on-demand tools (`read_skill`, `memory_get`, `memory_search`).
-
-
-# Both prefaces are copied verbatim from theseus's
-# `build_skills_system_prompt_section` / `download_memory_bundle_content`
-# so the system prompt is byte-for-byte identical to the orchestrator's.
 SKILLS_PROMPT_PREFACE = (
     "At its core, a skill is a folder containing a SKILL.md file. This file "
     "includes metadata (name and description, at minimum) and instructions "
@@ -166,8 +154,6 @@ async def load_openclaw_skills(
 ) -> List[Dict[str, str]]:
     """One-level walk of skills_root. Each subfolder with a SKILL.md becomes a skill."""
     skills_root = skills_root.rstrip("/")
-    # Retry: the runner FS often 502s for the first few seconds after MCP
-    # comes up. 4 attempts at 1.5s spacing covers the warmup window.
     last_error: Optional[BaseException] = None
     for attempt in range(4):
         try:
@@ -192,7 +178,6 @@ async def load_openclaw_skills(
         except Exception:
             continue
         if not content or content.lstrip().startswith("<!"):
-            # Defensive: HTTP servers sometimes return HTML 404 with status 200.
             continue
         skills.append(
             {
@@ -219,11 +204,6 @@ async def load_openclaw_memory(
             pass
 
     async def _try_read(path: str) -> Optional[str]:
-        # Retry: the runner FS often 502s during the first few seconds after
-        # MCP becomes ready (theseus sees the same thing). Without retries,
-        # MEMORY.md / today / yesterday silently come back empty even though
-        # the file exists, and the model has to discover them via memory_get.
-        # 4 attempts at 1.5s spacing covers the warmup window.
         last_error: Optional[BaseException] = None
         for attempt in range(4):
             try:
@@ -296,9 +276,6 @@ def build_openclaw_system_text(
         or memory.get("yesterday_md")
         or memory.get("files")
     ):
-        # Theseus joins memory sections with `\n\n---\n\n` and does NOT add a
-        # trailing `\n` to each section — matching that exactly avoids the
-        # extra blank line at EOF that diff -u flags as the only mismatch.
         sections = [f"## Memory System\n\n{MEMORY_PROMPT_PREFACE}"]
         if memory.get("memory_md"):
             sections.append(f"## Memory\n\n{memory['memory_md']}")
@@ -558,10 +535,6 @@ async def main():
 
     openclaw_active = bool(skills_root or memory_root or fs_root or current_date)
     if openclaw_active:
-        # Per the openclaw spec, runner_api_url piggy-backs on the first MCP URL:
-        # strip "/mcp", append "/api/v1/env". Theseus's `_derive_runner_api_url`
-        # uses the same construction for multi-app envs (per-app prefix is fine —
-        # the runner proxies through it).
         first_mcp_url = endpoints[0][1]
         runner_api_url = first_mcp_url[: -len("/mcp")] + "/api/v1/env"
         runner_fs = RunnerFs(runner_api_url)
@@ -594,8 +567,6 @@ async def main():
     if current_date:
         system_text += f"\n\nToday's date is {current_date}."
     if fs_root and runner_api_url:
-        # Mirrors theseus's `get_runner_bash_system_prompt(fs_root)` exactly so
-        # the agent gets the same input/deliverable contract.
         system_text += (
             "\n\nYou have a bash tool (runner_bash__bash) that runs shell "
             "commands inside the environment container.\n\n"
@@ -663,13 +634,6 @@ async def main():
                     tool_param["name"] = f"{prefix}{mcp_tool.name}"
                 anthropic_tools.append(tool_param)
                 dispatch[tool_param["name"]] = make_mcp_handler(session, mcp_tool.name)
-
-        # OpenClaw on-demand tools.
-        # All descriptions and behavior are ported verbatim from theseus's
-        # `build_*_tool_definition` + `*_from_fs` helpers in
-        # `orchestrator/temporal/skill_memory_utils.py` so every tool's
-        # surface (name, description, parameter copy, return shape, error
-        # strings) is byte-for-byte identical.
 
         if skills and runner_fs is not None and skills_root:
             skill_choices = [s["name"] for s in skills]
