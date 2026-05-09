@@ -723,13 +723,6 @@ async def main():
     )
     print("Instance URL:", env.urls.root)
 
-    app_url = env.urls.root
-    app_urls: List[str] = list(env.urls.app or [])
-
-    print(f"App URLs ({len(app_urls)}):")
-    for url in app_urls:
-        print(f"  {url}")
-
     computer_tool: ToolParam = {
         "name": "computer",
         "description": (
@@ -811,42 +804,21 @@ async def main():
 
     from urllib.parse import urlparse
 
-    allowed_hosts = sorted(
-        {
-            urlparse(u).hostname.lower()
-            for u in [env.urls.root, *app_urls]
-            if urlparse(u).hostname
-        }
-    )
+    root_host = (urlparse(env.urls.root).hostname or "").lower()
+    allowed_hosts = [root_host] if root_host else None
 
     async with PlaywrightComputer(
         screen_size=(DISPLAY_WIDTH, DISPLAY_HEIGHT),
-        initial_url=app_url,
+        initial_url=env.urls.root,
         headless=True,
         allowed_hosts=allowed_hosts,
     ) as computer:
         initial = await computer.screenshot()
         save_screenshot(initial.screenshot, "initial")
-        apps_block = "\n".join(f"  - {u}" for u in app_urls) or "  (none)"
-        # Seed the model with an initial screenshot + the env URLs so it knows
-        # exactly where it can navigate (no guessing localhost or external sites).
-        seed_text = (
-            f"You are driving a Chromium browser ({DISPLAY_WIDTH}x{DISPLAY_HEIGHT}, "
-            f"absolute pixel coordinates) via the `computer` tool. The browser is "
-            f"currently at the env root: {app_url}\n"
-            f"\n"
-            f"Available app URLs (and the only URLs you should navigate to):\n"
-            f"{apps_block}\n"
-            f"\n"
-            f"Initial screenshot:"
-        )
         messages.append(
             {
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": seed_text},
-                    screenshot_to_block(initial),
-                ],
+                "content": [screenshot_to_block(initial)],
             }
         )
 
