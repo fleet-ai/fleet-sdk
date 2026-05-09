@@ -191,7 +191,9 @@ async def wait_for_mcp(
 
 
 async def main():
-    tasks = await fleet.load_tasks_async(project_key="bloomberg-sample-tasks")
+    tasks = await fleet.load_tasks_async(
+        keys=["task_x4zukk7uk6sj_n_1776210959854_ixm2x50h2_bash"]
+    )
     task = tasks[0]
 
     print("Task Key:", task.key)
