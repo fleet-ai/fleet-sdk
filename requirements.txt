@@ -1,0 +1,4 @@
+fleet-python==0.2.126
+playwright==1.57.0
+anthropic==0.100.0
+mcp==1.24.0
