@@ -2,7 +2,6 @@ import ast
 import asyncio
 import base64
 import json
-import sys
 from datetime import datetime
 from typing import Any, List, Literal, Optional
 
@@ -205,14 +204,17 @@ PLAYWRIGHT_KEY_MAP = {
     "delete": "Delete",
     "escape": "Escape",
     "esc": "Escape",
-    "space": " ",
+    "space": "Space",
     "shift": "Shift",
     "shift_l": "Shift",
     "shift_r": "Shift",
-    "ctrl": "Control",
-    "control": "Control",
-    "control_l": "Control",
-    "control_r": "Control",
+    # `ControlOrMeta` is Playwright's portability shim: Cmd on macOS, Control
+    # elsewhere. Matches what gemini_harness uses and what most web apps treat
+    # as the same shortcut. Works in `keyboard.down/up/press` too.
+    "ctrl": "ControlOrMeta",
+    "control": "ControlOrMeta",
+    "control_l": "ControlOrMeta",
+    "control_r": "ControlOrMeta",
     "alt": "Alt",
     "alt_l": "Alt",
     "alt_r": "Alt",
@@ -290,11 +292,18 @@ class PlaywrightComputer:
         initial_url: str,
         headless: bool = True,
         highlight_mouse: bool = False,
+        allowed_hosts: Optional[List[str]] = None,
     ):
         self._initial_url = initial_url
         self._screen_size = screen_size
         self._headless = headless
         self._highlight_mouse = highlight_mouse
+        # Lower-cased hostnames the model is allowed to navigate to. Anything
+        # else gets rejected so a hallucinated `localhost:3000` doesn't fly the
+        # browser into chrome-error://.
+        self._allowed_hosts = (
+            {h.lower() for h in allowed_hosts} if allowed_hosts else None
+        )
 
     async def _handle_new_page(self, new_page: playwright.async_api.Page):
         """Computer use is single-tab; redirect new tabs into the main page."""
@@ -384,9 +393,17 @@ class PlaywrightComputer:
         modifiers: Optional[List[str]] = None,
     ) -> EnvState:
         await self.highlight_mouse(x, y)
-        await self._page.mouse.click(
-            x, y, button=button, click_count=click_count, modifiers=modifiers or []
-        )
+        # Playwright's raw `Mouse.click()` doesn't accept a `modifiers` kwarg
+        # (only the high-level Page.click does); hold them down manually around
+        # the click instead, mirroring how `scroll` does it.
+        held = list(modifiers or [])
+        for k in held:
+            await self._page.keyboard.down(k)
+        try:
+            await self._page.mouse.click(x, y, button=button, click_count=click_count)
+        finally:
+            for k in reversed(held):
+                await self._page.keyboard.up(k)
         await self._safe_wait_for_load()
         return await self.screenshot()
 
@@ -510,6 +527,16 @@ class PlaywrightComputer:
     async def navigate(self, url: str) -> EnvState:
         if not url.startswith(("http://", "https://", "about:", "data:")):
             url = "https://" + url
+        if self._allowed_hosts is not None:
+            from urllib.parse import urlparse
+
+            host = (urlparse(url).hostname or "").lower()
+            if host not in self._allowed_hosts:
+                raise RuntimeError(
+                    f"navigate refused: host {host!r} is not in the env's "
+                    f"allow-list {sorted(self._allowed_hosts)}. Stay on the app "
+                    f"URLs you were given."
+                )
         await self._page.goto(url)
         await self._safe_wait_for_load()
         return await self.screenshot()
@@ -696,8 +723,12 @@ async def main():
     )
     print("Instance URL:", env.urls.root)
 
-    app_url = env.urls.app[0] if env.urls.app else env.urls.root
-    print(f"App URL: {app_url}")
+    app_url = env.urls.root
+    app_urls: List[str] = list(env.urls.app or [])
+
+    print(f"App URLs ({len(app_urls)}):")
+    for url in app_urls:
+        print(f"  {url}")
 
     computer_tool: ToolParam = {
         "name": "computer",
@@ -764,16 +795,7 @@ async def main():
     system: List[TextBlockParam] = [
         {
             "type": "text",
-            "text": (
-                f"You control a Chromium browser via the `computer` tool. "
-                f"The viewport is {DISPLAY_WIDTH}x{DISPLAY_HEIGHT} pixels and "
-                f"coordinates are absolute pixels (no normalization). "
-                f"The browser is already pointed at the task app. Complete the task. "
-                f"Take a screenshot whenever you need to see the current state. "
-                f"The session ends when you stop calling tools and emit a final text "
-                f"answer. Avoid unnecessary actions, as side effects may be graded as "
-                f"task failure."
-            ),
+            "text": "You are a helpful agent. Complete the task. The session ends when you stop calling tools. Avoid unnecessary actions, as side effects may be graded as task failure.",
             "cache_control": {"type": "ephemeral"},
         }
     ]
@@ -787,20 +809,42 @@ async def main():
     response = None
     final_answer: str = ""
 
+    from urllib.parse import urlparse
+
+    allowed_hosts = sorted(
+        {
+            urlparse(u).hostname.lower()
+            for u in [env.urls.root, *app_urls]
+            if urlparse(u).hostname
+        }
+    )
+
     async with PlaywrightComputer(
         screen_size=(DISPLAY_WIDTH, DISPLAY_HEIGHT),
         initial_url=app_url,
         headless=True,
+        allowed_hosts=allowed_hosts,
     ) as computer:
         initial = await computer.screenshot()
         save_screenshot(initial.screenshot, "initial")
-        # Seed the model with an initial screenshot so it doesn't waste a turn
-        # asking for one.
+        apps_block = "\n".join(f"  - {u}" for u in app_urls) or "  (none)"
+        # Seed the model with an initial screenshot + the env URLs so it knows
+        # exactly where it can navigate (no guessing localhost or external sites).
+        seed_text = (
+            f"You are driving a Chromium browser ({DISPLAY_WIDTH}x{DISPLAY_HEIGHT}, "
+            f"absolute pixel coordinates) via the `computer` tool. The browser is "
+            f"currently at the env root: {app_url}\n"
+            f"\n"
+            f"Available app URLs (and the only URLs you should navigate to):\n"
+            f"{apps_block}\n"
+            f"\n"
+            f"Initial screenshot:"
+        )
         messages.append(
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Initial browser screenshot:"},
+                    {"type": "text", "text": seed_text},
                     screenshot_to_block(initial),
                 ],
             }
