@@ -1,8 +1,8 @@
-import argparse
+import ast
 import asyncio
 import json
 from datetime import datetime
-from typing import Any, List
+from typing import Any, List, Optional
 
 import fleet
 from dotenv import load_dotenv
@@ -49,6 +49,28 @@ def _block_field(block: Any, key: str) -> Any:
     if isinstance(block, dict):
         return block.get(key)
     return getattr(block, key, None)
+
+
+def verifier_accepts_conversation(verifier_func: Optional[str]) -> bool:
+    """Return True if the verifier's top-level function declares a `conversation` param.
+
+    The verifier is a Python source string (e.g. `def verify(env, final_answer=None,
+    conversation=None): ...`). We parse it with ast and inspect the first top-level
+    function's signature. Nested helper functions are intentionally ignored.
+    """
+    if not verifier_func:
+        return False
+    try:
+        tree = ast.parse(verifier_func)
+    except SyntaxError:
+        return False
+
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = node.args
+            param_names = {a.arg for a in args.args} | {a.arg for a in args.kwonlyargs}
+            return "conversation" in param_names
+    return False
 
 
 def to_openai_conversation(
@@ -167,7 +189,7 @@ async def wait_for_mcp(
     )
 
 
-async def main(with_conversation: bool):
+async def main():
     tasks = await fleet.load_tasks_async(project_key="bloomberg-sample-tasks")
     task = tasks[0]
 
@@ -287,9 +309,11 @@ async def main(with_conversation: bool):
     print(f" Final Answer: {final_answer}")
 
     verify_kwargs: dict = {"final_answer": final_answer}
-    if with_conversation:
+    if verifier_accepts_conversation(task.verifier_func):
         verify_kwargs["conversation"] = to_openai_conversation(system, messages)
-        print("Passing conversation to verifier")
+        print("Verifier accepts `conversation` param; passing it.")
+    else:
+        print("Verifier does not accept `conversation` param; skipping.")
 
     result = await task.verify_detailed_async(env, **verify_kwargs)
     print(f"Verifier stdout:", result.stdout)
@@ -299,12 +323,4 @@ async def main(with_conversation: bool):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the Fleet agent harness.")
-    parser.add_argument(
-        "--with-conversation",
-        action="store_true",
-        default=False,
-        help="Pass the full OpenAI-format conversation to verify_detailed_async.",
-    )
-    args = parser.parse_args()
-    asyncio.run(main(with_conversation=args.with_conversation))
+    asyncio.run(main())
