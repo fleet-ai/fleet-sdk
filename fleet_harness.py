@@ -1,7 +1,8 @@
+import argparse
 import asyncio
 import json
 from datetime import datetime
-from typing import List
+from typing import Any, List
 
 import fleet
 from dotenv import load_dotenv
@@ -44,6 +45,96 @@ def convert_tool_format(tool: Tool) -> ToolParam:
     }
 
 
+def _block_field(block: Any, key: str) -> Any:
+    if isinstance(block, dict):
+        return block.get(key)
+    return getattr(block, key, None)
+
+
+def to_openai_conversation(
+    system: List[TextBlockParam],
+    messages: List[MessageParam],
+) -> List[dict]:
+    """Convert Anthropic-format system+messages into OpenAI chat schema.
+
+    This is the format Fleet verifiers expect for the `conversation` param:
+      - {"role": "system", "content": str}
+      - {"role": "user", "content": str}
+      - {"role": "assistant", "content": str | None, "tool_calls": [...]}
+      - {"role": "tool", "tool_call_id": str, "content": str}
+    """
+    out: List[dict] = []
+
+    system_text = "\n\n".join(
+        b["text"] for b in system if b.get("type") == "text" and b.get("text")
+    )
+    if system_text:
+        out.append({"role": "system", "content": system_text})
+
+    for msg in messages:
+        role = msg["role"]
+        content = msg["content"]
+        blocks = [content] if isinstance(content, str) else list(content)
+
+        if role == "user":
+            text_parts: List[str] = []
+            tool_msgs: List[dict] = []
+            for block in blocks:
+                if isinstance(block, str):
+                    text_parts.append(block)
+                    continue
+                btype = _block_field(block, "type")
+                if btype == "text":
+                    text_parts.append(_block_field(block, "text") or "")
+                elif btype == "tool_result":
+                    tool_content = _block_field(block, "content")
+                    if not isinstance(tool_content, str):
+                        tool_content = json.dumps(tool_content, default=str)
+                    tool_msgs.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": _block_field(block, "tool_use_id"),
+                            "content": tool_content,
+                        }
+                    )
+
+            if text_parts:
+                out.append({"role": "user", "content": "\n".join(text_parts)})
+            out.extend(tool_msgs)
+            continue
+
+        if role == "assistant":
+            text_parts = []
+            tool_calls: List[dict] = []
+            for block in blocks:
+                btype = _block_field(block, "type")
+                if btype == "text":
+                    text_parts.append(_block_field(block, "text") or "")
+                elif btype == "tool_use":
+                    tool_calls.append(
+                        {
+                            "id": _block_field(block, "id"),
+                            "type": "function",
+                            "function": {
+                                "name": _block_field(block, "name"),
+                                "arguments": json.dumps(
+                                    _block_field(block, "input") or {}
+                                ),
+                            },
+                        }
+                    )
+
+            entry: dict = {
+                "role": "assistant",
+                "content": "\n".join(text_parts) if text_parts else None,
+            }
+            if tool_calls:
+                entry["tool_calls"] = tool_calls
+            out.append(entry)
+
+    return out
+
+
 async def wait_for_mcp(
     mcp_url: str, timeout: float = 120.0, delay: float = 1.0
 ) -> None:
@@ -76,7 +167,7 @@ async def wait_for_mcp(
     )
 
 
-async def main():
+async def main(with_conversation: bool):
     tasks = await fleet.load_tasks_async(project_key="bloomberg-sample-tasks")
     task = tasks[0]
 
@@ -195,7 +286,12 @@ async def main():
     final_answer = response.content[-1].text
     print(f" Final Answer: {final_answer}")
 
-    result = await task.verify_detailed_async(env, final_answer=final_answer)
+    verify_kwargs: dict = {"final_answer": final_answer}
+    if with_conversation:
+        verify_kwargs["conversation"] = to_openai_conversation(system, messages)
+        print("Passing conversation to verifier")
+
+    result = await task.verify_detailed_async(env, **verify_kwargs)
     print(f"Verifier stdout:", result.stdout)
     print(f"Reward score:", result.result)
 
@@ -203,4 +299,12 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description="Run the Fleet agent harness.")
+    parser.add_argument(
+        "--with-conversation",
+        action="store_true",
+        default=False,
+        help="Pass the full OpenAI-format conversation to verify_detailed_async.",
+    )
+    args = parser.parse_args()
+    asyncio.run(main(with_conversation=args.with_conversation))
