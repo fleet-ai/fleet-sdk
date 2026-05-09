@@ -10,11 +10,11 @@ import fleet
 import playwright.async_api
 import pydantic
 from anthropic import AsyncAnthropic
-from anthropic.types.beta import (
-    BetaMessageParam,
-    BetaTextBlockParam,
-    BetaToolUnionParam,
-    BetaToolResultBlockParam,
+from anthropic.types import (
+    MessageParam,
+    TextBlockParam,
+    ToolParam,
+    ToolResultBlockParam,
 )
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
@@ -28,10 +28,30 @@ client = AsyncAnthropic()
 MODEL = "claude-opus-4-7"
 DISPLAY_WIDTH = 1366
 DISPLAY_HEIGHT = 768
-COMPUTER_TOOL_TYPE = "computer_20251124"
-BETA_HEADER = "computer-use-2025-11-24"
-MAX_TURNS = 200
-HEADLESS = True
+
+# Action set Claude can pass via the `computer` function tool. Mirrors the
+# action vocabulary that theseus's browser-lease fallback exposes (see
+# orchestrator/temporal/activities.py::BROWSER_LEASE_COMPUTER_ACTIONS) so the
+# behaviour matches what Claude has been prompted on in production.
+SUPPORTED_ACTIONS = (
+    "navigate",
+    "screenshot",
+    "left_click",
+    "right_click",
+    "double_click",
+    "triple_click",
+    "middle_click",
+    "mouse_move",
+    "left_click_drag",
+    "type",
+    "key",
+    "scroll",
+    "wait",
+    "cursor_position",
+    "left_mouse_down",
+    "left_mouse_up",
+    "hold_key",
+)
 
 
 def save_to_tmp(content: str, prefix: str = "output", extension: str = "txt") -> str:
@@ -77,8 +97,8 @@ def verifier_accepts_conversation(verifier_func: Optional[str]) -> bool:
 
 
 def to_openai_conversation(
-    system: List[BetaTextBlockParam],
-    messages: List[BetaMessageParam],
+    system: List[TextBlockParam],
+    messages: List[MessageParam],
 ) -> List[dict]:
     """Convert Anthropic-format system+messages into OpenAI chat schema.
 
@@ -487,6 +507,13 @@ class PlaywrightComputer:
         # Playwright doesn't expose mouse position; just return a screenshot.
         return await self.screenshot()
 
+    async def navigate(self, url: str) -> EnvState:
+        if not url.startswith(("http://", "https://", "about:", "data:")):
+            url = "https://" + url
+        await self._page.goto(url)
+        await self._safe_wait_for_load()
+        return await self.screenshot()
+
 
 # ---------------------------------------------------------------------------
 # Action dispatch
@@ -518,6 +545,12 @@ async def execute_computer_action(
     try:
         if action == "screenshot":
             return await computer.screenshot(), None, False
+
+        if action == "navigate":
+            url = tool_input.get("url") or ""
+            if not url:
+                return None, "navigate requires a non-empty `url`", True
+            return await computer.navigate(url), None, False
 
         if action == "left_click":
             x, y = _coord(tool_input.get("coordinate"))
@@ -666,16 +699,69 @@ async def main():
     app_url = env.urls.app[0] if env.urls.app else env.urls.root
     print(f"App URL: {app_url}")
 
-    computer_tool: BetaToolUnionParam = {
-        "type": COMPUTER_TOOL_TYPE,
+    computer_tool: ToolParam = {
         "name": "computer",
-        "display_width_px": DISPLAY_WIDTH,
-        "display_height_px": DISPLAY_HEIGHT,
-        "display_number": 1,
+        "description": (
+            f"Control a Chromium browser ({DISPLAY_WIDTH}x{DISPLAY_HEIGHT} viewport, "
+            "coordinates are absolute pixels from the top-left). Call with `action` "
+            "and the action-specific parameters. After every action you receive a "
+            "fresh screenshot back. Use `screenshot` whenever you need to re-observe "
+            "the page without otherwise changing state."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": list(SUPPORTED_ACTIONS),
+                    "description": "The browser action to perform.",
+                },
+                "coordinate": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "description": "[x, y] in absolute viewport pixels.",
+                },
+                "start_coordinate": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "description": "Drag start [x, y]; pair with `coordinate` as the end.",
+                },
+                "text": {
+                    "type": "string",
+                    "description": (
+                        "For `type`: text to type. "
+                        "For `key`/`hold_key`: xdotool key combo (e.g. 'Return', 'ctrl+a'). "
+                        "For click/scroll: optional modifier (e.g. 'shift', 'ctrl')."
+                    ),
+                },
+                "url": {
+                    "type": "string",
+                    "description": "URL for the `navigate` action.",
+                },
+                "scroll_direction": {
+                    "type": "string",
+                    "enum": ["up", "down", "left", "right"],
+                },
+                "scroll_amount": {
+                    "type": "integer",
+                    "description": "Scroll wheel clicks (~100px each).",
+                },
+                "duration": {
+                    "type": "number",
+                    "description": "Seconds for `wait`/`hold_key` (clamped to 30).",
+                },
+            },
+            "required": ["action"],
+        },
+        "cache_control": {"type": "ephemeral"},
     }
-    tools: List[BetaToolUnionParam] = [computer_tool]
+    tools: List[ToolParam] = [computer_tool]
 
-    system: List[BetaTextBlockParam] = [
+    system: List[TextBlockParam] = [
         {
             "type": "text",
             "text": (
@@ -691,7 +777,7 @@ async def main():
             "cache_control": {"type": "ephemeral"},
         }
     ]
-    messages: List[BetaMessageParam] = [
+    messages: List[MessageParam] = [
         {
             "role": "user",
             "content": [{"type": "text", "text": task.prompt}],
@@ -704,8 +790,7 @@ async def main():
     async with PlaywrightComputer(
         screen_size=(DISPLAY_WIDTH, DISPLAY_HEIGHT),
         initial_url=app_url,
-        headless=HEADLESS,
-        highlight_mouse=not HEADLESS,
+        headless=True,
     ) as computer:
         initial = await computer.screenshot()
         save_screenshot(initial.screenshot, "initial")
@@ -721,20 +806,21 @@ async def main():
             }
         )
 
-        for turn in range(1, MAX_TURNS + 1):
+        turn = 0
+        while True:
+            turn += 1
             print(f"\n{'=' * 50}")
             print(f"Turn {turn} - sending {len(messages)} messages")
 
             messages[-1]["content"][-1]["cache_control"] = {"type": "ephemeral"}
 
             print("\nAssistant: ", end="", flush=True)
-            async with client.beta.messages.stream(
+            async with client.messages.stream(
                 model=MODEL,
                 max_tokens=8192,
                 messages=messages,
                 tools=tools,
                 system=system,
-                betas=[BETA_HEADER],
             ) as stream:
                 async for text in stream.text_stream:
                     print(text, end="", flush=True)
@@ -753,7 +839,7 @@ async def main():
 
             messages.append({"role": "assistant", "content": response.content})
 
-            tool_results: List[BetaToolResultBlockParam] = []
+            tool_results: List[ToolResultBlockParam] = []
             for block in response.content:
                 if block.type != "tool_use":
                     continue
