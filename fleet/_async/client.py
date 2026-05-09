@@ -601,7 +601,9 @@ class AsyncFleet:
         )
 
         instance = AsyncEnv(client=self.client, **response.json())
-        await instance.instance.load()
+        # Resources are loaded lazily on first `db()`/`browser()`/`resources()` access
+        # via `_load_resources()`, so we don't preload here. Eagerly loading would
+        # fail-fast with a 502 while the container is still warming up.
         return instance
 
     async def make_for_task(self, task: Task) -> AsyncEnv:
@@ -653,7 +655,7 @@ class AsyncFleet:
         else:
             response = await self.client.request("GET", f"/v1/env/instances/{instance_id}")
             instance = AsyncEnv(client=self.client, **response.json())
-            await instance.instance.load()
+            # Resources load lazily on first `db()`/`browser()`/`resources()` access.
             return instance
 
     def _create_url_instance(self, base_url: str) -> AsyncEnv:
