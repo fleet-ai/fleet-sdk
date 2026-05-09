@@ -28,10 +28,6 @@ MODEL = "claude-opus-4-7"
 DISPLAY_WIDTH = 1366
 DISPLAY_HEIGHT = 768
 
-# Action set Claude can pass via the `computer` function tool. Mirrors the
-# action vocabulary that theseus's browser-lease fallback exposes (see
-# orchestrator/temporal/activities.py::BROWSER_LEASE_COMPUTER_ACTIONS) so the
-# behaviour matches what Claude has been prompted on in production.
 SUPPORTED_ACTIONS = (
     "navigate",
     "screenshot",
@@ -191,10 +187,6 @@ def to_openai_conversation(
 # Playwright browser
 # ---------------------------------------------------------------------------
 
-# Map Anthropic / xdotool key names to Playwright key names.
-# Anthropic's `key` action uses xdotool syntax: e.g. "Return", "ctrl+s",
-# "Page_Down", "shift+Tab". We split on '+', map each token, and feed it back
-# to Playwright. Unknown tokens (single chars like 'a') pass through.
 PLAYWRIGHT_KEY_MAP = {
     "return": "Enter",
     "enter": "Enter",
@@ -208,9 +200,6 @@ PLAYWRIGHT_KEY_MAP = {
     "shift": "Shift",
     "shift_l": "Shift",
     "shift_r": "Shift",
-    # `ControlOrMeta` is Playwright's portability shim: Cmd on macOS, Control
-    # elsewhere. Matches what gemini_harness uses and what most web apps treat
-    # as the same shortcut. Works in `keyboard.down/up/press` too.
     "ctrl": "ControlOrMeta",
     "control": "ControlOrMeta",
     "control_l": "ControlOrMeta",
@@ -298,9 +287,6 @@ class PlaywrightComputer:
         self._screen_size = screen_size
         self._headless = headless
         self._highlight_mouse = highlight_mouse
-        # Lower-cased hostnames the model is allowed to navigate to. Anything
-        # else gets rejected so a hallucinated `localhost:3000` doesn't fly the
-        # browser into chrome-error://.
         self._allowed_hosts = (
             {h.lower() for h in allowed_hosts} if allowed_hosts else None
         )
@@ -833,7 +819,7 @@ async def main():
             print("\nAssistant: ", end="", flush=True)
             async with client.messages.stream(
                 model=MODEL,
-                max_tokens=8192,
+                max_tokens=128000,
                 messages=messages,
                 tools=tools,
                 system=system,
