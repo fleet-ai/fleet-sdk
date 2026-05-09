@@ -1,6 +1,7 @@
 import ast
 import asyncio
 import json
+from contextlib import AsyncExitStack
 from datetime import datetime
 from typing import Any, List, Optional
 
@@ -203,9 +204,19 @@ async def main():
         ttl_seconds=3600,
     )
     print("Instance URL:", env.urls.root)
-    mcp_url = env.mcp.url
 
-    await wait_for_mcp(mcp_url)
+    if env.multi_env_list:
+        endpoints = [(app, f"{env.urls.root}{app}/mcp") for app in env.multi_env_list]
+    else:
+        endpoints = [(None, env.mcp.url)]
+
+    print(f"MCP endpoints ({len(endpoints)}):")
+    for app_name, url in endpoints:
+        print(f"  {app_name or '(root)'}: {url}")
+
+    print(f"\nProbing {len(endpoints)} endpoint(s) in parallel...")
+    await asyncio.gather(*(wait_for_mcp(url) for _, url in endpoints))
+    print(f"All {len(endpoints)} MCP endpoint(s) ready")
 
     print(f"App URL: {env.urls.app[0]}")
 
@@ -223,87 +234,107 @@ async def main():
         }
     ]
 
-    async with streamable_http_client(mcp_url) as (read_stream, write_stream, _):
-        async with ClientSession(read_stream, write_stream) as session:
+    async with AsyncExitStack() as stack:
+        anthropic_tools: List[ToolParam] = []
+        # namespaced tool name -> (session, original mcp tool name)
+        dispatch: dict = {}
+
+        for app_name, url in endpoints:
+            read_stream, write_stream, _ = await stack.enter_async_context(
+                streamable_http_client(url)
+            )
+            session = await stack.enter_async_context(
+                ClientSession(read_stream, write_stream)
+            )
             await session.initialize()
 
-            list_tools = await session.list_tools()
+            tools_resp = await session.list_tools()
+            # Hyphens in app names (e.g. "google-maps") aren't valid in OpenAI/Anthropic
+            # function names, so swap them for underscores.
+            prefix = f"{app_name.replace('-', '_')}__" if app_name else ""
 
-            anthropic_tools: List[ToolParam] = [
-                convert_tool_format(tool) for tool in list_tools.tools
-            ]
-            if anthropic_tools:
-                anthropic_tools[-1]["cache_control"] = {"type": "ephemeral"}
+            for mcp_tool in tools_resp.tools:
+                tool_param = convert_tool_format(mcp_tool)
+                if prefix:
+                    tool_param["name"] = f"{prefix}{mcp_tool.name}"
+                anthropic_tools.append(tool_param)
+                dispatch[tool_param["name"]] = (session, mcp_tool.name)
 
-            print(f"Loaded {len(anthropic_tools)} tools")
+        if anthropic_tools:
+            anthropic_tools[-1]["cache_control"] = {"type": "ephemeral"}
 
-            while True:
-                print(f"\nSending {len(messages)} messages")
-                print([m["role"] for m in messages])
+        print(
+            f"Loaded {len(anthropic_tools)} tools across {len(endpoints)} MCP endpoint(s)"
+        )
 
-                messages[-1]["content"][-1]["cache_control"] = {"type": "ephemeral"}
+        while True:
+            print(f"\nSending {len(messages)} messages")
+            print([m["role"] for m in messages])
 
-                print("\nAssistant: ", end="", flush=True)
-                async with client.messages.stream(
-                    model=MODEL,
-                    max_tokens=128000,
-                    messages=messages,
-                    tools=anthropic_tools,
-                    system=system,
-                ) as stream:
-                    async for text in stream.text_stream:
-                        print(text, end="", flush=True)
-                    response = await stream.get_final_message()
-                print()
+            messages[-1]["content"][-1]["cache_control"] = {"type": "ephemeral"}
 
-                del messages[-1]["content"][-1]["cache_control"]
+            print("\nAssistant: ", end="", flush=True)
+            async with client.messages.stream(
+                model=MODEL,
+                max_tokens=128000,
+                messages=messages,
+                tools=anthropic_tools,
+                system=system,
+            ) as stream:
+                async for text in stream.text_stream:
+                    print(text, end="", flush=True)
+                response = await stream.get_final_message()
+            print()
 
-                usage = response.usage
-                print(f"Stop reason: {response.stop_reason}")
-                print(
-                    f"Tokens: input={usage.input_tokens} output={usage.output_tokens} "
-                    f"cache_read={getattr(usage, 'cache_read_input_tokens', 0)} "
-                    f"cache_create={getattr(usage, 'cache_creation_input_tokens', 0)}"
+            del messages[-1]["content"][-1]["cache_control"]
+
+            usage = response.usage
+            print(f"Stop reason: {response.stop_reason}")
+            print(
+                f"Tokens: input={usage.input_tokens} output={usage.output_tokens} "
+                f"cache_read={getattr(usage, 'cache_read_input_tokens', 0)} "
+                f"cache_create={getattr(usage, 'cache_creation_input_tokens', 0)}"
+            )
+
+            messages.append({"role": "assistant", "content": response.content})
+
+            tool_results: List[ToolResultBlockParam] = []
+            for block in response.content:
+                if block.type != "tool_use":
+                    continue
+
+                print(f"\nTool ({block.name}): {block.input}")
+
+                target_session, original_name = dispatch[block.name]
+                result = await target_session.call_tool(original_name, block.input)
+                result_str = result.content[0].text
+
+                result_path = save_to_tmp(
+                    result_str, prefix="tool_result", extension="txt"
+                )
+                print(f"Tool result saved to: {result_path}")
+
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result_str,
+                    }
                 )
 
-                messages.append({"role": "assistant", "content": response.content})
+            if not tool_results:
+                break
 
-                tool_results: List[ToolResultBlockParam] = []
-                for block in response.content:
-                    if block.type != "tool_use":
-                        continue
+            messages.append({"role": "user", "content": tool_results})
 
-                    print(f"\nTool ({block.name}): {block.input}")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        transcript_filename = f"messages_transcript_{timestamp}.json"
+        transcript_path = f"/tmp/{transcript_filename}"
 
-                    result = await session.call_tool(block.name, block.input)
-                    result_str = result.content[0].text
+        with open(transcript_path, "w") as f:
+            json.dump(messages, f, indent=2, default=str)
 
-                    result_path = save_to_tmp(
-                        result_str, prefix="tool_result", extension="txt"
-                    )
-                    print(f"Tool result saved to: {result_path}")
-
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result_str,
-                        }
-                    )
-
-                if not tool_results:
-                    break
-
-                messages.append({"role": "user", "content": tool_results})
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            transcript_filename = f"messages_transcript_{timestamp}.json"
-            transcript_path = f"/tmp/{transcript_filename}"
-
-            with open(transcript_path, "w") as f:
-                json.dump(messages, f, indent=2, default=str)
-
-            print(f"\nFull transcript saved to: {transcript_path}")
+        print(f"\nFull transcript saved to: {transcript_path}")
 
     final_answer = response.content[-1].text
     print(f" Final Answer: {final_answer}")
