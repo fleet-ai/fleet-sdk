@@ -171,10 +171,15 @@ from .instance.base import default_httpx_client
 from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
-from .resources.browser import AsyncBrowserResource
 from .resources.filesystem import AsyncFilesystemResource
 from .resources.mcp import AsyncMCPResource
 from .resources.api import AsyncAPIResource
+from .browser import (
+    AsyncBrowserLease,
+    create_browser as _create_browser_lease,
+    get_browser as _get_browser_lease,
+    host_from_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -386,8 +391,51 @@ class AsyncEnv(EnvironmentBase):
     def db(self, name: str = "current") -> AsyncSQLiteResource:
         return self.instance.db(name)
 
-    def browser(self, name: str = "cdp") -> AsyncBrowserResource:
-        return self.instance.browser(name)
+    async def browser(
+        self,
+        ttl_seconds: int = 300,
+        *,
+        lease_id: Optional[str] = None,
+        allowed_hosts: Optional[List[str]] = None,
+        include_root_host: bool = True,
+        wait_until_running: bool = False,
+        wait_timeout: float = 60.0,
+        extra: Optional[Dict[str, Any]] = None,
+        jwt_token: Optional[str] = None,
+        team_id: Optional[str] = None,
+    ) -> AsyncBrowserLease:
+        """Spin up an orchestrator-managed Fleet Browser lease for this env.
+
+        ``await env.browser()`` posts to ``/v1/browser`` and returns an
+        :class:`fleet._async.browser.AsyncBrowserLease` with ``cdp_url`` /
+        ``mcp_url`` / ``stream_url`` and a ``mcp_tools()`` accessor. By
+        default the host derived from ``self.urls.root`` is prepended to
+        ``allowed_hosts`` so the browser can reach the instance — pass
+        ``include_root_host=False`` to opt out.
+        """
+        hosts: Optional[List[str]] = list(allowed_hosts) if allowed_hosts else None
+        if include_root_host and self.urls and self.urls.root:
+            root_host = host_from_url(self.urls.root)
+            if root_host:
+                hosts = hosts or []
+                if root_host not in hosts:
+                    hosts.insert(0, root_host)
+        return await _create_browser_lease(
+            self._load_client,
+            ttl_seconds=ttl_seconds,
+            lease_id=lease_id,
+            allowed_hosts=hosts,
+            extra=extra,
+            jwt_token=jwt_token,
+            team_id=team_id,
+            wait_until_running=wait_until_running,
+            wait_timeout=wait_timeout,
+        )
+
+    @property
+    def root_url(self) -> Optional[str]:
+        """Convenience: ``self.urls.root`` if available."""
+        return self.urls.root if self.urls else None
 
     def fs(self) -> AsyncFilesystemResource:
         """Get a filesystem diff resource for inspecting file changes."""
@@ -794,6 +842,45 @@ class AsyncFleet:
     ) -> VerifiersExecuteResponse:
         return await _execute_verifier_remote(
             self.client, bundle_data, args, kwargs, timeout
+        )
+
+    async def create_browser(
+        self,
+        ttl_seconds: int = 300,
+        *,
+        lease_id: Optional[str] = None,
+        allowed_hosts: Optional[List[str]] = None,
+        request_timestamp_ms: Optional[int] = None,
+        extra: Optional[Dict[str, Any]] = None,
+        jwt_token: Optional[str] = None,
+        team_id: Optional[str] = None,
+        wait_until_running: bool = False,
+        wait_timeout: float = 60.0,
+    ) -> AsyncBrowserLease:
+        """Create a Fleet Browser lease (``POST /v1/browser``)."""
+        return await _create_browser_lease(
+            self.client,
+            ttl_seconds=ttl_seconds,
+            lease_id=lease_id,
+            allowed_hosts=allowed_hosts,
+            request_timestamp_ms=request_timestamp_ms,
+            extra=extra,
+            jwt_token=jwt_token,
+            team_id=team_id,
+            wait_until_running=wait_until_running,
+            wait_timeout=wait_timeout,
+        )
+
+    async def get_browser(
+        self,
+        lease_id: str,
+        *,
+        jwt_token: Optional[str] = None,
+        team_id: Optional[str] = None,
+    ) -> AsyncBrowserLease:
+        """Inspect an existing browser lease (``GET /v1/browser/{lease_id}``)."""
+        return await _get_browser_lease(
+            self.client, lease_id, jwt_token=jwt_token, team_id=team_id
         )
 
     async def delete(self, instance_id: str) -> InstanceResponse:

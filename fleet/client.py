@@ -177,10 +177,15 @@ from .instance.base import default_httpx_client
 from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import SQLiteResource
-from .resources.browser import BrowserResource
 from .resources.filesystem import FilesystemResource
 from .resources.mcp import SyncMCPResource
 from .resources.api import APIResource
+from .browser import (
+    BrowserLease,
+    create_browser as _create_browser_lease,
+    get_browser as _get_browser_lease,
+    host_from_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -398,8 +403,51 @@ class SyncEnv(EnvironmentBase):
     def db(self, name: str = "current") -> SQLiteResource:
         return self.instance.db(name)
 
-    def browser(self, name: str = "cdp") -> BrowserResource:
-        return self.instance.browser(name)
+    def browser(
+        self,
+        ttl_seconds: int = 300,
+        *,
+        lease_id: Optional[str] = None,
+        allowed_hosts: Optional[List[str]] = None,
+        include_root_host: bool = True,
+        wait_until_running: bool = False,
+        wait_timeout: float = 60.0,
+        extra: Optional[Dict[str, Any]] = None,
+        jwt_token: Optional[str] = None,
+        team_id: Optional[str] = None,
+    ) -> BrowserLease:
+        """Spin up an orchestrator-managed Fleet Browser lease for this env.
+
+        ``env.browser()`` posts to ``/v1/browser`` and returns a
+        :class:`fleet.browser.BrowserLease` with ``cdp_url`` / ``mcp_url`` /
+        ``stream_url`` and a ``mcp_tools()`` accessor. By default the host
+        from ``self.urls.root`` is prepended to ``allowed_hosts`` so the
+        browser can reach the instance — pass ``include_root_host=False``
+        to opt out.
+        """
+        hosts: Optional[List[str]] = list(allowed_hosts) if allowed_hosts else None
+        if include_root_host and self.urls and self.urls.root:
+            root_host = host_from_url(self.urls.root)
+            if root_host:
+                hosts = hosts or []
+                if root_host not in hosts:
+                    hosts.insert(0, root_host)
+        return _create_browser_lease(
+            self._load_client,
+            ttl_seconds=ttl_seconds,
+            lease_id=lease_id,
+            allowed_hosts=hosts,
+            extra=extra,
+            jwt_token=jwt_token,
+            team_id=team_id,
+            wait_until_running=wait_until_running,
+            wait_timeout=wait_timeout,
+        )
+
+    @property
+    def root_url(self) -> Optional[str]:
+        """Convenience: ``self.urls.root`` if available (handy paired with spawn_browser)."""
+        return self.urls.root if self.urls else None
 
     def fs(self) -> FilesystemResource:
         """Get a filesystem diff resource for inspecting file changes."""
@@ -807,6 +855,50 @@ class Fleet:
         self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
     ) -> VerifiersExecuteResponse:
         return _execute_verifier_remote(self.client, bundle_data, args, kwargs, timeout)
+
+    def create_browser(
+        self,
+        ttl_seconds: int = 300,
+        *,
+        lease_id: Optional[str] = None,
+        allowed_hosts: Optional[List[str]] = None,
+        request_timestamp_ms: Optional[int] = None,
+        extra: Optional[Dict[str, Any]] = None,
+        jwt_token: Optional[str] = None,
+        team_id: Optional[str] = None,
+        wait_until_running: bool = False,
+        wait_timeout: float = 60.0,
+    ) -> BrowserLease:
+        """Create a Fleet Browser lease (``POST /v1/browser``).
+
+        Freeform — pass any of ``allowed_hosts`` / ``lease_id`` /
+        ``request_timestamp_ms`` directly, or use ``extra`` for keys this
+        SDK version doesn't surface yet.
+        """
+        return _create_browser_lease(
+            self.client,
+            ttl_seconds=ttl_seconds,
+            lease_id=lease_id,
+            allowed_hosts=allowed_hosts,
+            request_timestamp_ms=request_timestamp_ms,
+            extra=extra,
+            jwt_token=jwt_token,
+            team_id=team_id,
+            wait_until_running=wait_until_running,
+            wait_timeout=wait_timeout,
+        )
+
+    def get_browser(
+        self,
+        lease_id: str,
+        *,
+        jwt_token: Optional[str] = None,
+        team_id: Optional[str] = None,
+    ) -> BrowserLease:
+        """Inspect an existing browser lease (``GET /v1/browser/{lease_id}``)."""
+        return _get_browser_lease(
+            self.client, lease_id, jwt_token=jwt_token, team_id=team_id
+        )
 
     def delete(self, instance_id: str) -> InstanceResponse:
         return _delete_instance(self.client, instance_id)
