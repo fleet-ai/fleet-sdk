@@ -243,8 +243,8 @@ class VerifiersExecuteRequest(BaseModel):
     function_name: Optional[str] = Field(
         "verify", description="Name of the function to execute", title="Function Name"
     )
-    timeout: Optional[conint(ge=1, le=300)] = Field(
-        60, description="Execution timeout in seconds", title="Timeout"
+    timeout: Optional[conint(ge=1, le=600)] = Field(
+        600, description="Execution timeout in seconds", title="Timeout"
     )
     region: Optional[str] = Field(
         None, description="AWS region for execution", title="Region"

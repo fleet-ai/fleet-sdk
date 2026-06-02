@@ -167,6 +167,8 @@ from ..instance.models import (
 from ..config import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_TIMEOUT,
+    DEFAULT_VERIFIER_EXECUTION_TIMEOUT,
+    DEFAULT_VERIFIER_HTTP_TIMEOUT_BUFFER,
     REGION_BASE_URL,
     GLOBAL_BASE_URL,
 )
@@ -482,7 +484,7 @@ class AsyncEnv(EnvironmentBase):
         args: tuple,
         args_array: list,
         kwargs: dict,
-        timeout: Optional[int] = 30,
+        timeout: Optional[int] = DEFAULT_VERIFIER_EXECUTION_TIMEOUT,
         needs_upload: bool = True,
         verifier_runtime_version: Optional[str] = None,
     ) -> VerifiersExecuteResponse:
@@ -801,7 +803,11 @@ class AsyncFleet:
         return await _check_bundle_exists(self.client, bundle_hash)
 
     async def execute_verifier_remote(
-        self, bundle_data: bytes, args: tuple, kwargs: dict, timeout: Optional[int] = 30
+        self,
+        bundle_data: bytes,
+        args: tuple,
+        kwargs: dict,
+        timeout: Optional[int] = DEFAULT_VERIFIER_EXECUTION_TIMEOUT,
     ) -> VerifiersExecuteResponse:
         return await _execute_verifier_remote(
             self.client, bundle_data, args, kwargs, timeout
@@ -1827,7 +1833,7 @@ async def _execute_verifier_remote(
     args: tuple,
     args_array: list,
     kwargs: dict,
-    timeout: Optional[int] = 30,
+    timeout: Optional[int] = DEFAULT_VERIFIER_EXECUTION_TIMEOUT,
     needs_upload: bool = True,
     verifier_runtime_version: Optional[str] = None,
 ) -> VerifiersExecuteResponse:
@@ -1872,7 +1878,13 @@ async def _execute_verifier_remote(
 
     # Note: This should be called on the instance URL, not the orchestrator
     # The instance has manager URLs for verifier execution
-    response = await client.request("POST", "/v1/verifiers/execute", json=request_data)
+    request_kwargs = {}
+    if timeout is not None and timeout > 300:
+        request_kwargs["timeout"] = timeout + DEFAULT_VERIFIER_HTTP_TIMEOUT_BUFFER
+
+    response = await client.request(
+        "POST", "/v1/verifiers/execute", json=request_data, **request_kwargs
+    )
 
     # Debug the response
     response_json = response.json()
