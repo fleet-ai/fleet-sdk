@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, Optional, List, TypeVar, Tuple
 
 from .bundler import FunctionBundler
 from ..client import AsyncEnv
+from ...config import DEFAULT_VERIFIER_EXECUTION_TIMEOUT
 from ...models import VerifiersExecuteResponse
 
 logger = logging.getLogger(__name__)
@@ -231,6 +232,10 @@ Remote traceback:
         self, env: "AsyncEnv", *args, **kwargs
     ) -> "VerifiersExecuteResponse":
         """Remote execution of the verifier function that returns the full response model."""
+        verifier_timeout = kwargs.pop("verifier_timeout", None)
+        if verifier_timeout is None:
+            verifier_timeout = DEFAULT_VERIFIER_EXECUTION_TIMEOUT
+
         args_array = list(args)
         args_array.append({"env": env.instance_id})
         args = tuple(args_array)
@@ -252,6 +257,7 @@ Remote traceback:
                     args=args,
                     args_array=args_array,
                     kwargs=kwargs,
+                    timeout=verifier_timeout,
                     needs_upload=True,
                     verifier_runtime_version=self.verifier_runtime_version,
                 )
@@ -269,6 +275,7 @@ Remote traceback:
                     args=args,
                     args_array=args_array,
                     kwargs=kwargs,
+                    timeout=verifier_timeout,
                     needs_upload=False,
                     verifier_runtime_version=self.verifier_runtime_version,
                 )
@@ -290,6 +297,7 @@ Remote traceback:
                     args=args,
                     args_array=args_array,
                     kwargs=kwargs,
+                    timeout=verifier_timeout,
                     needs_upload=True,
                     verifier_runtime_version=self.verifier_runtime_version,
                 )

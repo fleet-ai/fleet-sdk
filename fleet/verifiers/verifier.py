@@ -24,6 +24,7 @@ from typing import (
 )
 
 from .bundler import FunctionBundler
+from ..config import DEFAULT_VERIFIER_EXECUTION_TIMEOUT
 
 if TYPE_CHECKING:
     from ..client import SyncEnv
@@ -242,6 +243,10 @@ Remote traceback:
         self, env: "SyncEnv", *args, **kwargs
     ) -> "VerifiersExecuteResponse":
         """Remote execution of the verifier function that returns the full response model."""
+        verifier_timeout = kwargs.pop("verifier_timeout", None)
+        if verifier_timeout is None:
+            verifier_timeout = DEFAULT_VERIFIER_EXECUTION_TIMEOUT
+
         args_array = list(args)
         args_array.append({"env": env.instance_id})
         args = tuple(args_array)
@@ -263,6 +268,7 @@ Remote traceback:
                     args=args,
                     args_array=args_array,
                     kwargs=kwargs,
+                    timeout=verifier_timeout,
                     needs_upload=True,
                     verifier_runtime_version=self.verifier_runtime_version,
                 )
@@ -281,6 +287,7 @@ Remote traceback:
                     args=args,
                     args_array=args_array,
                     kwargs=kwargs,
+                    timeout=verifier_timeout,
                     needs_upload=False,
                     verifier_runtime_version=self.verifier_runtime_version,
                 )
@@ -301,6 +308,7 @@ Remote traceback:
                     args=args,
                     args_array=args_array,
                     kwargs=kwargs,
+                    timeout=verifier_timeout,
                     needs_upload=True,
                     verifier_runtime_version=self.verifier_runtime_version,
                 )
