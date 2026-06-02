@@ -563,6 +563,7 @@ class Fleet:
         ttl_seconds: Optional[int] = None,
         run_id: Optional[str] = None,
         heartbeat_interval: Optional[int] = None,
+        data_versions: Optional[Dict[str, str]] = None,
     ) -> SyncEnv:
         if ":" in env_key:
             env_key_part, env_version = env_key.split(":", 1)
@@ -593,6 +594,7 @@ class Fleet:
             env_version=env_version,
             data_key=data_key_part,
             data_version=data_version,
+            data_versions=data_versions,
             region=region,
             env_variables=env_variables,
             image_type=image_type,

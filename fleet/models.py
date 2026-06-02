@@ -59,6 +59,7 @@ class InstanceRequest(BaseModel):
     env_version: Optional[str] = Field(None, title="Env Version")
     data_key: Optional[str] = Field(None, title="Data Key")
     data_version: Optional[str] = Field(None, title="Data Version")
+    data_versions: Optional[Dict[str, str]] = Field(None, title="Data Versions")
     region: Optional[str] = Field("us-west-1", title="Region")
     seed: Optional[int] = Field(None, title="Seed")
     timestamp: Optional[int] = Field(None, title="Timestamp")

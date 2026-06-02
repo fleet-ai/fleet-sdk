@@ -12,6 +12,7 @@ async def make_async(
     ttl_seconds: Optional[int] = None,
     run_id: Optional[str] = None,
     heartbeat_interval: Optional[int] = None,
+    data_versions: Optional[Dict[str, str]] = None,
 ) -> AsyncEnv:
     return await AsyncFleet().make(
         env_key,
@@ -22,6 +23,7 @@ async def make_async(
         ttl_seconds=ttl_seconds,
         run_id=run_id,
         heartbeat_interval=heartbeat_interval,
+        data_versions=data_versions,
     )
 
 
