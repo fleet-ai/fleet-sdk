@@ -589,6 +589,16 @@ class Fleet:
             data_key_part = data_key
             data_version = None
 
+        if data_versions:
+            data_versions = {
+                k: (
+                    f"v{v}"
+                    if v and not v.startswith("v") and v[0].isdigit()
+                    else v
+                )
+                for k, v in data_versions.items()
+            }
+
         request = InstanceRequest(
             env_key=env_key_part,
             env_version=env_version,
