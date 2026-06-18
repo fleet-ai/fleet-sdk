@@ -154,9 +154,25 @@ class AsyncVerifierFunction:
             # Return error score 0
             return 0.0
 
-    async def remote(self, env: AsyncEnv, *args, **kwargs) -> float:
-        """Remote execution of the verifier function with SHA-based bundle caching."""
-        response = await self.remote_with_response(env, *args, **kwargs)
+    async def remote(
+        self,
+        env: AsyncEnv,
+        *args,
+        async_: bool = False,
+        poll_interval: float = 5.0,
+        **kwargs,
+    ) -> float:
+        """Remote execution of the verifier function with SHA-based bundle caching.
+
+        When ``async_`` is True the verifier is submitted to run in the
+        background and the result is polled (every ``poll_interval`` seconds)
+        until it completes — this avoids HTTP/edge idle timeouts for
+        long-running verifiers. When False the behavior is unchanged (the
+        request blocks until the verifier finishes).
+        """
+        response = await self.remote_with_response(
+            env, *args, async_=async_, poll_interval=poll_interval, **kwargs
+        )
 
         # Handle response
         if response.stdout:
@@ -228,9 +244,20 @@ Remote traceback:
         )
 
     async def remote_with_response(
-        self, env: "AsyncEnv", *args, **kwargs
+        self,
+        env: "AsyncEnv",
+        *args,
+        async_: bool = False,
+        poll_interval: float = 5.0,
+        **kwargs,
     ) -> "VerifiersExecuteResponse":
-        """Remote execution of the verifier function that returns the full response model."""
+        """Remote execution of the verifier function that returns the full response model.
+
+        When ``async_`` is True the verifier is submitted asynchronously and
+        polled (every ``poll_interval`` seconds) until it reaches a terminal
+        state; the returned response is the completed/failed job result. When
+        False the request blocks until the verifier finishes (unchanged).
+        """
         args_array = list(args)
         args_array.append({"env": env.instance_id})
         args = tuple(args_array)
@@ -254,6 +281,8 @@ Remote traceback:
                     kwargs=kwargs,
                     needs_upload=True,
                     verifier_runtime_version=self.verifier_runtime_version,
+                    async_=async_,
+                    poll_interval=poll_interval,
                 )
 
                 # logger.debug(f"Bundle {bundle_sha[:8]}... uploaded successfully")
@@ -271,6 +300,8 @@ Remote traceback:
                     kwargs=kwargs,
                     needs_upload=False,
                     verifier_runtime_version=self.verifier_runtime_version,
+                    async_=async_,
+                    poll_interval=poll_interval,
                 )
 
             return response
@@ -292,6 +323,8 @@ Remote traceback:
                     kwargs=kwargs,
                     needs_upload=True,
                     verifier_runtime_version=self.verifier_runtime_version,
+                    async_=async_,
+                    poll_interval=poll_interval,
                 )
                 return response
             else:
