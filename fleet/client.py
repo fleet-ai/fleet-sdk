@@ -22,6 +22,7 @@ import httpx
 import json
 import logging
 import os
+import time
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -542,6 +543,8 @@ class SyncEnv(EnvironmentBase):
         timeout: Optional[int] = 30,
         needs_upload: bool = True,
         verifier_runtime_version: Optional[str] = None,
+        async_: bool = False,
+        poll_interval: float = 5.0,
     ) -> VerifiersExecuteResponse:
         return _execute_verifier_remote(
             self._load_client,
@@ -555,6 +558,8 @@ class SyncEnv(EnvironmentBase):
             timeout,
             needs_upload,
             verifier_runtime_version,
+            async_=async_,
+            poll_interval=poll_interval,
         )
 
     def __getstate__(self):
@@ -1933,6 +1938,8 @@ def _execute_verifier_remote(
     timeout: Optional[int] = 30,
     needs_upload: bool = True,
     verifier_runtime_version: Optional[str] = None,
+    async_: bool = False,
+    poll_interval: float = 5.0,
 ) -> VerifiersExecuteResponse:
     # Pickle args and kwargs together
     # The first arg should be None as a placeholder for env
@@ -1960,6 +1967,11 @@ def _execute_verifier_remote(
     if verifier_runtime_version:
         request_data["verifier_runtime_version"] = verifier_runtime_version
 
+    # Async submit-and-poll path. When async_ is False the behavior below is
+    # identical to the original synchronous request.
+    if async_:
+        request_data["async"] = True
+
     # Debug logging
     # logger.debug(
     #     f"Sending verifier execute request: key={key}, sha256={bundle_sha[:8]}..., function_name={function_name}"
@@ -1981,4 +1993,19 @@ def _execute_verifier_remote(
     response_json = response.json()
     # logger.debug(f"Verifier execute response: {response_json}")
 
-    return VerifiersExecuteResponse(**response_json)
+    if not async_:
+        return VerifiersExecuteResponse(**response_json)
+
+    # Async: the submit returns a job handle; poll until the job reaches a
+    # terminal state (completed/failed). Branch on `status`, never `success`.
+    job_id = response_json.get("job_id")
+    if not job_id:
+        # No job handle returned (e.g. server ran it inline) - surface as-is.
+        return VerifiersExecuteResponse(**response_json)
+
+    while True:
+        poll_response = client.request("GET", f"/v1/verifiers/jobs/{job_id}")
+        poll_json = poll_response.json()
+        if poll_json.get("status") in ("completed", "failed"):
+            return VerifiersExecuteResponse(**poll_json)
+        time.sleep(poll_interval)

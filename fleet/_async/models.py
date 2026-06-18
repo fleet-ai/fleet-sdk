@@ -259,6 +259,12 @@ class VerifiersExecuteRequest(BaseModel):
     display_src: Optional[str] = Field(
         None, description="Display source code", title="Display Src"
     )
+    async_: Optional[bool] = Field(
+        None,
+        alias="async",
+        description="Submit asynchronously and return a job handle instead of waiting",
+        title="Async",
+    )
 
 
 class VerifiersExecuteResponse(BaseModel):
@@ -302,6 +308,16 @@ class VerifiersExecuteResponse(BaseModel):
     )
     stdout: Optional[str] = Field(
         None, description="Captured stdout from execution", title="Stdout"
+    )
+    status: Optional[str] = Field(
+        None,
+        description="Job status for async execution (pending/running/completed/failed)",
+        title="Status",
+    )
+    job_id: Optional[str] = Field(
+        None,
+        description="Job handle for async execution; poll GET /v1/verifiers/jobs/{job_id}",
+        title="Job Id",
     )
 
 
