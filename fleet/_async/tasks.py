@@ -81,11 +81,23 @@ class Task(BaseModel):
         # Allow arbitrary types for the verifier field
         arbitrary_types_allowed = True
 
-    def verify(self, env, *args, **kwargs) -> float:
+    def verify(
+        self,
+        env,
+        *args,
+        async_: bool = False,
+        poll_interval: float = 5.0,
+        **kwargs,
+    ) -> float:
         """Verify the task using the verifier function (sync version).
 
         For sync environments, calls the sync verifier directly.
         For async verifiers, automatically runs them with asyncio.run().
+
+        When ``async_`` is True the verifier is submitted to run in the
+        background and polled (every ``poll_interval`` seconds) until it
+        completes, avoiding HTTP/edge idle timeouts for long-running
+        verifiers. When False the behavior is unchanged.
         """
         # If verifier doesn't exist but verifier_func does, rebuild it
         if not self.verifier and self.verifier_func:
@@ -95,7 +107,9 @@ class Task(BaseModel):
             import asyncio
             import inspect
 
-            result = self.verifier.remote(env, *args, **kwargs)
+            result = self.verifier.remote(
+                env, *args, async_=async_, poll_interval=poll_interval, **kwargs
+            )
 
             # If the result is a coroutine, we need to run it
             if inspect.iscoroutine(result):
@@ -115,18 +129,27 @@ class Task(BaseModel):
         else:
             raise ValueError("No verifier function found for this task")
 
-    async def verify_async(self, *args, **kwargs) -> float:
+    async def verify_async(
+        self, *args, async_: bool = False, poll_interval: float = 5.0, **kwargs
+    ) -> float:
         """Verify the task using the verifier function (async version).
 
         For async environments, awaits the async verifier.
         Works with both sync and async verifiers in async contexts.
+
+        When ``async_`` is True the verifier is submitted to run in the
+        background and polled (every ``poll_interval`` seconds) until it
+        completes, avoiding HTTP/edge idle timeouts for long-running
+        verifiers. When False the behavior is unchanged.
         """
         # If verifier doesn't exist but verifier_func does, rebuild it
         if not self.verifier and self.verifier_func:
             self._rebuild_verifier()
 
         if self.verifier:
-            result = self.verifier.remote(*args, **kwargs)
+            result = self.verifier.remote(
+                *args, async_=async_, poll_interval=poll_interval, **kwargs
+            )
             # If it's a coroutine, await it
             import inspect
 
@@ -138,19 +161,26 @@ class Task(BaseModel):
             raise ValueError("No verifier function found for this task")
 
     async def verify_detailed_async(
-        self, *args, **kwargs
+        self, *args, async_: bool = False, poll_interval: float = 5.0, **kwargs
     ) -> "VerifiersExecuteResponse":
         """Verify the task and return the full execute response model.
 
         For async environments, awaits the async verifier.
         Works with both sync and async verifiers in async contexts.
+
+        When ``async_`` is True the verifier is submitted to run in the
+        background and polled (every ``poll_interval`` seconds) until it
+        completes, avoiding HTTP/edge idle timeouts for long-running
+        verifiers. When False the behavior is unchanged.
         """
         # If verifier doesn't exist but verifier_func does, rebuild it
         if not self.verifier and self.verifier_func:
             self._rebuild_verifier()
 
         if self.verifier:
-            result = self.verifier.remote_with_response(*args, **kwargs)
+            result = self.verifier.remote_with_response(
+                *args, async_=async_, poll_interval=poll_interval, **kwargs
+            )
             # If it's a coroutine, await it
             import inspect
 
@@ -161,11 +191,23 @@ class Task(BaseModel):
         else:
             raise ValueError("No verifier function found for this task")
 
-    def verify_detailed(self, env, *args, **kwargs) -> "VerifiersExecuteResponse":
+    def verify_detailed(
+        self,
+        env,
+        *args,
+        async_: bool = False,
+        poll_interval: float = 5.0,
+        **kwargs,
+    ) -> "VerifiersExecuteResponse":
         """Verify the task and return the full execute response model (sync version).
 
         For sync environments, calls the sync verifier directly.
         For async verifiers, automatically runs them with asyncio.run().
+
+        When ``async_`` is True the verifier is submitted to run in the
+        background and polled (every ``poll_interval`` seconds) until it
+        completes, avoiding HTTP/edge idle timeouts for long-running
+        verifiers. When False the behavior is unchanged.
         """
         # If verifier doesn't exist but verifier_func does, rebuild it
         if not self.verifier and self.verifier_func:
@@ -176,7 +218,9 @@ class Task(BaseModel):
             import inspect
 
             # Check if verifier has remote_with_response method (for decorated verifiers)
-            result = self.verifier.remote_with_response(env, *args, **kwargs)
+            result = self.verifier.remote_with_response(
+                env, *args, async_=async_, poll_interval=poll_interval, **kwargs
+            )
 
             # If the result is a coroutine, we need to run it
             if inspect.iscoroutine(result):
