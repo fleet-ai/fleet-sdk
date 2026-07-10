@@ -3,6 +3,8 @@
 Tests both sync (fleet/tasks.py) and async (fleet/_async/tasks.py) versions.
 """
 
+import asyncio
+
 import pytest
 from fleet.tasks import verifier_from_string as sync_verifier_from_string
 from fleet._async.tasks import verifier_from_string as async_verifier_from_string
@@ -233,6 +235,28 @@ def my_verifier(env):
         assert verifier._sha256 == sha256_val
         assert verifier._verifier_code == code
 
+    def test_verifier_module_constants_and_helpers_share_namespace(self):
+        """Verifier-defined globals must be visible during module init and execution."""
+        code = """
+SOURCE_SCORE = 1.0
+
+def my_verifier(env):
+    return CONFIG["score"]
+
+def build_config():
+    return {"score": SOURCE_SCORE}
+
+CONFIG = build_config()
+"""
+        verifier = sync_verifier_from_string(
+            verifier_func=code,
+            verifier_id="test-verifier",
+            verifier_key="test-key",
+            sha256="test-sha",
+        )
+
+        assert verifier.func(None) == 1.0
+
 
 class TestAsyncVerifierFromString:
     """Tests for async version of verifier_from_string."""
@@ -332,6 +356,28 @@ import asyncio
                 verifier_key="test-key",
                 sha256="test-sha",
             )
+
+    def test_async_verifier_module_constants_and_helpers_share_namespace(self):
+        """Async loading must preserve verifier-defined module globals."""
+        code = """
+SOURCE_SCORE = 1.0
+
+async def my_verifier(env):
+    return CONFIG["score"]
+
+def build_config():
+    return {"score": SOURCE_SCORE}
+
+CONFIG = build_config()
+"""
+        verifier = async_verifier_from_string(
+            verifier_func=code,
+            verifier_id="test-verifier",
+            verifier_key="test-key",
+            sha256="test-sha",
+        )
+
+        assert asyncio.run(verifier.func(None)) == 1.0
 
 
 class TestRealWorldScenarios:

@@ -341,34 +341,31 @@ def verifier_from_string(
                 return False
             return target in numbers
 
-        # Create a globals namespace with all required imports
-        exec_globals = globals().copy()
-        exec_globals.update(
-            {
-                "TASK_SUCCESSFUL_SCORE": TASK_SUCCESSFUL_SCORE,
-                "TASK_FAILED_SCORE": TASK_FAILED_SCORE,
-                "IgnoreConfig": IgnoreConfig,
-                "Environment": object,  # Add Environment type if needed
-                "normalized_contains": normalized_contains,
-                "extract_numbers": extract_numbers,
-                "contains_number": contains_number,
-                "json": json,
-                "re": re,
-                "string": string,
-            }
-        )
+        # Execute verifier modules in one shared namespace. Functions created
+        # by exec resolve names from its globals dictionary, so splitting the
+        # globals and locals dictionaries hides verifier-defined constants and
+        # helpers from one another.
+        exec_namespace = {
+            "TASK_SUCCESSFUL_SCORE": TASK_SUCCESSFUL_SCORE,
+            "TASK_FAILED_SCORE": TASK_FAILED_SCORE,
+            "IgnoreConfig": IgnoreConfig,
+            "Environment": object,  # Add Environment type if needed
+            "normalized_contains": normalized_contains,
+            "extract_numbers": extract_numbers,
+            "contains_number": contains_number,
+            "json": json,
+            "re": re,
+            "string": string,
+        }
 
-        # Create a local namespace for executing the code
-        local_namespace = {}
-
-        # Execute the cleaned verifier code in the namespace
-        exec(cleaned_code, exec_globals, local_namespace)
+        # Execute the cleaned verifier code in the module-style namespace.
+        exec(cleaned_code, exec_namespace, exec_namespace)
 
         # Find the function that was defined (not imported)
         # Functions defined via exec have co_filename == '<string>'
         # Imported functions have their actual module file path
         func_obj = None
-        for name, obj in local_namespace.items():
+        for name, obj in exec_namespace.items():
             if inspect.isfunction(obj) and obj.__code__.co_filename == "<string>":
                 func_obj = obj
                 break
