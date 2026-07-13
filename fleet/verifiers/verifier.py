@@ -169,6 +169,7 @@ class SyncVerifierFunction:
         self,
         env: "SyncEnv",
         *args,
+        cost_team_id: Optional[str] = None,
         async_: bool = False,
         poll_interval: float = 5.0,
         **kwargs,
@@ -182,7 +183,12 @@ class SyncVerifierFunction:
         request blocks until the verifier finishes).
         """
         response = self.remote_with_response(
-            env, *args, async_=async_, poll_interval=poll_interval, **kwargs
+            env,
+            *args,
+            cost_team_id=cost_team_id,
+            async_=async_,
+            poll_interval=poll_interval,
+            **kwargs,
         )
 
         # Handle response
@@ -258,6 +264,7 @@ Remote traceback:
         self,
         env: "SyncEnv",
         *args,
+        cost_team_id: Optional[str] = None,
         async_: bool = False,
         poll_interval: float = 5.0,
         **kwargs,
@@ -292,6 +299,7 @@ Remote traceback:
                     kwargs=kwargs,
                     needs_upload=True,
                     verifier_runtime_version=self.verifier_runtime_version,
+                    cost_team_id=cost_team_id,
                     async_=async_,
                     poll_interval=poll_interval,
                 )
@@ -312,6 +320,7 @@ Remote traceback:
                     kwargs=kwargs,
                     needs_upload=False,
                     verifier_runtime_version=self.verifier_runtime_version,
+                    cost_team_id=cost_team_id,
                     async_=async_,
                     poll_interval=poll_interval,
                 )
@@ -334,6 +343,7 @@ Remote traceback:
                     kwargs=kwargs,
                     needs_upload=True,
                     verifier_runtime_version=self.verifier_runtime_version,
+                    cost_team_id=cost_team_id,
                     async_=async_,
                     poll_interval=poll_interval,
                 )

@@ -230,6 +230,9 @@ class VerifiersCheckResponse(BaseModel):
 
 
 class VerifiersExecuteRequest(BaseModel):
+    cost_team_id: Optional[str] = Field(
+        None, description="Team to attribute verifier costs to", title="Cost Team Id"
+    )
     key: Optional[str] = Field(
         None, description="Key of the verifier artifact", title="Key"
     )
