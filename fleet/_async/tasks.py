@@ -85,6 +85,7 @@ class Task(BaseModel):
         self,
         env,
         *args,
+        cost_team_id: Optional[str] = None,
         async_: bool = False,
         poll_interval: float = 5.0,
         **kwargs,
@@ -108,7 +109,12 @@ class Task(BaseModel):
             import inspect
 
             result = self.verifier.remote(
-                env, *args, async_=async_, poll_interval=poll_interval, **kwargs
+                env,
+                *args,
+                cost_team_id=cost_team_id,
+                async_=async_,
+                poll_interval=poll_interval,
+                **kwargs,
             )
 
             # If the result is a coroutine, we need to run it
@@ -130,7 +136,12 @@ class Task(BaseModel):
             raise ValueError("No verifier function found for this task")
 
     async def verify_async(
-        self, *args, async_: bool = False, poll_interval: float = 5.0, **kwargs
+        self,
+        *args,
+        cost_team_id: Optional[str] = None,
+        async_: bool = False,
+        poll_interval: float = 5.0,
+        **kwargs,
     ) -> float:
         """Verify the task using the verifier function (async version).
 
@@ -148,7 +159,11 @@ class Task(BaseModel):
 
         if self.verifier:
             result = self.verifier.remote(
-                *args, async_=async_, poll_interval=poll_interval, **kwargs
+                *args,
+                cost_team_id=cost_team_id,
+                async_=async_,
+                poll_interval=poll_interval,
+                **kwargs,
             )
             # If it's a coroutine, await it
             import inspect
@@ -161,7 +176,12 @@ class Task(BaseModel):
             raise ValueError("No verifier function found for this task")
 
     async def verify_detailed_async(
-        self, *args, async_: bool = False, poll_interval: float = 5.0, **kwargs
+        self,
+        *args,
+        cost_team_id: Optional[str] = None,
+        async_: bool = False,
+        poll_interval: float = 5.0,
+        **kwargs,
     ) -> "VerifiersExecuteResponse":
         """Verify the task and return the full execute response model.
 
@@ -179,7 +199,11 @@ class Task(BaseModel):
 
         if self.verifier:
             result = self.verifier.remote_with_response(
-                *args, async_=async_, poll_interval=poll_interval, **kwargs
+                *args,
+                cost_team_id=cost_team_id,
+                async_=async_,
+                poll_interval=poll_interval,
+                **kwargs,
             )
             # If it's a coroutine, await it
             import inspect
@@ -195,6 +219,7 @@ class Task(BaseModel):
         self,
         env,
         *args,
+        cost_team_id: Optional[str] = None,
         async_: bool = False,
         poll_interval: float = 5.0,
         **kwargs,
@@ -219,7 +244,12 @@ class Task(BaseModel):
 
             # Check if verifier has remote_with_response method (for decorated verifiers)
             result = self.verifier.remote_with_response(
-                env, *args, async_=async_, poll_interval=poll_interval, **kwargs
+                env,
+                *args,
+                cost_team_id=cost_team_id,
+                async_=async_,
+                poll_interval=poll_interval,
+                **kwargs,
             )
 
             # If the result is a coroutine, we need to run it

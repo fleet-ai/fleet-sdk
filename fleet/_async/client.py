@@ -532,6 +532,7 @@ class AsyncEnv(EnvironmentBase):
         verifier_runtime_version: Optional[str] = None,
         async_: bool = False,
         poll_interval: float = 5.0,
+        cost_team_id: Optional[str] = None,
     ) -> VerifiersExecuteResponse:
         return await _execute_verifier_remote(
             self._load_client,
@@ -547,6 +548,7 @@ class AsyncEnv(EnvironmentBase):
             verifier_runtime_version,
             async_=async_,
             poll_interval=poll_interval,
+            cost_team_id=cost_team_id,
         )
 
     def __getstate__(self):
@@ -1820,6 +1822,7 @@ async def _execute_verifier_remote(
     verifier_runtime_version: Optional[str] = None,
     async_: bool = False,
     poll_interval: float = 5.0,
+    cost_team_id: Optional[str] = None,
 ) -> VerifiersExecuteResponse:
     # Pickle args and kwargs together
     # The first arg should be None as a placeholder for env
@@ -1846,6 +1849,9 @@ async def _execute_verifier_remote(
     # Add verifier_runtime_version if present
     if verifier_runtime_version:
         request_data["verifier_runtime_version"] = verifier_runtime_version
+
+    if cost_team_id is not None:
+        request_data["cost_team_id"] = cost_team_id
 
     # Async submit-and-poll path. When async_ is False the behavior below is
     # identical to the original synchronous request.
