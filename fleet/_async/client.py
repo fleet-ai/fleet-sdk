@@ -22,6 +22,7 @@ import httpx
 import json
 import logging
 import os
+import time
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -172,7 +173,7 @@ from ..config import (
     REGION_BASE_URL,
     GLOBAL_BASE_URL,
 )
-from .exceptions import FleetConflictError
+from .exceptions import FleetConflictError, FleetTimeoutError
 from .instance.base import default_httpx_client
 from .instance.client import ValidatorType
 from .resources.base import Resource
@@ -183,6 +184,12 @@ from .resources.mcp import AsyncMCPResource
 from .resources.api import AsyncAPIResource
 
 logger = logging.getLogger(__name__)
+
+# Duplicate-create recovery: how often to re-check a still-provisioning
+# instance, and the minimum budget granted even when the create timeout is
+# nearly spent (one meaningful poll beats an instant timeout).
+DUPLICATE_RECOVERY_POLL_INTERVAL_S = 5.0
+DUPLICATE_RECOVERY_MIN_BUDGET_S = 30.0
 
 
 class AsyncSession:
@@ -611,6 +618,7 @@ class AsyncFleet:
         if region and self.client.base_url == GLOBAL_BASE_URL:
             base_url = REGION_BASE_URL.get(region)
 
+        create_started = time.monotonic()
         try:
             response = await self.client.request(
                 "POST",
@@ -621,18 +629,53 @@ class AsyncFleet:
             )
         except FleetConflictError as e:
             # duplicate_request_id: a transport-level retry re-POSTed a create
-            # whose first attempt already succeeded server-side. Recover the
-            # original instance instead of failing the call.
+            # the server had already accepted for this request id. The pointed
+            # instance may still be provisioning (the id is bound at insert,
+            # before the create finishes) or may have already died, so recover
+            # by status instead of returning it blindly.
             if e.instance_id:
-                logger.warning(
-                    "Create request was already processed; recovering instance %s",
-                    e.instance_id,
-                )
-                return await self.instance(e.instance_id)
+                remaining = create_timeout - (time.monotonic() - create_started)
+                return await self._recover_duplicate_create(e.instance_id, remaining)
             raise
 
         instance = AsyncEnv(client=self.client, **response.json())
         return instance
+
+    async def _recover_duplicate_create(
+        self, instance_id: str, budget_s: float
+    ) -> AsyncEnv:
+        """Recover the instance a duplicate-create 409 points at.
+
+        running -> return it; still provisioning -> poll out the remaining
+        create budget; error/stopped (the original attempt failed or the
+        instance already died) -> raise instead of handing back a dead env.
+        """
+        deadline = time.monotonic() + max(budget_s, DUPLICATE_RECOVERY_MIN_BUDGET_S)
+        while True:
+            env = await self.instance(instance_id)
+            status = env.status
+            if status == "running":
+                logger.warning(
+                    "Create request was already processed; recovered running "
+                    "instance %s",
+                    instance_id,
+                )
+                return env
+            if status in ("error", "stopped"):
+                raise FleetConflictError(
+                    f"Duplicate create request points at instance "
+                    f"'{instance_id}' in state '{status}': the original "
+                    "attempt did not produce a usable environment. Retry "
+                    "the create as a new request.",
+                    instance_id=instance_id,
+                )
+            if time.monotonic() >= deadline:
+                raise FleetTimeoutError(
+                    f"Instance '{instance_id}' recovered from a duplicate "
+                    f"create request was still '{status}' when the create "
+                    "budget ran out."
+                )
+            await asyncio.sleep(DUPLICATE_RECOVERY_POLL_INTERVAL_S)
 
     async def make_for_task(self, task: Task) -> AsyncEnv:
         return await self.make(env_key=f"{task.env_id}:{task.version}")

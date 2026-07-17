@@ -18,12 +18,12 @@ from fleet.exceptions import FleetConflictError as SyncFleetConflictError
 from fleet._async.exceptions import FleetConflictError as AsyncFleetConflictError
 
 
-def _instance_payload(instance_id: str = "inst-123") -> dict:
+def _instance_payload(instance_id: str = "inst-123", status: str = "running") -> dict:
     return {
         "instance_id": instance_id,
         "env_key": "fira",
         "version": "v0.0.69",
-        "status": "running",
+        "status": status,
         "subdomain": f"{instance_id}.us-east-1",
         "created_at": "2026-07-17T00:00:00Z",
         "updated_at": "2026-07-17T00:00:00Z",
@@ -111,13 +111,24 @@ class TestMakeWaitDeclaration:
 
 
 class TestMakeDuplicateRecovery:
-    def test_conflict_with_pointer_recovers_instance(self, fleet_client):
-        conflict = SyncFleetConflictError(
+    @pytest.fixture(autouse=True)
+    def fast_recovery(self, monkeypatch):
+        import fleet.client as sync_client
+        import fleet._async.client as async_client
+
+        for mod in (sync_client, async_client):
+            monkeypatch.setattr(mod, "DUPLICATE_RECOVERY_POLL_INTERVAL_S", 0.001)
+            monkeypatch.setattr(mod, "DUPLICATE_RECOVERY_MIN_BUDGET_S", 0.05)
+
+    def _conflict(self, cls=SyncFleetConflictError):
+        return cls(
             "Request with ID 'abc' has already been processed.",
             instance_id="inst-orig",
         )
+
+    def test_conflict_with_running_pointer_recovers_instance(self, fleet_client):
         fleet_client.client.request.side_effect = [
-            conflict,
+            self._conflict(),
             _response_with(_instance_payload("inst-orig")),
         ]
 
@@ -128,6 +139,50 @@ class TestMakeDuplicateRecovery:
         assert recovery_call.args[0] == "GET"
         assert recovery_call.args[1] == "/v1/env/instances/inst-orig"
 
+    def test_conflict_with_pending_pointer_polls_until_running(self, fleet_client):
+        fleet_client.client.request.side_effect = [
+            self._conflict(),
+            _response_with(_instance_payload("inst-orig", status="pending")),
+            _response_with(_instance_payload("inst-orig", status="pending")),
+            _response_with(_instance_payload("inst-orig", status="running")),
+        ]
+
+        env = fleet_client.make("fira")
+
+        assert env.instance_id == "inst-orig"
+        assert env.status == "running"
+        assert fleet_client.client.request.call_count == 4
+
+    def test_conflict_with_error_pointer_raises(self, fleet_client):
+        fleet_client.client.request.side_effect = [
+            self._conflict(),
+            _response_with(_instance_payload("inst-orig", status="error")),
+        ]
+
+        with pytest.raises(SyncFleetConflictError) as exc_info:
+            fleet_client.make("fira")
+        assert exc_info.value.instance_id == "inst-orig"
+        assert "'error'" in str(exc_info.value)
+
+    def test_conflict_with_stopped_pointer_raises(self, fleet_client):
+        fleet_client.client.request.side_effect = [
+            self._conflict(),
+            _response_with(_instance_payload("inst-orig", status="stopped")),
+        ]
+
+        with pytest.raises(SyncFleetConflictError):
+            fleet_client.make("fira")
+
+    def test_conflict_with_stuck_pending_pointer_times_out(self, fleet_client):
+        from fleet.exceptions import FleetTimeoutError
+
+        fleet_client.client.request.side_effect = [self._conflict()] + [
+            _response_with(_instance_payload("inst-orig", status="pending"))
+        ] * 1000
+
+        with pytest.raises(FleetTimeoutError):
+            fleet_client.make("fira", timeout=0.1)
+
     def test_conflict_without_pointer_reraises(self, fleet_client):
         fleet_client.client.request.side_effect = SyncFleetConflictError(
             "Request with ID 'abc' has already been processed."
@@ -135,15 +190,11 @@ class TestMakeDuplicateRecovery:
         with pytest.raises(SyncFleetConflictError):
             fleet_client.make("fira")
 
-    async def test_async_conflict_with_pointer_recovers_instance(
+    async def test_async_conflict_with_running_pointer_recovers_instance(
         self, async_fleet_client
     ):
-        conflict = AsyncFleetConflictError(
-            "Request with ID 'abc' has already been processed.",
-            instance_id="inst-orig",
-        )
         async_fleet_client.client.request.side_effect = [
-            conflict,
+            self._conflict(AsyncFleetConflictError),
             _response_with(_instance_payload("inst-orig")),
         ]
 
@@ -153,6 +204,42 @@ class TestMakeDuplicateRecovery:
         recovery_call = async_fleet_client.client.request.call_args_list[1]
         assert recovery_call.args[0] == "GET"
         assert recovery_call.args[1] == "/v1/env/instances/inst-orig"
+
+    async def test_async_conflict_with_pending_pointer_polls_until_running(
+        self, async_fleet_client
+    ):
+        async_fleet_client.client.request.side_effect = [
+            self._conflict(AsyncFleetConflictError),
+            _response_with(_instance_payload("inst-orig", status="pending")),
+            _response_with(_instance_payload("inst-orig", status="running")),
+        ]
+
+        env = await async_fleet_client.make("fira")
+
+        assert env.status == "running"
+        assert async_fleet_client.client.request.call_count == 3
+
+    async def test_async_conflict_with_error_pointer_raises(self, async_fleet_client):
+        async_fleet_client.client.request.side_effect = [
+            self._conflict(AsyncFleetConflictError),
+            _response_with(_instance_payload("inst-orig", status="error")),
+        ]
+
+        with pytest.raises(AsyncFleetConflictError) as exc_info:
+            await async_fleet_client.make("fira")
+        assert exc_info.value.instance_id == "inst-orig"
+
+    async def test_async_conflict_with_stuck_pending_pointer_times_out(
+        self, async_fleet_client
+    ):
+        from fleet._async.exceptions import FleetTimeoutError as AsyncFleetTimeoutError
+
+        async_fleet_client.client.request.side_effect = [
+            self._conflict(AsyncFleetConflictError)
+        ] + [_response_with(_instance_payload("inst-orig", status="pending"))] * 1000
+
+        with pytest.raises(AsyncFleetTimeoutError):
+            await async_fleet_client.make("fira", timeout=0.1)
 
 
 class TestConflictErrorParsing:
