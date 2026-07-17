@@ -790,6 +790,64 @@ class QueryBuilder:
 ################################################################################
 
 
+# Tables that are incidental to task completion: apps write them during normal
+# UI interaction (login, session, audit, search history, navigation, tracking)
+# or the framework writes them (migrations, metadata), but they are not the
+# business writes a verifier intends to assert. ``expect_only`` / ``expect_only_v2``
+# treat incidental writes to these tables as ignored *only when the table is not
+# explicitly listed in ``allowed_changes``*, so a correct agent is not flagged for
+# routine side-effect rows. A verifier that genuinely wants to assert changes to
+# one of these tables still can by listing it in ``allowed_changes`` (per-row
+# validation runs regardless of this set). Pass ``incidental_tables=set()`` to
+# opt out and restore strict behavior for every unmentioned table.
+DEFAULT_INCIDENTAL_TABLES: frozenset[str] = frozenset(
+    {
+        # framework / migration / metadata
+        "__drizzle_migrations",
+        "sqlite_sequence",
+        "sqlite_stat1",
+        "_generation_state",
+        "_db_metadata",
+        "_db_meta",
+        # auth / login / session
+        "login_activities",
+        "login_activity",
+        "login_audit",
+        "login_history",
+        "user_sessions",
+        "sessions",
+        "session",
+        "session_tokens",
+        "password_reset_token",
+        "email_verification_token",
+        "captcha_challenge",
+        # audit / tracking / activity
+        "audit_log",
+        "audit_logs",
+        "user_actions",
+        "user_activity",
+        "recent_activity",
+        "recent_activities",
+        "navigation_items",
+        "search_history",
+        "activities",
+        "export_activity",
+        "shop_partner_visit",
+        "signature",
+        "teams_presence",
+        # misc incidental side-effect tables
+        "attachments",
+        "todo_task_lists",
+        "todo_tasks",
+        "todo_task_steps",
+        "sections",
+        "section_chats",
+        "section_channels",
+        "email_folders",
+    }
+)
+
+
 class IgnoreConfig:
     """Configuration for ignoring specific tables, fields, or combinations during diff operations."""
 
@@ -798,20 +856,33 @@ class IgnoreConfig:
         tables: Optional[Set[str]] = None,
         fields: Optional[Set[str]] = None,
         table_fields: Optional[Dict[str, Set[str]]] = None,
+        incidental_tables: Optional[Set[str]] = None,
     ):
         """
         Args:
             tables: Set of table names to completely ignore
             fields: Set of field names to ignore across all tables
             table_fields: Dict mapping table names to sets of field names to ignore in that table
+            incidental_tables: Set of table names whose incidental writes are tolerated
+                when the table is not listed in ``allowed_changes``. Defaults to
+                :data:`DEFAULT_INCIDENTAL_TABLES`. Pass an empty set to opt out.
         """
         self.tables = tables or set()
         self.fields = fields or set()
         self.table_fields = table_fields or {}
+        self.incidental_tables = (
+            incidental_tables
+            if incidental_tables is not None
+            else set(DEFAULT_INCIDENTAL_TABLES)
+        )
 
     def should_ignore_table(self, table: str) -> bool:
         """Check if a table should be completely ignored."""
         return table in self.tables
+
+    def is_incidental_table(self, table: str) -> bool:
+        """Check if a table is an incidental side-effect table (case-insensitive)."""
+        return (table or "").lower() in self.incidental_tables
 
     def should_ignore_field(self, table: str, field: str) -> bool:
         """Check if a specific field in a table should be ignored."""
@@ -1036,6 +1107,8 @@ class SnapshotDiff:
                 continue
             if self.ignore_config.should_ignore_table(table):
                 continue
+            if self.ignore_config.is_incidental_table(table):
+                continue
             before_count = self._get_row_count(self.before.db_path, table)
             after_count = self._get_row_count(self.after.db_path, table)
             if before_count != after_count:
@@ -1249,6 +1322,8 @@ class SnapshotDiff:
                 continue
             if self.ignore_config.should_ignore_table(table):
                 continue
+            if self.ignore_config.is_incidental_table(table):
+                continue
             before_count = self._get_row_count(self.before.db_path, table)
             after_count = self._get_row_count(self.after.db_path, table)
             if before_count != after_count:
@@ -1275,6 +1350,8 @@ class SnapshotDiff:
         if not allowed_changes:
             diff = self._collect()
             for tbl, report in diff.items():
+                if self.ignore_config.is_incidental_table(tbl):
+                    continue
                 total = (
                     len(report.get("added_rows", []))
                     + len(report.get("removed_rows", []))
@@ -1322,8 +1399,11 @@ class SnapshotDiff:
 
         # Collect all unexpected changes for detailed reporting
         unexpected_changes = []
+        mentioned_tables = {c.get("table") for c in allowed_changes}
 
         for tbl, report in diff.items():
+            if tbl not in mentioned_tables and self.ignore_config.is_incidental_table(tbl):
+                continue
             for row in report.get("modified_rows", []):
                 for f, vals in row["changes"].items():
                     if self.ignore_config.should_ignore_field(tbl, f):
@@ -1474,6 +1554,8 @@ class SnapshotDiff:
         if not allowed_changes:
             diff = self._collect()
             for tbl, report in diff.items():
+                if self.ignore_config.is_incidental_table(tbl):
+                    continue
                 total = (
                     len(report.get("added_rows", []))
                     + len(report.get("removed_rows", []))
@@ -1696,8 +1778,11 @@ class SnapshotDiff:
 
         # Collect all unexpected changes for detailed reporting
         unexpected_changes = []
+        mentioned_tables = {c.get("table") for c in allowed_changes}
 
         for tbl, report in diff.items():
+            if tbl not in mentioned_tables and self.ignore_config.is_incidental_table(tbl):
+                continue
             for row in report.get("modified_rows", []):
                 row_changes = row["changes"]
 

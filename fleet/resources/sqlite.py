@@ -454,18 +454,18 @@ class SyncSnapshotDiff:
             removed_tables = before_tables - after_tables
 
             for table in added_tables:
-                if not self.ignore_config.should_ignore_table(table):
+                if not self.ignore_config.should_ignore_table(table) and not self.ignore_config.is_incidental_table(table):
                     raise AssertionError(f"Unexpected table added: {table}")
 
             for table in removed_tables:
-                if not self.ignore_config.should_ignore_table(table):
+                if not self.ignore_config.should_ignore_table(table) and not self.ignore_config.is_incidental_table(table):
                     raise AssertionError(f"Unexpected table removed: {table}")
 
             # Prepare tables to check
             tables_to_check = []
             all_tables = before_tables | after_tables
             for table in all_tables:
-                if not self.ignore_config.should_ignore_table(table):
+                if not self.ignore_config.should_ignore_table(table) and not self.ignore_config.is_incidental_table(table):
                     tables_to_check.append(table)
 
             # If no tables to check, we're done
@@ -752,6 +752,7 @@ class SyncSnapshotDiff:
             if (
                 table not in changes_by_table
                 and not self.ignore_config.should_ignore_table(table)
+                and not self.ignore_config.is_incidental_table(table)
             ):
                 tables_to_verify.append(table)
 
@@ -827,8 +828,11 @@ class SyncSnapshotDiff:
 
         # Collect all unexpected changes
         unexpected_changes = []
+        mentioned_tables = {c.get("table") for c in allowed_changes}
 
         for tbl, report in diff.items():
+            if tbl not in mentioned_tables and self.ignore_config.is_incidental_table(tbl):
+                continue
             for row in report.get("modified_rows", []):
                 for f, vals in row["changes"].items():
                     if self.ignore_config.should_ignore_field(tbl, f):
@@ -1228,6 +1232,7 @@ class SyncSnapshotDiff:
             if (
                 table not in changes_by_table
                 and not self.ignore_config.should_ignore_table(table)
+                and not self.ignore_config.is_incidental_table(table)
             ):
                 tables_to_verify.append(table)
 
@@ -1517,8 +1522,11 @@ class SyncSnapshotDiff:
 
         # Collect all unexpected changes for detailed reporting
         unexpected_changes = []
+        mentioned_tables = {c.get("table") for c in allowed_changes}
 
         for tbl, report in diff.items():
+            if tbl not in mentioned_tables and self.ignore_config.is_incidental_table(tbl):
+                continue
             for row in report.get("modified_rows", []):
                 row_changes = row["changes"]
 
