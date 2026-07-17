@@ -119,6 +119,8 @@ async def make(
     env_variables: Optional[Dict[str, Any]] = None,
     image_type: Optional[str] = None,
     ttl_seconds: Optional[int] = None,
+    timeout: Optional[float] = None,
+    max_wait_seconds: Optional[int] = None,
 ) -> AsyncEnv:
     """Create a new environment instance.
 
@@ -133,6 +135,8 @@ async def make(
         env_variables=env_variables,
         image_type=image_type,
         ttl_seconds=ttl_seconds,
+        timeout=timeout,
+        max_wait_seconds=max_wait_seconds,
     )
 
 

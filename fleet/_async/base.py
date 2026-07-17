@@ -19,6 +19,7 @@ from .exceptions import (
     FleetVersionNotFoundError,
     FleetBadRequestError,
     FleetPermissionError,
+    FleetConflictError,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ class AsyncWrapper(BaseWrapper):
             pass
 
         # Try to parse error response as JSON
+        duplicate_instance_id = None
         try:
             error_data = response.json()
             detail = error_data.get("detail", response.text)
@@ -120,6 +122,8 @@ class AsyncWrapper(BaseWrapper):
                     )
                 else:
                     error_message = detail.get("message", str(detail))
+                if detail.get("error") == "duplicate_request_id":
+                    duplicate_instance_id = detail.get("instance_id")
             else:
                 error_message = detail
 
@@ -235,6 +239,19 @@ class AsyncWrapper(BaseWrapper):
         elif status_code == 429:
             # Rate limit errors (not instance limit which is now 403)
             raise FleetRateLimitError(error_message)
+        elif status_code == 409:
+            # Conflict errors (resource already exists)
+            resource_name = None
+            # Try to extract resource name from error message
+            if "'" in error_message:
+                parts = error_message.split("'")
+                if len(parts) >= 2:
+                    resource_name = parts[1]
+            raise FleetConflictError(
+                error_message,
+                resource_name=resource_name,
+                instance_id=duplicate_instance_id,
+            )
         else:
             raise FleetAPIError(
                 error_message,
