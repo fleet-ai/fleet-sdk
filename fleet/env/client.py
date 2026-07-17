@@ -12,6 +12,8 @@ def make(
     ttl_seconds: Optional[int] = None,
     run_id: Optional[str] = None,
     heartbeat_interval: Optional[int] = None,
+    timeout: Optional[float] = None,
+    max_wait_seconds: Optional[int] = None,
 ) -> SyncEnv:
     return Fleet().make(
         env_key,
@@ -22,6 +24,8 @@ def make(
         ttl_seconds=ttl_seconds,
         run_id=run_id,
         heartbeat_interval=heartbeat_interval,
+        timeout=timeout,
+        max_wait_seconds=max_wait_seconds,
     )
 
 

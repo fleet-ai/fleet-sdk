@@ -167,9 +167,12 @@ from ..instance.models import (
 from ..config import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_TIMEOUT,
+    DEFAULT_CREATE_TIMEOUT,
+    CREATE_MAX_WAIT_MARGIN_S,
     REGION_BASE_URL,
     GLOBAL_BASE_URL,
 )
+from .exceptions import FleetConflictError
 from .instance.base import default_httpx_client
 from .instance.client import ValidatorType
 from .resources.base import Resource
@@ -552,6 +555,8 @@ class AsyncFleet:
         ttl_seconds: Optional[int] = None,
         run_id: Optional[str] = None,
         heartbeat_interval: Optional[int] = None,
+        timeout: Optional[float] = None,
+        max_wait_seconds: Optional[int] = None,
     ) -> AsyncEnv:
         if ":" in env_key:
             env_key_part, env_version = env_key.split(":", 1)
@@ -577,6 +582,15 @@ class AsyncFleet:
             data_key_part = data_key
             data_version = None
 
+        # Creates can wait on real infrastructure (node launch, image pull,
+        # seed hydration), so they run on their own budget: the server is
+        # asked to wait slightly less than the HTTP read timeout so a slow
+        # create returns a response instead of a client-side timeout.
+        create_timeout = DEFAULT_CREATE_TIMEOUT if timeout is None else timeout
+        if max_wait_seconds is None:
+            max_wait_seconds = max(int(create_timeout) - CREATE_MAX_WAIT_MARGIN_S, 0)
+        max_wait_seconds = min(max_wait_seconds, 3600)
+
         request = InstanceRequest(
             env_key=env_key_part,
             env_version=env_version,
@@ -589,6 +603,7 @@ class AsyncFleet:
             ttl_seconds=ttl_seconds,
             run_id=run_id,
             heartbeat_interval=heartbeat_interval,
+            max_wait_seconds=max_wait_seconds,
         )
 
         # Only use region-specific base URL if no custom base URL is set
@@ -596,12 +611,25 @@ class AsyncFleet:
         if region and self.client.base_url == GLOBAL_BASE_URL:
             base_url = REGION_BASE_URL.get(region)
 
-        response = await self.client.request(
-            "POST",
-            "/v1/env/instances",
-            json=request.model_dump(exclude_none=True),
-            base_url=base_url,
-        )
+        try:
+            response = await self.client.request(
+                "POST",
+                "/v1/env/instances",
+                json=request.model_dump(exclude_none=True),
+                base_url=base_url,
+                timeout=create_timeout,
+            )
+        except FleetConflictError as e:
+            # duplicate_request_id: a transport-level retry re-POSTed a create
+            # whose first attempt already succeeded server-side. Recover the
+            # original instance instead of failing the call.
+            if e.instance_id:
+                logger.warning(
+                    "Create request was already processed; recovering instance %s",
+                    e.instance_id,
+                )
+                return await self.instance(e.instance_id)
+            raise
 
         instance = AsyncEnv(client=self.client, **response.json())
         return instance
