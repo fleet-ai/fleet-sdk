@@ -73,6 +73,7 @@ class InstanceRequest(BaseModel):
     created_from: Optional[str] = Field(None, title="Created From")
     ttl_seconds: Optional[int] = Field(None, title="TTL Seconds")
     heartbeat_interval: Optional[int] = Field(None, title="Heartbeat Interval")
+    max_wait_seconds: Optional[int] = Field(None, title="Max Wait Seconds")
 
 
 class InstanceStatus(Enum):

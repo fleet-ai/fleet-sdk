@@ -137,6 +137,25 @@ class FleetTeamNotFoundError(FleetPermissionError):
         self.team_id = team_id
 
 
+class FleetConflictError(FleetAPIError):
+    """Exception raised when there's a conflict (e.g., resource already exists).
+
+    For duplicate-create conflicts (409 duplicate_request_id), ``instance_id``
+    points at the instance the original request produced, so callers can
+    recover the result instead of failing.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        resource_name: Optional[str] = None,
+        instance_id: Optional[str] = None,
+    ):
+        super().__init__(message, status_code=409)
+        self.resource_name = resource_name
+        self.instance_id = instance_id
+
+
 class FleetEnvironmentError(FleetError):
     """Exception raised when environment operations fail."""
 
