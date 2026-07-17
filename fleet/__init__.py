@@ -78,7 +78,7 @@ from . import env
 from . import global_client as _global_client
 from ._async import global_client as _async_global_client
 
-__version__ = "0.2.130"
+__version__ = "0.2.132"
 
 __all__ = [
     # Core classes
