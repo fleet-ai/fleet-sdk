@@ -52,6 +52,7 @@ class Instance(BaseModel):
     region: str = Field(..., title="Region")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
     run_id: Optional[str] = Field(None, title="Run Id")
+    multi_env_list: Optional[List[str]] = Field(None, title="Multi Env List")
 
 
 class InstanceRequest(BaseModel):
@@ -230,6 +231,9 @@ class VerifiersCheckResponse(BaseModel):
 
 
 class VerifiersExecuteRequest(BaseModel):
+    cost_team_id: Optional[str] = Field(
+        None, description="Team to attribute verifier costs to", title="Cost Team Id"
+    )
     key: Optional[str] = Field(
         None, description="Key of the verifier artifact", title="Key"
     )
@@ -266,6 +270,12 @@ class VerifiersExecuteRequest(BaseModel):
     )
     display_src: Optional[str] = Field(
         None, description="Display source code", title="Display Src"
+    )
+    async_: Optional[bool] = Field(
+        None,
+        alias="async",
+        description="Submit asynchronously and return a job handle instead of waiting",
+        title="Async",
     )
 
 
@@ -310,6 +320,16 @@ class VerifiersExecuteResponse(BaseModel):
     )
     stdout: Optional[str] = Field(
         None, description="Captured stdout from execution", title="Stdout"
+    )
+    status: Optional[str] = Field(
+        None,
+        description="Job status for async execution (pending/running/completed/failed)",
+        title="Status",
+    )
+    job_id: Optional[str] = Field(
+        None,
+        description="Job handle for async execution; poll GET /v1/verifiers/jobs/{job_id}",
+        title="Job Id",
     )
 
 
@@ -370,6 +390,7 @@ class InstanceResponse(BaseModel):
     profile_id: Optional[str] = Field(None, title="Profile Id")
     heartbeat_interval: Optional[int] = Field(None, title="Heartbeat Interval")
     heartbeat_region: Optional[str] = Field(None, title="Heartbeat Region")
+    multi_env_list: Optional[List[str]] = Field(None, title="Multi Env List")
 
 
 class Run(BaseModel):

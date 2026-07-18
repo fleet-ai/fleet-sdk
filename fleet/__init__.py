@@ -26,6 +26,8 @@ from .exceptions import (
 )
 from .client import Fleet, SyncEnv, Session
 from ._async.client import AsyncFleet, AsyncEnv, AsyncSession
+from .browser import BrowserLease, host_from_url
+from ._async.browser import AsyncBrowserLease
 from .models import InstanceResponse, Environment, Run
 from .instance.models import Resource, ResetResponse
 
@@ -79,7 +81,7 @@ from . import env
 from . import global_client as _global_client
 from ._async import global_client as _async_global_client
 
-__version__ = "0.2.124"
+__version__ = "0.2.132"
 
 __all__ = [
     # Core classes
@@ -87,6 +89,10 @@ __all__ = [
     "SyncEnv",
     "AsyncFleet",
     "AsyncEnv",
+    # Browser lease (orchestrator-managed /v1/browser)
+    "BrowserLease",
+    "AsyncBrowserLease",
+    "host_from_url",
     # Models
     "InstanceResponse",
     "SyncEnv",

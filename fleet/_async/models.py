@@ -51,6 +51,7 @@ class Instance(BaseModel):
     team_id: str = Field(..., title="Team Id")
     region: str = Field(..., title="Region")
     env_variables: Optional[Dict[str, Any]] = Field(None, title="Env Variables")
+    multi_env_list: Optional[List[str]] = Field(None, title="Multi Env List")
 
 
 class InstanceRequest(BaseModel):
@@ -221,6 +222,9 @@ class VerifiersCheckResponse(BaseModel):
 
 
 class VerifiersExecuteRequest(BaseModel):
+    cost_team_id: Optional[str] = Field(
+        None, description="Team to attribute verifier costs to", title="Cost Team Id"
+    )
     key: Optional[str] = Field(
         None, description="Key of the verifier artifact", title="Key"
     )
@@ -257,6 +261,12 @@ class VerifiersExecuteRequest(BaseModel):
     )
     display_src: Optional[str] = Field(
         None, description="Display source code", title="Display Src"
+    )
+    async_: Optional[bool] = Field(
+        None,
+        alias="async",
+        description="Submit asynchronously and return a job handle instead of waiting",
+        title="Async",
     )
 
 
@@ -301,6 +311,16 @@ class VerifiersExecuteResponse(BaseModel):
     )
     stdout: Optional[str] = Field(
         None, description="Captured stdout from execution", title="Stdout"
+    )
+    status: Optional[str] = Field(
+        None,
+        description="Job status for async execution (pending/running/completed/failed)",
+        title="Status",
+    )
+    job_id: Optional[str] = Field(
+        None,
+        description="Job handle for async execution; poll GET /v1/verifiers/jobs/{job_id}",
+        title="Job Id",
     )
 
 
@@ -357,6 +377,7 @@ class InstanceResponse(BaseModel):
     data_version: Optional[str] = Field(None, title="Data Version")
     urls: Optional[InstanceURLs] = Field(None, title="Urls")
     health: Optional[bool] = Field(None, title="Health")
+    multi_env_list: Optional[List[str]] = Field(None, title="Multi Env List")
 
 
 class AccountResponse(BaseModel):
