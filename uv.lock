@@ -661,7 +661,7 @@ wheels = [
 
 [[package]]
 name = "fleet-python"
-version = "0.2.132"
+version = "0.2.132" # x-release-please-version
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "python",
+  "include-component-in-tag": true,
+  "include-v-in-tag": true,
+  "draft": true,
+  "packages": {
+    ".": {
+      "package-name": "fleet-python",
+      "component": "fleet-python",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "fleet/__init__.py"
+        },
+        {
+          "type": "generic",
+          "path": "fleet/_async/__init__.py"
+        },
+        {
+          "type": "generic",
+          "path": "uv.lock"
+        }
+      ]
+    }
+  }
+}
+

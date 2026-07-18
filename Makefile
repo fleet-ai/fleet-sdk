@@ -1,4 +1,4 @@
-.PHONY: help install-dev build test clean publish-to-pypi validate-tag unasync
+.PHONY: help install-dev build test clean validate-tag unasync release-help
 
 # Use the active Python interpreter (python3 preferred, fallback to python)
 PYTHON ?= $(shell command -v python3 || command -v python)
@@ -11,7 +11,7 @@ help:
 	@echo "test           Run tests"
 	@echo "clean          Clean build artifacts"
 	@echo "validate-tag   Validate release tag format"
-	@echo "publish-to-pypi Publish package to PyPI"
+	@echo "release-help    Show the automated release process"
 	@echo "unasync        Generate sync code from async sources"
 
 install-dev:
@@ -81,18 +81,10 @@ validate-tag:
 	fi
 	./scripts/validate-release-tag.sh $(TAG)
 
-publish-to-pypi: build
-	@echo "⚠️  Warning: Direct publishing is deprecated for security reasons"
-	@echo "🔒 Recommended: Use GitHub Actions workflow with OIDC authentication"
-	@echo "📋 To publish via GitHub Actions:"
-	@echo "   1. Ensure PyPI Trusted Publisher is configured"
-	@echo "   2. Create release tag: git tag fleet-python-v<VERSION>"
-	@echo "   3. Push tag: git push origin fleet-python-v<VERSION>"
-	@echo ""
-	@echo "Proceeding with direct upload in 5 seconds..."
-	@sleep 5
-	twine check dist/*
-	twine upload dist/*
+release-help:
+	@echo "Fleet SDK releases are automated from protected main."
+	@echo "Merge the reviewed Release Please PR; do not create or push tags manually."
+	@echo "See docs/releases.md for gates, configuration, retry, and rollback guidance."
 
 # Local development
 dev-setup: install-dev

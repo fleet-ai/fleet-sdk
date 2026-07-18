@@ -1,0 +1,113 @@
+name: Release Fleet Python SDK
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: fleet-python-release
+  cancel-in-progress: false
+
+jobs:
+  release_please:
+    runs-on: warp-ubuntu-latest-x64-4x
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+      release_sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          # A GitHub App/PAT token is required so the bot's release PR runs CI.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  test-build-publish:
+    if: ${{ needs.release_please.outputs.release_created == 'true' }}
+    needs: release_please
+    runs-on: warp-ubuntu-latest-x64-4x
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.release_please.outputs.release_sha }}
+          fetch-depth: 0
+      - name: Fetch canonical main and release tag
+        run: git fetch --force origin "main:refs/remotes/origin/main" "refs/tags/${{ needs.release_please.outputs.tag_name }}:refs/tags/${{ needs.release_please.outputs.tag_name }}"
+      - name: Validate tag, version, and main ancestry
+        run: scripts/validate-release-tag.sh "${{ needs.release_please.outputs.tag_name }}"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+      - name: Run the full SDK suite at the tagged commit
+        run: |
+          uv sync --extra dev --extra cli --frozen
+          uv run pytest
+      - name: Build the publishable artifacts once
+        run: uv build
+      - run: uvx twine check dist/*
+      - name: Verify exact artifact versions
+        run: python scripts/validate-release-artifacts.py --version "${{ needs.release_please.outputs.version }}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fleet-python-${{ needs.release_please.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish the tested artifacts through PyPI Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          packages-dir: dist/
+
+  finalize-github-release:
+    if: ${{ needs.release_please.outputs.release_created == 'true' }}
+    needs: [release_please, test-build-publish]
+    runs-on: warp-ubuntu-latest-x64-4x
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: fleet-python-${{ needs.release_please.outputs.version }}
+          path: dist/
+      - name: Attach artifacts and publish the draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release_please.outputs.tag_name }}
+        run: |
+          gh release upload "$RELEASE_TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          gh release edit "$RELEASE_TAG" --draft=false --verify-tag --repo "$GITHUB_REPOSITORY"
+
+  notify-internal-consumers:
+    if: ${{ needs.release_please.outputs.release_created == 'true' }}
+    needs: [release_please, finalize-github-release]
+    runs-on: warp-ubuntu-latest-x64-4x
+    steps:
+      - name: Request a separate Theseus consumer update PR
+        env:
+          GH_TOKEN: ${{ secrets.FLEET_SDK_CONSUMER_TOKEN }}
+          VERSION: ${{ needs.release_please.outputs.version }}
+          TAG: ${{ needs.release_please.outputs.tag_name }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::FLEET_SDK_CONSUMER_TOKEN must be configured for cross-repository updates"
+            exit 1
+          fi
+          gh api --method POST repos/fleet-ai/theseus/dispatches \
+            -f event_type=fleet-sdk-released \
+            -f "client_payload[version]=$VERSION" \
+            -f "client_payload[tag]=$TAG"

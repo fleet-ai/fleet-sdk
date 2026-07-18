@@ -25,20 +25,20 @@ fi
 TAG_VERSION=${RELEASE_TAG#fleet-python-v}
 echo "Tag version: $TAG_VERSION"
 
-# Check if we're on main branch
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [ "$CURRENT_BRANCH" != "main" ] && [ "$CURRENT_BRANCH" != "HEAD" ]; then
-    echo "Warning: Not on main branch. Current branch: $CURRENT_BRANCH"
-    # Check if this is a beta release
-    if [[ $TAG_VERSION =~ b[0-9]+$ ]]; then
-        echo "Beta release detected on non-main branch - skipping main branch ancestry check"
-    else
-        # For non-beta releases, check if the tag is reachable from main
-        if ! git merge-base --is-ancestor $(git rev-parse $RELEASE_TAG) $(git rev-parse origin/main) 2>/dev/null; then
-            echo "Error: Tag $RELEASE_TAG is not reachable from main branch"
-            exit 1
-        fi
-    fi
+# Detached HEAD is normal in tag-triggered GitHub Actions. Always validate the
+# tagged commit directly instead of inferring safety from the branch name.
+TAG_COMMIT=$(git rev-list -n 1 "$RELEASE_TAG" 2>/dev/null) || {
+    echo "Error: Tag $RELEASE_TAG does not exist"
+    exit 1
+}
+MAIN_COMMIT=$(git rev-parse origin/main 2>/dev/null) || {
+    echo "Error: origin/main is unavailable; fetch full history before validating"
+    exit 1
+}
+
+if ! git merge-base --is-ancestor "$TAG_COMMIT" "$MAIN_COMMIT"; then
+    echo "Error: Tag $RELEASE_TAG is not reachable from origin/main"
+    exit 1
 fi
 
 # Check if version in pyproject.toml matches tag
@@ -52,4 +52,4 @@ fi
 echo "✅ Tag validation passed"
 echo "  - Format: ✅ $RELEASE_TAG"
 echo "  - Version match: ✅ $TAG_VERSION = $PYPROJECT_VERSION"
-echo "  - Branch: ✅ Reachable from main" 
+echo "  - Branch: ✅ Reachable from main"
