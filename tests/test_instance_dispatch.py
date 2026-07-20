@@ -7,6 +7,10 @@ import os
 from unittest.mock import Mock, AsyncMock, patch
 from fleet.client import Fleet
 from fleet._async.client import AsyncFleet
+from fleet.resources.browser import BrowserResource
+from fleet.resources.sqlite import SQLiteResource
+from fleet._async.resources.browser import AsyncBrowserResource
+from fleet._async.resources.sqlite import AsyncSQLiteResource
 
 
 class TestFleetInstanceDispatch:
@@ -84,6 +88,48 @@ class TestFleetInstanceDispatch:
 
         # Verify instance client is created with correct URL
         assert env.instance.base_url == "http://localhost:8080"
+
+    def test_url_mode_resources_are_lazy_without_discovery(self, fleet_client):
+        """Known resource handles must not require the warming /resources endpoint."""
+        env = fleet_client.instance("http://localhost:8080/api/v1/env")
+
+        current = env.db("current")
+        browser = env.browser()
+
+        assert isinstance(current, SQLiteResource)
+        assert current.name == "current"
+        assert isinstance(browser, BrowserResource)
+        assert browser.name == "cdp"
+        assert isinstance(env.state("sqlite://current"), SQLiteResource)
+        env.instance.client.httpx_client.request.assert_not_called()
+
+    def test_discovered_resources_remain_usable(self, fleet_client):
+        """Explicit discovery must not make db/browser wrap resource wrappers."""
+        env = fleet_client.instance("http://localhost:8080/api/v1/env")
+        response = Mock(status_code=200)
+        response.json.return_value = [
+            {"name": "current", "type": "sqlite", "mode": "rw"},
+            {"name": "cdp", "type": "cdp", "mode": "rw"},
+        ]
+        env.instance.client.request = Mock(return_value=response)
+
+        assert len(env.resources()) == 2
+        assert isinstance(env.db("current"), SQLiteResource)
+        assert env.db("current").name == "current"
+        assert isinstance(env.browser(), BrowserResource)
+        assert env.browser().name == "cdp"
+
+    def test_spawn_browser_retains_orchestrator_lease_helper(self, fleet_client):
+        env = fleet_client.instance("http://localhost:8080/api/v1/env")
+        lease = Mock()
+
+        with patch(
+            "fleet.client._create_browser_lease", return_value=lease
+        ) as create:
+            result = env.spawn_browser(include_root_host=False)
+
+        assert result is lease
+        create.assert_called_once()
 
     def test_dispatch_https_url_localhost_mode(self, fleet_client):
         """Test that https:// URL dispatches to localhost mode."""
@@ -436,6 +482,59 @@ class TestAsyncFleetInstanceDispatch:
 
         # Verify instance client is created with correct URL
         assert env.instance.base_url == "http://localhost:8080"
+
+    async def test_url_mode_resources_are_lazy_without_discovery(
+        self, async_fleet_client
+    ):
+        """Async handles are synchronous to create and must not need discovery."""
+        env = await async_fleet_client.instance(
+            "http://localhost:8080/api/v1/env"
+        )
+
+        current = env.db("current")
+        browser = env.browser()
+
+        assert isinstance(current, AsyncSQLiteResource)
+        assert current.name == "current"
+        assert isinstance(browser, AsyncBrowserResource)
+        assert browser.name == "cdp"
+        assert isinstance(env.state("sqlite://current"), AsyncSQLiteResource)
+        env.instance.client.httpx_client.request.assert_not_called()
+
+    async def test_discovered_resources_remain_usable(self, async_fleet_client):
+        """Explicit async discovery must preserve usable resource handles."""
+        env = await async_fleet_client.instance(
+            "http://localhost:8080/api/v1/env"
+        )
+        response = Mock(status_code=200)
+        response.json.return_value = [
+            {"name": "current", "type": "sqlite", "mode": "rw"},
+            {"name": "cdp", "type": "cdp", "mode": "rw"},
+        ]
+        env.instance.client.request = AsyncMock(return_value=response)
+
+        assert len(await env.resources()) == 2
+        assert isinstance(env.db("current"), AsyncSQLiteResource)
+        assert env.db("current").name == "current"
+        assert isinstance(env.browser(), AsyncBrowserResource)
+        assert env.browser().name == "cdp"
+
+    async def test_spawn_browser_retains_orchestrator_lease_helper(
+        self, async_fleet_client
+    ):
+        env = await async_fleet_client.instance(
+            "http://localhost:8080/api/v1/env"
+        )
+        lease = Mock()
+
+        with patch(
+            "fleet._async.client._create_browser_lease",
+            new=AsyncMock(return_value=lease),
+        ) as create:
+            result = await env.spawn_browser(include_root_host=False)
+
+        assert result is lease
+        create.assert_awaited_once()
 
     async def test_local_mode_async_query_functionality(self, async_fleet_client, temp_db_files):
         """Test that local mode databases work with async queries."""

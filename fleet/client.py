@@ -183,6 +183,7 @@ from .instance.base import default_httpx_client
 from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import SQLiteResource
+from .resources.browser import BrowserResource
 from .resources.filesystem import FilesystemResource
 from .resources.mcp import SyncMCPResource
 from .resources.api import APIResource
@@ -417,7 +418,11 @@ class SyncEnv(EnvironmentBase):
     def db(self, name: str = "current") -> SQLiteResource:
         return self.instance.db(name)
 
-    def browser(
+    def browser(self, name: str = "cdp") -> BrowserResource:
+        """Get the browser resource exposed by this environment instance."""
+        return self.instance.browser(name)
+
+    def spawn_browser(
         self,
         ttl_seconds: int = 300,
         *,
@@ -432,7 +437,7 @@ class SyncEnv(EnvironmentBase):
     ) -> BrowserLease:
         """Spin up an orchestrator-managed Fleet Browser lease for this env.
 
-        ``env.browser()`` posts to ``/v1/browser`` and returns a
+        ``env.spawn_browser()`` posts to ``/v1/browser`` and returns a
         :class:`fleet.browser.BrowserLease` with ``cdp_url`` / ``mcp_url`` /
         ``stream_url`` and a ``mcp_tools()`` accessor. By default the host
         from ``self.urls.root`` is prepended to ``allowed_hosts`` so the
@@ -704,9 +709,8 @@ class Fleet:
             raise
 
         instance = SyncEnv(client=self.client, **response.json())
-        # Resources load lazily on first `db()`/`browser()`/`resources()` access via
-        # `_load_resources()`. Skipping the eager preload avoids fail-fast 502s while
-        # the container is still warming up.
+        # Known db/browser handles are constructed lazily; resources() performs
+        # discovery. Skipping eager discovery avoids transient warmup 502s.
         return instance
 
     def _recover_duplicate_create(self, instance_id: str, budget_s: float) -> SyncEnv:
@@ -798,7 +802,7 @@ class Fleet:
         else:
             response = self.client.request("GET", f"/v1/env/instances/{instance_id}")
             instance = SyncEnv(client=self.client, **response.json())
-            # Resources load lazily on first `db()`/`browser()`/`resources()` access.
+            # Known db/browser handles are lazy; resources() performs discovery.
             return instance
 
     def _create_url_instance(self, base_url: str) -> SyncEnv:

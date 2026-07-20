@@ -178,6 +178,7 @@ from .instance.base import default_httpx_client
 from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
+from .resources.browser import AsyncBrowserResource
 from .resources.filesystem import AsyncFilesystemResource
 from .resources.mcp import AsyncMCPResource
 from .resources.api import AsyncAPIResource
@@ -406,7 +407,11 @@ class AsyncEnv(EnvironmentBase):
     def db(self, name: str = "current") -> AsyncSQLiteResource:
         return self.instance.db(name)
 
-    async def browser(
+    def browser(self, name: str = "cdp") -> AsyncBrowserResource:
+        """Get the browser resource exposed by this environment instance."""
+        return self.instance.browser(name)
+
+    async def spawn_browser(
         self,
         ttl_seconds: int = 300,
         *,
@@ -421,7 +426,7 @@ class AsyncEnv(EnvironmentBase):
     ) -> AsyncBrowserLease:
         """Spin up an orchestrator-managed Fleet Browser lease for this env.
 
-        ``await env.browser()`` posts to ``/v1/browser`` and returns an
+        ``await env.spawn_browser()`` posts to ``/v1/browser`` and returns an
         :class:`fleet._async.browser.AsyncBrowserLease` with ``cdp_url`` /
         ``mcp_url`` / ``stream_url`` and a ``mcp_tools()`` accessor. By
         default the host derived from ``self.urls.root`` is prepended to
@@ -449,7 +454,7 @@ class AsyncEnv(EnvironmentBase):
 
     @property
     def root_url(self) -> Optional[str]:
-        """Convenience: ``self.urls.root`` if available."""
+        """Return the root URL, for example to pass to ``spawn_browser``."""
         return self.urls.root if self.urls else None
 
     def fs(self) -> AsyncFilesystemResource:
@@ -693,9 +698,8 @@ class AsyncFleet:
             raise
 
         instance = AsyncEnv(client=self.client, **response.json())
-        # Resources are loaded lazily on first `db()`/`browser()`/`resources()` access
-        # via `_load_resources()`, so we don't preload here. Eagerly loading would
-        # fail-fast with a 502 while the container is still warming up.
+        # Known db/browser handles are constructed lazily; resources() performs
+        # discovery. Skipping eager discovery avoids transient warmup 502s.
         return instance
 
     async def _recover_duplicate_create(
@@ -791,7 +795,7 @@ class AsyncFleet:
                 "GET", f"/v1/env/instances/{instance_id}"
             )
             instance = AsyncEnv(client=self.client, **response.json())
-            # Resources load lazily on first `db()`/`browser()`/`resources()` access.
+            # Known db/browser handles are lazy; resources() performs discovery.
             return instance
 
     def _create_url_instance(self, base_url: str) -> AsyncEnv:

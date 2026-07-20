@@ -77,6 +77,10 @@ class AsyncInstanceClient:
 
     def state(self, uri: str) -> Resource:
         url = urlparse(uri)
+        if url.scheme == ResourceType.db.value:
+            return self.db(url.netloc)
+        if url.scheme == ResourceType.cdp.value:
+            return self.browser(url.netloc)
         return self._resources_state[url.scheme][url.netloc]
 
     def db(self, name: str) -> AsyncSQLiteResource:
@@ -89,7 +93,13 @@ class AsyncInstanceClient:
         Returns:
             An SQLite database resource for the given database name
         """
-        resource_info = self._resources_state[ResourceType.db.value][name]
+        resource_info = self._resources_state[ResourceType.db.value].get(name)
+        if resource_info is None:
+            resource_info = ResourceModel(
+                name=name,
+                type=ResourceType.db,
+                mode=ResourceMode.rw,
+            )
         # Local mode - resource_info is a dict with creation parameters
         if isinstance(resource_info, dict) and resource_info.get('type') == 'local':
             # Create new instance each time (matching HTTP mode behavior)
@@ -98,13 +108,22 @@ class AsyncInstanceClient:
                 client=None,
                 db_path=resource_info['db_path']
             )
-        # HTTP mode - resource_info is a ResourceModel, create new wrapper
+        if isinstance(resource_info, AsyncSQLiteResource):
+            resource_info = resource_info.resource
+        # HTTP mode - create a fresh wrapper around the resource description.
         return AsyncSQLiteResource(resource_info, self.client)
 
-    def browser(self, name: str) -> AsyncBrowserResource:
-        return AsyncBrowserResource(
-            self._resources_state[ResourceType.cdp.value][name], self.client
-        )
+    def browser(self, name: str = "cdp") -> AsyncBrowserResource:
+        resource_info = self._resources_state[ResourceType.cdp.value].get(name)
+        if resource_info is None:
+            resource_info = ResourceModel(
+                name=name,
+                type=ResourceType.cdp,
+                mode=ResourceMode.rw,
+            )
+        elif isinstance(resource_info, AsyncBrowserResource):
+            resource_info = resource_info.resource
+        return AsyncBrowserResource(resource_info, self.client)
 
     def fs(self) -> AsyncFilesystemResource:
         """Returns a filesystem diff resource for inspecting file changes.
