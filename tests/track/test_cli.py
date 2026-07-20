@@ -8,6 +8,7 @@ import uuid
 
 import pytest
 import typer
+from click.utils import strip_ansi
 from typer.testing import CliRunner
 
 from fleet.track import cli
@@ -257,7 +258,7 @@ def test_track_search_requires_body_unless_listing_filters(monkeypatch):
     result = runner.invoke(cli.app, ["search"])
 
     assert result.exit_code != 0
-    assert "BODY is required unless --filters is provided" in (
+    assert "BODY is required unless --filters is provided" in strip_ansi(
         result.stdout + result.stderr
     )
 
@@ -377,26 +378,27 @@ def test_track_search_reads_json_from_stdin(monkeypatch):
 
 def test_track_search_help_documents_json_body_mode():
     result = runner.invoke(cli.app, ["search", "--help"])
+    help_text = strip_ansi(result.stdout)
 
     assert result.exit_code == 0, result.stdout
-    assert "JSON search body" in result.stdout
-    assert "flt track search @search.json" in result.stdout
-    assert "mode" in result.stdout
-    assert "filters" in result.stdout
-    assert "limit" in result.stdout
-    assert "Filterable attributes" in result.stdout
-    assert "repo_url" in result.stdout
-    assert "last_active" in result.stdout
-    assert "event_count" in result.stdout
-    assert "team_id" in result.stdout
-    assert "--tpuf" not in result.stdout
-    assert "--limit" not in result.stdout
-    assert "--filters" in result.stdout
-    assert "--tool" not in result.stdout
-    assert "--cwd" not in result.stdout
-    assert "--since" not in result.stdout
-    assert "--cursor" not in result.stdout
-    assert "--source" not in result.stdout
+    assert "JSON search body" in help_text
+    assert "flt track search @search.json" in help_text
+    assert "mode" in help_text
+    assert "filters" in help_text
+    assert "limit" in help_text
+    assert "Filterable attributes" in help_text
+    assert "repo_url" in help_text
+    assert "last_active" in help_text
+    assert "event_count" in help_text
+    assert "team_id" in help_text
+    assert "--tpuf" not in help_text
+    assert "--limit" not in help_text
+    assert "--filters" in help_text
+    assert "--tool" not in help_text
+    assert "--cwd" not in help_text
+    assert "--since" not in help_text
+    assert "--cursor" not in help_text
+    assert "--source" not in help_text
 
 
 def test_track_aggregate_posts_json_to_aggregate_api(monkeypatch):
