@@ -830,7 +830,7 @@ class AsyncFleet:
         return env
 
     @staticmethod
-    def _normalize_db_path(path: str) -> tuple[str, bool]:
+    def _normalize_db_path(path: str, memory_scope: str) -> tuple[str, bool]:
         """Normalize database path and detect if it's in-memory.
 
         Args:
@@ -843,17 +843,14 @@ class AsyncFleet:
         Returns:
             Tuple of (normalized_path, is_memory)
         """
-        import uuid
-        import sqlite3
-
         if path == ":memory:":
-            # Plain :memory: - create unique namespace
-            name = f"mem_{uuid.uuid4().hex[:8]}"
-            return f"file:{name}?mode=memory&cache=shared", True
+            return f"file:{memory_scope}?mode=memory&cache=shared", True
         elif path.startswith(":memory:"):
-            # Named memory: :memory:current -> file:current?mode=memory&cache=shared
+            # Scope shorthand names to this environment. SQLite shared-memory
+            # URI names are process-global, so using the raw shorthand here
+            # would allow separate Fleet environments to leak state.
             namespace = path[8:]  # Remove ":memory:" prefix
-            return f"file:{namespace}?mode=memory&cache=shared", True
+            return f"file:{memory_scope}_{namespace}?mode=memory&cache=shared", True
         elif "mode=memory" in path:
             # Already a proper memory URI
             return path, True
@@ -872,18 +869,20 @@ class AsyncFleet:
             AsyncEnv: Environment instance configured for local mode
         """
         import sqlite3
+        import uuid
 
         instance_client = AsyncInstanceClient(url="local://", httpx_client=None)
         instance_client._resources = []  # Mark as loaded
         instance_client._memory_anchors = (
             {}
         )  # Store anchor connections for in-memory DBs
+        memory_scope = f"fleet_{uuid.uuid4().hex}"
 
         # Store creation parameters for local AsyncSQLiteResources
         # This allows db() to create new instances each time (matching HTTP mode behavior)
         for name, path in dbs.items():
             # Normalize path and detect if it's in-memory
-            normalized_path, is_memory = self._normalize_db_path(path)
+            normalized_path, is_memory = self._normalize_db_path(path, memory_scope)
 
             # Create anchor connection for in-memory databases
             # This keeps the database alive as long as the env exists

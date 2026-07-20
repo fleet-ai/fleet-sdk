@@ -232,7 +232,7 @@ def test_track_search_rejects_non_json_body(monkeypatch):
     result = runner.invoke(cli.app, ["search", "who worked on turbopuffer indexing"])
 
     assert result.exit_code != 0
-    assert "invalid JSON" in (result.stdout + result.stderr)
+    assert "invalid JSON" in strip_ansi(result.output)
 
 
 def test_track_search_requires_json_object(monkeypatch):
@@ -245,7 +245,7 @@ def test_track_search_requires_json_object(monkeypatch):
     result = runner.invoke(cli.app, ["search", json.dumps(["not", "an", "object"])])
 
     assert result.exit_code != 0
-    assert "body must be a JSON object" in (result.stdout + result.stderr)
+    assert "body must be a JSON object" in strip_ansi(result.output)
 
 
 def test_track_search_requires_body_unless_listing_filters(monkeypatch):
@@ -258,9 +258,7 @@ def test_track_search_requires_body_unless_listing_filters(monkeypatch):
     result = runner.invoke(cli.app, ["search"])
 
     assert result.exit_code != 0
-    assert "BODY is required unless --filters is provided" in strip_ansi(
-        result.stdout + result.stderr
-    )
+    assert "BODY is required unless --filters is provided" in strip_ansi(result.output)
 
 
 def test_track_search_filters_outputs_catalog_json(monkeypatch):

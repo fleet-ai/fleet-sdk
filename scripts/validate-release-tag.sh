@@ -41,8 +41,26 @@ if ! git merge-base --is-ancestor "$TAG_COMMIT" "$MAIN_COMMIT"; then
     exit 1
 fi
 
-# Check if version in pyproject.toml matches tag
-PYPROJECT_VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+# Read project.version without requiring tomllib, which is unavailable on the
+# oldest Python versions supported by the SDK.
+PYPROJECT_VERSION=$(python - <<'PY'
+from pathlib import Path
+
+in_project = False
+for line in Path("pyproject.toml").read_text().splitlines():
+    stripped = line.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        in_project = stripped == "[project]"
+        continue
+    if in_project:
+        key, separator, value = stripped.partition("=")
+        if separator and key.strip() == "version":
+            print(value.strip().strip("\"'"))
+            break
+else:
+    raise SystemExit("project.version is missing from pyproject.toml")
+PY
+)
 
 if [ "$TAG_VERSION" != "$PYPROJECT_VERSION" ]; then
     echo "Error: Tag version ($TAG_VERSION) does not match pyproject.toml version ($PYPROJECT_VERSION)"

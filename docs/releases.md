@@ -3,7 +3,7 @@
 Fleet SDK releases originate only from protected `main`.
 
 1. Release Please opens or updates a release PR containing the version bump and `CHANGELOG.md`.
-2. Required SDK CI tests Python 3.9–3.12 and builds, inspects, installs, and retains the wheel and sdist.
+2. Required SDK CI tests Python 3.9–3.14 and builds, inspects, installs, and retains the wheel and sdist.
 3. Merging the approved release PR makes Release Please create the immutable `fleet-python-vX.Y.Z` tag and a draft GitHub release.
 4. The release workflow checks out that exact commit, proves the tag is on `origin/main`, reruns the full suite, builds once, verifies both artifact versions, and publishes those files through the protected `pypi` environment using OIDC Trusted Publishing.
 5. Only after PyPI succeeds does automation attach the artifacts, publish the GitHub release, and dispatch a separate Theseus consumer-update PR.

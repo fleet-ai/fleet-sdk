@@ -297,6 +297,19 @@ class TestFleetInstanceDispatch:
         assert result.success is True
         assert result.rows == [[1, 'shared_data'], [2, 'more_data']]
 
+    def test_memory_namespace_is_scoped_to_environment(self, fleet_client):
+        """Separate environments must not share shorthand memory namespaces."""
+        first = fleet_client.instance({"current": ":memory:shared"})
+        second = fleet_client.instance({"current": ":memory:shared"})
+
+        first.db("current").exec("CREATE TABLE only_in_first (id INTEGER)")
+
+        result = second.db("current").query(
+            "SELECT name FROM sqlite_master WHERE name = 'only_in_first'"
+        )
+        assert result.success is True
+        assert not result.rows
+
     def test_memory_data_persists(self, fleet_client):
         """Test that memory data persists while env is alive."""
         env = fleet_client.instance({
@@ -559,6 +572,21 @@ class TestAsyncFleetInMemoryTests:
         result = await db1.query("SELECT * FROM test ORDER BY id")
         assert result.success is True
         assert result.rows == [[1, 'shared_data'], [2, 'more_data']]
+
+    async def test_memory_namespace_is_scoped_to_environment(
+        self, async_fleet_client
+    ):
+        """Separate environments must not share shorthand memory namespaces."""
+        first = await async_fleet_client.instance({"current": ":memory:shared"})
+        second = await async_fleet_client.instance({"current": ":memory:shared"})
+
+        await first.db("current").exec("CREATE TABLE only_in_first (id INTEGER)")
+
+        result = await second.db("current").query(
+            "SELECT name FROM sqlite_master WHERE name = 'only_in_first'"
+        )
+        assert result.success is True
+        assert not result.rows
 
     async def test_memory_data_persists(self, async_fleet_client):
         """Test that memory data persists while env is alive in async."""

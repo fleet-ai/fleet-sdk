@@ -550,7 +550,7 @@ def list_sessions(
 
 @app.command(name="search")
 def search_sessions(
-    body_arg: str | None = typer.Argument(
+    body_arg: Optional[str] = typer.Argument(
         None,
         metavar="[BODY]",
         help="JSON search body. Pass inline JSON, @file, or - for stdin.",
