@@ -11,7 +11,7 @@ Fleet SDK releases originate only from protected `main`.
 ## Required repository configuration
 
 - Protect `main` and require all `SDK CI` jobs plus review approval.
-- Admit `fleet-ai/fleet-sdk` to the WarpBuild runner group. CI and release workflows require `warp-ubuntu-latest-x64-4x` directly and intentionally do not fall back to GitHub-hosted runners.
+- CI and release workflows currently use GitHub-hosted `ubuntu-latest` runners. Fleet SDK is not admitted to the organization's WarpBuild runner group.
 - Configure the `pypi` GitHub environment with required reviewers and PyPI Trusted Publisher subject `fleet-ai/fleet-sdk`, workflow `.github/workflows/release.yml`, environment `pypi`.
 - Set `RELEASE_PLEASE_TOKEN` to a narrowly scoped GitHub App token or fine-grained PAT that can update release PRs and contents. The bot-authored PR must trigger required CI.
 - Set `FLEET_SDK_CONSUMER_TOKEN` to a narrowly scoped token allowed only to dispatch the `fleet-sdk-released` event to `fleet-ai/theseus`.

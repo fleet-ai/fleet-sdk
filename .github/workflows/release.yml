@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   release_please:
-    runs-on: warp-ubuntu-latest-x64-4x
+    runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -33,7 +33,7 @@ jobs:
   test-build-publish:
     if: ${{ needs.release_please.outputs.release_created == 'true' }}
     needs: release_please
-    runs-on: warp-ubuntu-latest-x64-4x
+    runs-on: ubuntu-latest
     environment: pypi
     permissions:
       contents: read
@@ -76,7 +76,7 @@ jobs:
   finalize-github-release:
     if: ${{ needs.release_please.outputs.release_created == 'true' }}
     needs: [release_please, test-build-publish]
-    runs-on: warp-ubuntu-latest-x64-4x
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
@@ -95,7 +95,7 @@ jobs:
   notify-internal-consumers:
     if: ${{ needs.release_please.outputs.release_created == 'true' }}
     needs: [release_please, finalize-github-release]
-    runs-on: warp-ubuntu-latest-x64-4x
+    runs-on: ubuntu-latest
     steps:
       - name: Request a separate Theseus consumer update PR
         env:
