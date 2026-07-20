@@ -15,7 +15,7 @@ concurrency:
 jobs:
   test:
     name: Test (Python ${{ matrix.python-version }})
-    runs-on: ${{ vars.WARPBUILD_RUNNER || 'ubuntu-latest' }}
+    runs-on: warp-ubuntu-latest-x64-4x
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +33,7 @@ jobs:
 
   package:
     name: Build and inspect distributions
-    runs-on: ${{ vars.WARPBUILD_RUNNER || 'ubuntu-latest' }}
+    runs-on: warp-ubuntu-latest-x64-4x
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
