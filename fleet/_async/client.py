@@ -830,7 +830,9 @@ class AsyncFleet:
         return env
 
     @staticmethod
-    def _normalize_db_path(path: str, memory_scope: str) -> tuple[str, bool]:
+    def _normalize_db_path(
+        path: str, memory_scope: str, resource_name: str
+    ) -> tuple[str, bool]:
         """Normalize database path and detect if it's in-memory.
 
         Args:
@@ -844,7 +846,10 @@ class AsyncFleet:
             Tuple of (normalized_path, is_memory)
         """
         if path == ":memory:":
-            return f"file:{memory_scope}?mode=memory&cache=shared", True
+            return (
+                f"file:{memory_scope}_{resource_name}?mode=memory&cache=shared",
+                True,
+            )
         elif path.startswith(":memory:"):
             # Scope shorthand names to this environment. SQLite shared-memory
             # URI names are process-global, so using the raw shorthand here
@@ -882,7 +887,9 @@ class AsyncFleet:
         # This allows db() to create new instances each time (matching HTTP mode behavior)
         for name, path in dbs.items():
             # Normalize path and detect if it's in-memory
-            normalized_path, is_memory = self._normalize_db_path(path, memory_scope)
+            normalized_path, is_memory = self._normalize_db_path(
+                path, memory_scope, name
+            )
 
             # Create anchor connection for in-memory databases
             # This keeps the database alive as long as the env exists

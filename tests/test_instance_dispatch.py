@@ -234,6 +234,18 @@ class TestFleetInstanceDispatch:
         assert result.success is True
         assert result.rows == [[1, 'hello']]
 
+    def test_bare_memory_resources_are_isolated(self, fleet_client):
+        """Each bare :memory: resource gets its own database."""
+        env = fleet_client.instance({"current": ":memory:", "seed": ":memory:"})
+
+        env.db("current").exec("CREATE TABLE only_in_current (id INTEGER)")
+
+        result = env.db("seed").query(
+            "SELECT name FROM sqlite_master WHERE name = 'only_in_current'"
+        )
+        assert result.success is True
+        assert not result.rows
+
     def test_memory_namespace_syntax(self, fleet_client):
         """Test that :memory:namespace syntax creates isolated databases."""
         env = fleet_client.instance({
@@ -514,6 +526,20 @@ class TestAsyncFleetInMemoryTests:
         result = await db.query("SELECT * FROM test")
         assert result.success is True
         assert result.rows == [[1, 'hello']]
+
+    async def test_bare_memory_resources_are_isolated(self, async_fleet_client):
+        """Each bare :memory: resource gets its own database."""
+        env = await async_fleet_client.instance(
+            {"current": ":memory:", "seed": ":memory:"}
+        )
+
+        await env.db("current").exec("CREATE TABLE only_in_current (id INTEGER)")
+
+        result = await env.db("seed").query(
+            "SELECT name FROM sqlite_master WHERE name = 'only_in_current'"
+        )
+        assert result.success is True
+        assert not result.rows
 
     async def test_memory_namespace_syntax(self, async_fleet_client):
         """Test that :memory:namespace syntax creates isolated databases in async."""
