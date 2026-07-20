@@ -2067,6 +2067,9 @@ async def _execute_verifier_remote(
         # No job handle returned (e.g. server ran it inline) - surface as-is.
         return VerifiersExecuteResponse(**response_json)
 
+    poll_deadline = (
+        None if timeout is None else time.monotonic() + max(timeout, 0)
+    )
     while True:
         poll_response = await client.request(
             "GET", f"/v1/verifiers/jobs/{job_id}"
@@ -2074,4 +2077,9 @@ async def _execute_verifier_remote(
         poll_json = poll_response.json()
         if poll_json.get("status") in ("completed", "failed"):
             return VerifiersExecuteResponse(**poll_json)
+        if poll_deadline is not None and time.monotonic() >= poll_deadline:
+            raise FleetTimeoutError(
+                f"Verifier job {job_id} did not complete within {timeout} seconds",
+                timeout_duration=timeout,
+            )
         await asyncio.sleep(poll_interval)

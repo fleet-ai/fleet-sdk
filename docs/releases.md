@@ -11,6 +11,7 @@ Fleet SDK releases originate only from protected `main`.
 ## Required repository configuration
 
 - Protect `main` and require all `SDK CI` jobs plus review approval.
+- Admit `fleet-ai/fleet-sdk` to the WarpBuild runner group, then set repository variable `WARPBUILD_RUNNER` to `warp-ubuntu-latest-x64-4x`. Workflows fall back to `ubuntu-latest` while that integration is unavailable instead of remaining queued indefinitely.
 - Configure the `pypi` GitHub environment with required reviewers and PyPI Trusted Publisher subject `fleet-ai/fleet-sdk`, workflow `.github/workflows/release.yml`, environment `pypi`.
 - Set `RELEASE_PLEASE_TOKEN` to a narrowly scoped GitHub App token or fine-grained PAT that can update release PRs and contents. The bot-authored PR must trigger required CI.
 - Set `FLEET_SDK_CONSUMER_TOKEN` to a narrowly scoped token allowed only to dispatch the `fleet-sdk-released` event to `fleet-ai/theseus`.
@@ -21,4 +22,3 @@ Fleet SDK releases originate only from protected `main`.
 - PyPI versions are immutable. If PyPI accepted the files but a later GitHub/consumer step failed, rerun only the failed job or finalize the existing draft release; do not republish the version.
 - If failure happens before PyPI accepts the files, rerun the failed workflow job at the same tagged SHA. The retained workflow artifact is evidence; the publish job still rebuilds and verifies from the tag before uploading.
 - To roll back a defective release, publish a new patch release. Never delete or retarget a published tag.
-

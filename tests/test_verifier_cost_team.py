@@ -3,8 +3,10 @@ from types import SimpleNamespace
 import pytest
 
 from fleet._async.client import _execute_verifier_remote as execute_async
+from fleet._async.exceptions import FleetTimeoutError as AsyncFleetTimeoutError
 from fleet._async.verifiers.verifier import AsyncVerifierFunction
 from fleet.client import _execute_verifier_remote as execute_sync
+from fleet.exceptions import FleetTimeoutError
 from fleet.verifiers.verifier import SyncVerifierFunction
 
 
@@ -196,3 +198,80 @@ def test_sync_execute_preserves_existing_positional_async_arguments():
 
     assert client.request_json["async"] is True
     assert "cost_team_id" not in client.request_json
+
+
+class AsyncPollingClientStub:
+    def __init__(self):
+        self.requests = []
+
+    async def request(self, method, path, **kwargs):
+        self.requests.append((method, path, kwargs))
+        if method == "POST":
+            return SimpleNamespace(json=lambda: {"job_id": "verifier-job"})
+        return SimpleNamespace(
+            json=lambda: {"job_id": "verifier-job", "status": "running"}
+        )
+
+
+class SyncPollingClientStub:
+    def __init__(self):
+        self.requests = []
+
+    def request(self, method, path, **kwargs):
+        self.requests.append((method, path, kwargs))
+        if method == "POST":
+            return SimpleNamespace(json=lambda: {"job_id": "verifier-job"})
+        return SimpleNamespace(
+            json=lambda: {"job_id": "verifier-job", "status": "running"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_async_verifier_polling_stops_at_execution_timeout():
+    client = AsyncPollingClientStub()
+
+    with pytest.raises(AsyncFleetTimeoutError, match="verifier-job"):
+        await execute_async(
+            client,
+            bundle_data=b"",
+            bundle_sha="sha",
+            key="key",
+            function_name="verify",
+            args=(),
+            args_array=[],
+            kwargs={},
+            timeout=0,
+            needs_upload=False,
+            async_=True,
+            poll_interval=0,
+        )
+
+    assert [(method, path) for method, path, _ in client.requests] == [
+        ("POST", "/v1/verifiers/execute"),
+        ("GET", "/v1/verifiers/jobs/verifier-job"),
+    ]
+
+
+def test_sync_verifier_polling_stops_at_execution_timeout():
+    client = SyncPollingClientStub()
+
+    with pytest.raises(FleetTimeoutError, match="verifier-job"):
+        execute_sync(
+            client,
+            bundle_data=b"",
+            bundle_sha="sha",
+            key="key",
+            function_name="verify",
+            args=(),
+            args_array=[],
+            kwargs={},
+            timeout=0,
+            needs_upload=False,
+            async_=True,
+            poll_interval=0,
+        )
+
+    assert [(method, path) for method, path, _ in client.requests] == [
+        ("POST", "/v1/verifiers/execute"),
+        ("GET", "/v1/verifiers/jobs/verifier-job"),
+    ]
