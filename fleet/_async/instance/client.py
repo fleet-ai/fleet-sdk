@@ -1,8 +1,7 @@
 """Fleet SDK Instance Client."""
 
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import httpx
-import inspect
 import time
 import logging
 from urllib.parse import urlparse
@@ -12,9 +11,6 @@ from ..resources.browser import AsyncBrowserResource
 from ..resources.api import AsyncAPIResource
 from ..resources.filesystem import AsyncFilesystemResource
 from ..resources.base import Resource
-
-from fleet.verifiers import DatabaseSnapshot
-from fleet.verifiers.parse import convert_verifier_string, extract_function_name
 
 from ..exceptions import FleetEnvironmentError
 from ...config import DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT
@@ -27,8 +23,6 @@ from ...instance.models import (
     ResourceType,
     ResourceMode,
     HealthResponse,
-    ExecuteFunctionRequest,
-    ExecuteFunctionResponse,
 )
 
 
@@ -40,11 +34,6 @@ RESOURCE_TYPES = {
     ResourceType.cdp: AsyncBrowserResource,
     ResourceType.api: AsyncAPIResource,
 }
-
-ValidatorType = Callable[
-    [DatabaseSnapshot, DatabaseSnapshot, Optional[str]],
-    int,
-]
 
 
 class AsyncInstanceClient:
@@ -149,32 +138,6 @@ class AsyncInstanceClient:
             for resources_by_name in self._resources_state.values()
             for resource in resources_by_name.values()
         ]
-
-    async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
-        function_code = inspect.getsource(validator)
-        function_name = validator.__name__
-        return await self.verify_raw(function_code, function_name)
-
-    async def verify_raw(
-        self, function_code: str, function_name: Optional[str] = None
-    ) -> ExecuteFunctionResponse:
-        try:
-            function_code = convert_verifier_string(function_code)
-        except:
-            pass
-
-        if function_name is None:
-            function_name = extract_function_name(function_code)
-
-        response = await self.client.request(
-            "POST",
-            "/execute_verifier_function",
-            json=ExecuteFunctionRequest(
-                function_code=function_code,
-                function_name=function_name,
-            ).model_dump(),
-        )
-        return ExecuteFunctionResponse(**response.json())
 
     async def _load_resources(self) -> None:
         if self._resources is None:
