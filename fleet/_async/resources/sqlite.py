@@ -2,6 +2,7 @@ from typing import Any, List, Optional, Dict, Tuple
 from ...instance.models import Resource as ResourceModel
 from ...instance.models import DescribeResponse, QueryRequest, QueryResponse
 from .base import Resource
+from ...resources.sqlite import _raise_for_non_query_response
 from datetime import datetime
 import tempfile
 import sqlite3
@@ -2409,6 +2410,8 @@ class AsyncSQLiteResource(Resource):
             f"/resources/sqlite/{self.resource.name}/query",
             json=request.model_dump(),
         )
+        # Shared with the sync path so the two can't drift.
+        _raise_for_non_query_response(response, self.resource.name)
         return QueryResponse(**response.json())
 
     async def _query_direct(

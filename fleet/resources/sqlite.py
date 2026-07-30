@@ -2,6 +2,7 @@ from typing import Any, List, Optional, Dict, Tuple
 from ..instance.models import Resource as ResourceModel
 from ..instance.models import DescribeResponse, QueryRequest, QueryResponse
 from .base import Resource
+from ..exceptions import FleetEnvironmentError
 from datetime import datetime
 import tempfile
 import sqlite3
@@ -23,6 +24,41 @@ from fleet.verifiers.db import (
     _values_equivalent,
     validate_diff_expect_exactly,
 )
+
+
+def _raise_for_non_query_response(response: Any, resource_name: str) -> None:
+    """Fail loudly, and legibly, when a query response isn't a QueryResponse.
+
+    The query endpoint used to be parsed with a bare ``response.json()``. Any
+    response that wasn't 200-with-JSON therefore surfaced as an opaque
+    ``JSONDecodeError: Expecting value: line 1 column 1 (char 0)`` (non-JSON body)
+    or a pydantic ``ValidationError`` (a ``{"detail": ...}`` error body) -- with no
+    status code, URL or body text to work from.
+
+    That cost a full grading session on 2026-07-30: a BLOB column made the env
+    runner return ``500 Internal Server Error`` as text/plain, the char-0
+    JSONDecodeError reached the multi-app verifier, and its "app route is dead"
+    heuristic failed the run ENVIRONMENT_NOT_READY -- 90 minutes of rollout thrown
+    away pointing at the wrong layer.
+
+    Only paths that already raised are affected: a 200-with-JSON body is untouched,
+    so no working call changes behaviour. The body snippet is included deliberately
+    -- for a gateway failure it carries the reason phrase ("Bad Gateway", "Service
+    Unavailable") that callers classify unavailability on, so those keep working.
+    """
+    body = (response.text or "")[:500]
+    detail = (
+        f"SQLite query on resource '{resource_name}' did not return a QueryResponse: "
+        f"status_code={response.status_code} "
+        f"content_type={response.headers.get('content-type', 'unknown')!r} "
+        f"response={body or 'empty'}"
+    )
+    if response.status_code != 200:
+        raise FleetEnvironmentError(detail)
+    try:
+        response.json()
+    except ValueError as e:  # json.JSONDecodeError subclasses ValueError
+        raise FleetEnvironmentError(detail) from e
 
 
 def _quote_identifier(identifier: str) -> str:
@@ -2450,6 +2486,7 @@ class SQLiteResource(Resource):
             f"/resources/sqlite/{self.resource.name}/query",
             json=request.model_dump(),
         )
+        _raise_for_non_query_response(response, self.resource.name)
         return QueryResponse(**response.json())
 
     def _query_direct(
