@@ -755,6 +755,7 @@ def _build_grade_request(
     agentic: bool = False,
     collect: Optional[Dict[str, List[str]]] = None,
     task_id: Optional[str] = None,
+    max_turns: Optional[int] = None,
 ) -> dict:
     """Build the JSON request body for POST /v1/judge/grade."""
     body: Dict[str, Any] = {
@@ -794,6 +795,8 @@ def _build_grade_request(
         body["provider"] = provider
     if task_id is not None:
         body["task_id"] = task_id
+    if max_turns is not None:
+        body["max_turns"] = max_turns
     if collect is not None:
         body["collect"] = collect
 
@@ -969,6 +972,7 @@ class SyncJudge:
         agentic: bool = False,
         collect: Optional[Dict[str, List[str]]] = None,
         task_id: Optional[str] = None,
+        max_turns: Optional[int] = None,
     ) -> JudgeResult:
         """Grade a submission using LLM-as-judge via the orchestrator API.
 
@@ -990,6 +994,9 @@ class SyncJudge:
             agentic: If True, the orchestrator collects artifacts from the instance.
             collect: File patterns for orchestrator to collect (agentic mode).
             task_id: Optional task ID for tracking.
+            max_turns: Agentic tool-turn budget (1-50). None keeps the
+                orchestrator default; ignored when agentic is False and by
+                orchestrators that predate the field.
         """
         body = _build_grade_request(
             self._instance_id,
@@ -1007,6 +1014,7 @@ class SyncJudge:
             agentic=agentic,
             collect=collect,
             task_id=task_id,
+            max_turns=max_turns,
         )
 
         _print_judge_call_start(rubric, images, agentic, model, files=files)
