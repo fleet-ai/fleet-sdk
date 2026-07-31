@@ -63,6 +63,7 @@ class AsyncJudge:
         agentic: bool = False,
         collect: Optional[Dict[str, List[str]]] = None,
         task_id: Optional[str] = None,
+        max_turns: Optional[int] = None,
     ) -> JudgeResult:
         """Grade a submission using LLM-as-judge via the orchestrator API.
 
@@ -84,6 +85,9 @@ class AsyncJudge:
             agentic: If True, the orchestrator collects artifacts from the instance.
             collect: File patterns for orchestrator to collect (agentic mode).
             task_id: Optional task ID for tracking.
+            max_turns: Agentic tool-turn budget (1-50). None keeps the
+                orchestrator default; ignored when agentic is False and by
+                orchestrators that predate the field.
         """
         # Resolve Image.from_env images asynchronously before building request
         resolved_images = images
@@ -146,6 +150,7 @@ class AsyncJudge:
             agentic=agentic,
             collect=collect,
             task_id=task_id,
+            max_turns=max_turns,
         )
 
         _print_judge_call_start(rubric, resolved_images, agentic, model, files=resolved_files)
