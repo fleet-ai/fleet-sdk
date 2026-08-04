@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any, TYPE_CHECKING, Union
 from urllib.parse import urlparse
 from uuid import UUID
+from fleet.runner_auth import RunnerTokenProvider
 
 from .base import EnvironmentBase, SyncWrapper
 from .models import (
@@ -365,6 +366,19 @@ class SyncEnv(EnvironmentBase):
         self._instance: Optional[InstanceClient] = None
         self._judge: Optional["SyncJudge"] = None
         self._manager_url_override: Optional[str] = None  # For URL mode
+        self._runner_token_provider: Optional[RunnerTokenProvider] = None
+
+    def _runner_tokens(self) -> Optional[RunnerTokenProvider]:
+        """One provider per env, so instance + every app share one resolution.
+
+        Built here rather than passed down from Fleet because an env can also be
+        constructed straight from a url, with no Fleet client above it.
+        """
+        if self._client is None:
+            return None
+        if self._runner_token_provider is None:
+            self._runner_token_provider = RunnerTokenProvider(self._client)
+        return self._runner_token_provider
 
     @property
     def manager_url(self) -> str:
@@ -377,7 +391,9 @@ class SyncEnv(EnvironmentBase):
     def instance(self) -> InstanceClient:
         if self._instance is None:
             self._instance = InstanceClient(
-                self.manager_url, self._client.httpx_client if self._client else None
+                self.manager_url,
+                self._client.httpx_client if self._client else None,
+                runner_token_provider=self._runner_tokens(),
             )
         return self._instance
 
@@ -395,6 +411,7 @@ class SyncEnv(EnvironmentBase):
             self._apps[name] = InstanceClient(
                 new_url,
                 self._client.httpx_client if self._client else None,
+                runner_token_provider=self._runner_tokens(),
             )
         return self._apps[name]
 
@@ -545,6 +562,8 @@ class Fleet:
         if base_url is None:
             base_url = os.getenv("FLEET_BASE_URL")
         self._httpx_client = httpx_client or default_httpx_client(max_retries, timeout)
+        # One per Fleet client: the token is resolved once, lazily, on the
+        # first runner call, and shared by every instance this client hands out.
         self.client = SyncWrapper(
             api_key=api_key,
             base_url=base_url,
@@ -752,7 +771,11 @@ class Fleet:
         Returns:
             SyncEnv: Environment instance configured for URL mode
         """
-        instance_client = InstanceClient(url=base_url, httpx_client=self._httpx_client)
+        instance_client = InstanceClient(
+            url=base_url,
+            httpx_client=self._httpx_client,
+            runner_token_provider=RunnerTokenProvider(self.client),
+        )
 
         # Create a minimal environment for URL mode
         env = SyncEnv(
@@ -823,9 +846,7 @@ class Fleet:
 
         instance_client = InstanceClient(url="local://", httpx_client=None)
         instance_client._resources = []  # Mark as loaded
-        instance_client._memory_anchors = (
-            {}
-        )  # Store anchor connections for in-memory DBs
+        instance_client._memory_anchors = {}  # Store anchor connections for in-memory DBs
 
         # Store creation parameters for local SQLiteResources
         # This allows db() to create new instances each time (matching HTTP mode behavior)

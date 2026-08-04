@@ -29,6 +29,7 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Dict, Any, TYPE_CHECKING, Union
 from uuid import UUID
+from fleet.runner_auth import RunnerTokenProvider
 
 from .base import EnvironmentBase, AsyncWrapper
 from ..models import (
@@ -361,12 +362,23 @@ class AsyncEnv(EnvironmentBase):
         self._apps: Dict[str, AsyncInstanceClient] = {}
         self._instance: Optional[AsyncInstanceClient] = None
         self._judge: Optional["AsyncJudge"] = None
+        self._runner_token_provider: Optional[RunnerTokenProvider] = None
+
+    def _runner_tokens(self) -> Optional[RunnerTokenProvider]:
+        """One provider per env, so instance + every app share one resolution."""
+        if self._client is None:
+            return None
+        if self._runner_token_provider is None:
+            self._runner_token_provider = RunnerTokenProvider(self._client)
+        return self._runner_token_provider
 
     @property
     def instance(self) -> AsyncInstanceClient:
         if self._instance is None:
             self._instance = AsyncInstanceClient(
-                self.manager_url, self._client.httpx_client if self._client else None
+                self.manager_url,
+                self._client.httpx_client if self._client else None,
+                runner_token_provider=self._runner_tokens(),
             )
         return self._instance
 
@@ -384,6 +396,7 @@ class AsyncEnv(EnvironmentBase):
             self._apps[name] = AsyncInstanceClient(
                 f"{base_url}/{name}/api/v1/env",
                 self._client.httpx_client if self._client else None,
+                runner_token_provider=self._runner_tokens(),
             )
         return self._apps[name]
 
@@ -534,6 +547,8 @@ class AsyncFleet:
         if base_url is None:
             base_url = os.getenv("FLEET_BASE_URL")
         self._httpx_client = httpx_client or default_httpx_client(max_retries, timeout)
+        # One per Fleet client: the token is resolved once, lazily, on the
+        # first runner call, and shared by every instance this client hands out.
         self.client = AsyncWrapper(
             api_key=api_key,
             base_url=base_url,
@@ -746,7 +761,9 @@ class AsyncFleet:
             AsyncEnv: Environment instance configured for URL mode
         """
         instance_client = AsyncInstanceClient(
-            url=base_url, httpx_client=self._httpx_client
+            url=base_url,
+            httpx_client=self._httpx_client,
+            runner_token_provider=RunnerTokenProvider(self.client),
         )
 
         # Create a minimal environment for URL mode
@@ -817,9 +834,7 @@ class AsyncFleet:
 
         instance_client = AsyncInstanceClient(url="local://", httpx_client=None)
         instance_client._resources = []  # Mark as loaded
-        instance_client._memory_anchors = (
-            {}
-        )  # Store anchor connections for in-memory DBs
+        instance_client._memory_anchors = {}  # Store anchor connections for in-memory DBs
 
         # Store creation parameters for local AsyncSQLiteResources
         # This allows db() to create new instances each time (matching HTTP mode behavior)
