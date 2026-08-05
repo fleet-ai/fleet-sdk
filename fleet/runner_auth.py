@@ -49,6 +49,15 @@ _RUNNER_PATH_RE = re.compile(r"^(/[^/]+)?/api/v1/env(/|$)")
 # not stall the instance call that triggered it.
 _FETCH_TIMEOUT = 10.0
 
+# The control plane accepts two credential shapes and get_headers() emits
+# whichever applies: an API key becomes Authorization, while an `flt login`
+# session becomes X-JWT-Token + X-Team-ID. Checking only Authorization looked
+# right and silently excluded every logged-in user -- their headers were valid,
+# got discarded as "no credential", and the resulting miss was cached, so gated
+# instance calls kept going out bare. Keyed off the header names the wrapper
+# actually sets.
+_CREDENTIAL_HEADERS = ("Authorization", "X-JWT-Token")
+
 
 def is_runner_path(path: Optional[str]) -> bool:
     """True for the instance-runner routes the router gates."""
@@ -96,7 +105,9 @@ class RunnerTokenProvider:
             return None
         # No credential means no fetch: an unauthenticated GET would 401 and we
         # would cache a negative for the life of the client.
-        return headers if headers.get("Authorization") else None
+        if not any(headers.get(name) for name in _CREDENTIAL_HEADERS):
+            return None
+        return headers
 
     def token(self) -> Optional[str]:
         if self._resolved:

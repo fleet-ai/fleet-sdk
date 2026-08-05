@@ -23,14 +23,23 @@ from fleet.runner_auth import (
 
 
 class _Auth:
-    """Stands in for a control-plane wrapper: get_headers() + base_url."""
+    """Stands in for a control-plane wrapper: get_headers() + base_url.
 
-    def __init__(self, base_url="https://orchestrator.fleetai.com", authorized=True):
+    ``mode`` mirrors the two credential shapes the real wrapper emits -- an API
+    key becomes Authorization, an `flt login` session becomes X-JWT-Token plus
+    X-Team-ID and no Authorization at all.
+    """
+
+    def __init__(self, base_url="https://orchestrator.fleetai.com", mode="api_key"):
         self.base_url = base_url
-        self._authorized = authorized
+        self._mode = mode
 
     def get_headers(self):
-        return {"Authorization": "Bearer sk-test"} if self._authorized else {}
+        if self._mode == "api_key":
+            return {"Authorization": "Bearer sk-test"}
+        if self._mode == "jwt":
+            return {"X-JWT-Token": "jwt-abc", "X-Team-ID": "team-1"}
+        return {}
 
 
 @pytest.fixture(autouse=True)
@@ -191,6 +200,38 @@ def test_a_failed_resolution_is_also_cached(monkeypatch):
     assert calls["n"] == 1
 
 
+def test_jwt_sessions_also_fetch(monkeypatch):
+    """`flt login` sends X-JWT-Token + X-Team-ID and no Authorization.
+
+    Keying the credential check on Authorization alone looked correct and
+    excluded every logged-in user: valid headers were discarded as "no
+    credential", the fetch was skipped, and the miss was cached -- so their
+    gated instance calls kept going out bare. Caught by Bugbot on the first
+    revision of this file.
+    """
+    seen = {}
+
+    class _Client:
+        def __init__(self, **_kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def get(self, url, headers=None):
+            seen.update(headers or {})
+            return httpx.Response(200, json={"token": "tok-jwt"})
+
+    monkeypatch.setattr(httpx, "Client", _Client)
+
+    assert RunnerTokenProvider(_Auth(mode="jwt")).token() == "tok-jwt"
+    assert seen["X-JWT-Token"] == "jwt-abc"
+    assert seen["X-Team-ID"] == "team-1"
+
+
 def test_no_credential_means_no_fetch(monkeypatch):
     """An unauthenticated GET would 401 and poison the cache for the client."""
 
@@ -198,7 +239,7 @@ def test_no_credential_means_no_fetch(monkeypatch):
         raise AssertionError("fetched with no Authorization header")
 
     monkeypatch.setattr(httpx, "Client", _explode)
-    assert RunnerTokenProvider(_Auth(authorized=False)).token() is None
+    assert RunnerTokenProvider(_Auth(mode="none")).token() is None
 
 
 def test_no_base_url_means_no_fetch(monkeypatch):
