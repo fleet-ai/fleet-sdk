@@ -147,7 +147,6 @@ class FsDiffRequest(BaseModel):
     max_content_size: int = Field(102400, title="Max Content Size")
     exclude_patterns: Optional[List[str]] = Field(None, title="Exclude Patterns")
     extract_documents: bool = Field(True, title="Extract Documents")
-    diff_mode: Optional[str] = Field(None, title="Diff Mode")
 
 
 class FsFileDiffEntry(BaseModel):
@@ -156,10 +155,6 @@ class FsFileDiffEntry(BaseModel):
     modified_time: str = Field(..., title="Modified Time")
     file_type: str = Field(..., title="File Type")
     content: Optional[str] = Field(None, title="Content")
-    change_type: str = Field("modified", title="Change Type")
-    entry_type: Optional[str] = Field(None, title="Entry Type")
-    encoding: Optional[str] = Field(None, title="Encoding")
-    document_text: Optional[str] = Field(None, title="Document Text")
 
 
 class FsDiffResponse(BaseModel):
