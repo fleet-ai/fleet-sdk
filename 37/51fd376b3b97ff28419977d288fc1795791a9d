@@ -1,0 +1,29 @@
+fleet/resources/filesystem.py
+  s_e30d3c00af1a03::t_51ebe9f43a624f 260-268
+  s_e30d3c00af1a03::t_924a0c4f841ff0 291,299-300,305-311,315,371
+  s_e30d3c00af1a03::t_c3a89ac99daac1 25-51,83-85,137,142-144,196,209-211,221-223,348,351-353
+fleet/instance/models.py
+  s_e30d3c00af1a03::t_924a0c4f841ff0 150,159-162
+tests/test_filesystem_lifecycle_diff.py
+  s_e30d3c00af1a03::t_8432b6cd63b139 1-62
+fleet/_async/resources/filesystem.py
+  s_e30d3c00af1a03::t_51ebe9f43a624f 260-268
+  s_e30d3c00af1a03::t_924a0c4f841ff0 291,299-300,305-311,315,355
+  s_e30d3c00af1a03::t_f11095a959a469 25-51,83-85,137,142-144,196,209-211,221-223,353-354,373
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "3751fd376b3b97ff28419977d288fc1795791a9d",
+  "prompts": {},
+  "sessions": {
+    "s_e30d3c00af1a03": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe384-a60c-7db3-b81d-cac3bf3ff2ce",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "joenam-fleet <fleet@mac.mynetworksettings.com>"
+    }
+  }
+}
