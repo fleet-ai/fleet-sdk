@@ -22,33 +22,12 @@ if TYPE_CHECKING:
 
 # Document extensions that need /fs/doc/text for readable content extraction
 _DOC_EXTENSIONS = {
-    ".docx",
-    ".doc",
-    ".pptx",
-    ".ppt",
-    ".xlsx",
-    ".xls",
-    ".xlsm",
-    ".xltx",
-    ".xltm",
-    ".odt",
-    ".ott",
-    ".odm",
-    ".ods",
-    ".ots",
-    ".odp",
-    ".otp",
-    ".odg",
-    ".otg",
-    ".odf",
-    ".rtf",
-    ".pdf",
-    ".epub",
-    ".xps",
-    ".oxps",
-    ".fb2",
-    ".cbz",
-    ".mobi",
+    ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls",
+    ".xlsm", ".xltx", ".xltm",
+    ".odt", ".ott", ".odm", ".ods", ".ots", ".odp", ".otp",
+    ".odg", ".otg", ".odf",
+    ".rtf", ".pdf", ".epub",
+    ".xps", ".oxps", ".fb2", ".cbz", ".mobi",
 }
 
 
@@ -80,9 +59,7 @@ class SyncFilesystemDiff:
             )
         return self
 
-    def expect_only(
-        self, allowed_changes: List[Dict[str, Any]]
-    ) -> "SyncFilesystemDiff":
+    def expect_only(self, allowed_changes: List[Dict[str, Any]]) -> "SyncFilesystemDiff":
         """Assert that only the specified filesystem changes occurred.
 
         Each spec in allowed_changes is a dict with:
@@ -134,14 +111,12 @@ class SyncFilesystemDiff:
         if errors:
             raise AssertionError(
                 f"Filesystem expect_only failed with {len(errors)} error(s):\n"
-                + "\n".join(f"  {i + 1}. {e}" for i, e in enumerate(errors))
+                + "\n".join(f"  {i+1}. {e}" for i, e in enumerate(errors))
             )
 
         return self
 
-    def expect_exactly(
-        self, expected_changes: List[Dict[str, Any]]
-    ) -> "SyncFilesystemDiff":
+    def expect_exactly(self, expected_changes: List[Dict[str, Any]]) -> "SyncFilesystemDiff":
         """Assert that EXACTLY the specified filesystem changes occurred.
 
         Like expect_only, but also fails if an expected path is missing from the diff.
@@ -193,7 +168,7 @@ class SyncFilesystemDiff:
         if errors:
             raise AssertionError(
                 f"Filesystem expect_exactly failed with {len(errors)} error(s):\n"
-                + "\n".join(f"  {i + 1}. {e}" for i, e in enumerate(errors))
+                + "\n".join(f"  {i+1}. {e}" for i, e in enumerate(errors))
             )
 
         return self
@@ -206,9 +181,7 @@ class SyncFilesystemDiff:
         # Plain content checks (for text files)
         if "content" in spec and spec["content"] is not ...:
             if entry.content is None:
-                errors.append(
-                    f"'{path}': content not available (was content excluded from diff?)"
-                )
+                errors.append(f"'{path}': content not available (was content excluded from diff?)")
             elif entry.content != spec["content"]:
                 errors.append(
                     f"'{path}': content mismatch\n"
@@ -218,9 +191,7 @@ class SyncFilesystemDiff:
 
         if "content_contains" in spec and spec["content_contains"] is not ...:
             if entry.content is None:
-                errors.append(
-                    f"'{path}': content not available for content_contains check"
-                )
+                errors.append(f"'{path}': content not available for content_contains check")
             elif spec["content_contains"] not in entry.content:
                 errors.append(
                     f"'{path}': content does not contain expected substring: "
@@ -257,15 +228,6 @@ class SyncFilesystemDiff:
                     f"'{path}': file_type mismatch (expected {spec['file_type']!r}, got {entry.file_type!r})"
                 )
 
-        for field in ("change_type", "entry_type", "encoding"):
-            if field in spec and spec[field] is not ...:
-                actual = getattr(entry, field)
-                if actual != spec[field]:
-                    errors.append(
-                        f"'{path}': {field} mismatch "
-                        f"(expected {spec[field]!r}, got {actual!r})"
-                    )
-
         if "size" in spec and spec["size"] is not ...:
             if entry.size != spec["size"]:
                 errors.append(
@@ -288,7 +250,6 @@ class FilesystemResource(Resource):
         max_content_size: int = 102400,
         exclude_patterns: Optional[List[str]] = None,
         extract_documents: bool = True,
-        diff_mode: Optional[str] = None,
     ) -> SyncFilesystemDiff:
         """Get filesystem diff from the environment.
 
@@ -296,23 +257,15 @@ class FilesystemResource(Resource):
             include_content: Kept for backwards compatibility, ignored by server
             max_content_size: Kept for backwards compatibility, ignored by server
             exclude_patterns: Kept for backwards compatibility, ignored by server
-            extract_documents: Whether the server should extract document text metadata
-            diff_mode: ``post_start`` for task changes or ``image`` for legacy overlay changes
+            extract_documents: Kept for backwards compatibility, ignored by server
 
         Returns:
             SyncFilesystemDiff with assertion helpers
         """
-        request = {
-            "include_content": include_content,
-            "max_content_size": max_content_size,
-            "exclude_patterns": exclude_patterns,
-            "extract_documents": extract_documents,
-            "diff_mode": diff_mode,
-        }
         response = self.client.request(
             "POST",
             "/diff/fs",
-            json={key: value for key, value in request.items() if value is not None},
+            json={},
         )
         result = response.json()
         fs_response = FsDiffResponse(**result)
@@ -345,12 +298,12 @@ class FilesystemResource(Resource):
             include_content=include_content,
             max_content_size=max_content_size,
         )
-        response = self.client.request("POST", "/fs/file", json=request.model_dump())
+        response = self.client.request(
+            "POST", "/fs/file", json=request.model_dump()
+        )
         if response.status_code == 404:
             return FileStateResponse(
-                success=True,
-                path=path,
-                exists=False,
+                success=True, path=path, exists=False,
                 message=response.json().get("detail", "File not found"),
             )
         if response.status_code >= 400:
@@ -368,7 +321,9 @@ class FilesystemResource(Resource):
         Returns:
             File content as string
         """
-        request = FileStateTextRequest(path=path, max_content_size=max_content_size)
+        request = FileStateTextRequest(
+            path=path, max_content_size=max_content_size
+        )
         response = self.client.request(
             "POST", "/fs/file/text", json=request.model_dump()
         )
