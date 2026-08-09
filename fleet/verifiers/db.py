@@ -1438,7 +1438,11 @@ class SnapshotDiff:
         return self
 
     # ------------------------------------------------------------------
-    def expect_only_v2(self, allowed_changes: List[Dict[str, Any]]):
+    def expect_only_v2(
+        self,
+        allowed_changes: List[Dict[str, Any]],
+        require_completeness: bool = True,
+    ):
         """Allowed changes with bulk field spec support and explicit type field.
 
         This version supports explicit change types via the "type" field:
@@ -1464,6 +1468,15 @@ class SnapshotDiff:
         When using "fields" for inserts, every field must be accounted for in the list.
         For modifications, use "resulting_fields" with explicit "no_other_changes".
         For deletions with "fields", all specified fields are validated against the deleted row.
+
+        When ``require_completeness`` is True (the default), every spec that carries an
+        explicit ``type`` (``insert``/``modify``/``delete``) must also be realised in the
+        current database — an empty diff no longer vacuously passes a non-empty
+        expected-changes list. This closes the "0.5 credit for zero changes" gap where an
+        agent that does nothing satisfies the no-side-effects half while skipping the
+        completeness half. Set ``require_completeness=False`` to preserve the legacy
+        no-side-effects-only behaviour. Specs without an explicit ``type`` (legacy
+        whole-row / single-field specs) are not subject to the completeness pass.
         """
         # Normalize pk values
         for change in allowed_changes:
@@ -1487,7 +1500,10 @@ class SnapshotDiff:
 
         # Use targeted queries when possible (matches production behavior)
         if self._can_use_targeted_queries(allowed_changes):
-            return self._expect_only_targeted_v2(allowed_changes)
+            self._expect_only_targeted_v2(allowed_changes)
+            if require_completeness:
+                self._verify_completeness_v2(allowed_changes)
+            return self
 
         # Fall back to full diff for complex cases
         diff = self._collect()
@@ -1960,6 +1976,112 @@ class SnapshotDiff:
                 error_lines.append("  (No changes were allowed)")
 
             raise AssertionError("\n".join(error_lines))
+
+        if require_completeness:
+            self._verify_completeness_v2(allowed_changes)
+        return self
+
+    def _verify_completeness_v2(self, allowed_changes: List[Dict[str, Any]]):
+        """Verify every spec with an explicit ``type`` was realised in the current DB.
+
+        ``expect_only_v2``'s no-side-effects check passes vacuously when the diff is
+        empty (the agent made zero changes). This completeness pass closes that gap by
+        requiring that each expected ``insert``/``modify``/``delete`` actually
+        occurred, mirroring the completeness half of ``expect_exactly``. Specs without
+        an explicit ``type`` (legacy whole-row / single-field specs) are skipped so the
+        stricter behaviour only applies to the v2 spec format.
+
+        Raises ``AssertionError`` listing every missing or mismatched expected change.
+        """
+        missing: List[str] = []
+
+        specs_by_table: Dict[str, List[Dict[str, Any]]] = {}
+        for spec in allowed_changes:
+            if spec.get("type") is None:
+                continue
+            table = spec.get("table")
+            if table is None or self.ignore_config.should_ignore_table(table):
+                continue
+            specs_by_table.setdefault(table, []).append(spec)
+
+        if not specs_by_table:
+            return self
+
+        for table, table_specs in specs_by_table.items():
+            pk_columns = self._get_pk_columns(table)
+            for spec in table_specs:
+                pk = spec.get("pk")
+                pk_label = repr(pk)
+                spec_type = spec.get("type")
+                try:
+                    after_row = self._query_row(
+                        self.after.db_path, table, pk_columns, pk
+                    )
+                except Exception as e:
+                    missing.append(
+                        f"Completeness check error for table '{table}' pk={pk_label}: {e}"
+                    )
+                    continue
+
+                if spec_type == "insert":
+                    if after_row is None:
+                        missing.append(
+                            f"Expected insert in table '{table}' pk={pk_label} "
+                            f"did not occur (row absent in current DB)"
+                        )
+                        continue
+                    fields_spec = spec.get("fields")
+                    if fields_spec is not None:
+                        for field_name, expected_value in fields_spec:
+                            if expected_value is ...:
+                                continue
+                            if self.ignore_config.should_ignore_field(table, field_name):
+                                continue
+                            actual = after_row.get(field_name)
+                            if not _values_equivalent(expected_value, actual):
+                                missing.append(
+                                    f"Expected insert in table '{table}' pk={pk_label} "
+                                    f"field '{field_name}': expected {repr(expected_value)}, "
+                                    f"got {repr(actual)}"
+                                )
+                    continue
+
+                if spec_type == "delete":
+                    if after_row is not None:
+                        missing.append(
+                            f"Expected delete in table '{table}' pk={pk_label} "
+                            f"did not occur (row still present in current DB)"
+                        )
+                    continue
+
+                if spec_type == "modify":
+                    if after_row is None:
+                        missing.append(
+                            f"Expected modify in table '{table}' pk={pk_label} "
+                            f"did not occur (row absent in current DB)"
+                        )
+                        continue
+                    resulting_fields = spec.get("resulting_fields")
+                    if resulting_fields is None:
+                        continue
+                    for field_name, expected_value in resulting_fields:
+                        if expected_value is ...:
+                            continue
+                        if self.ignore_config.should_ignore_field(table, field_name):
+                            continue
+                        actual = after_row.get(field_name)
+                        if not _values_equivalent(expected_value, actual):
+                            missing.append(
+                                f"Expected modify in table '{table}' pk={pk_label} "
+                                f"field '{field_name}': expected {repr(expected_value)}, "
+                                f"got {repr(actual)}"
+                            )
+
+        if missing:
+            raise AssertionError(
+                "expect_only_v2 completeness check failed — expected changes "
+                "did not occur:\n" + "\n".join(f"  - {m}" for m in missing)
+            )
 
         return self
 

@@ -2591,3 +2591,230 @@ def test_targeted_row_exists_both_sides_no_change():
     finally:
         os.unlink(before_db)
         os.unlink(after_db)
+
+
+# ============================================================================
+# Tests for expect_only_v2 completeness enforcement (bug cac765f5)
+# ============================================================================
+# expect_only_v2 historically only enforced the no-side-effects half of its
+# contract: an empty diff (agent made zero changes) vacuously satisfied
+# "only expected changes occurred" because the empty set is a subset of any
+# set. With require_completeness=True (the new default), every spec that
+# carries an explicit type must also be realised in the current DB.
+
+
+def _write_identical_dbs(schema_sql, seed_rows):
+    """Create before/after DBs with identical contents (zero changes)."""
+    before_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+    after_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+    for path in (before_db, after_db):
+        conn = sqlite3.connect(path)
+        conn.execute(schema_sql)
+        for row in seed_rows:
+            conn.execute(row)
+        conn.commit()
+        conn.close()
+    return before_db, after_db
+
+
+def test_expect_only_v2_completeness_zero_changes_modify_fails():
+    """Zero DB changes + non-empty modify spec must fail (the reported bug)."""
+    before_db, after_db = _write_identical_dbs(
+        "CREATE TABLE issues (id INTEGER PRIMARY KEY, owner TEXT, priority TEXT)",
+        ["INSERT INTO issues VALUES (1, NULL, 'Medium')"],
+    )
+    try:
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+        with pytest.raises(AssertionError) as excinfo:
+            before.diff(after).expect_only_v2(
+                [
+                    {
+                        "table": "issues",
+                        "pk": 1,
+                        "type": "modify",
+                        "resulting_fields": [("owner", "ob-1"), ("priority", "High")],
+                        "no_other_changes": True,
+                    },
+                ]
+            )
+        assert "completeness check failed" in str(excinfo.value)
+        assert "priority" in str(excinfo.value)
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_expect_only_v2_completeness_zero_changes_insert_fails():
+    """Zero DB changes + insert spec must fail (expected insert did not occur)."""
+    before_db, after_db = _write_identical_dbs(
+        "CREATE TABLE issues (id INTEGER PRIMARY KEY, name TEXT)",
+        ["INSERT INTO issues VALUES (1, 'existing')"],
+    )
+    try:
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+        with pytest.raises(AssertionError) as excinfo:
+            before.diff(after).expect_only_v2(
+                [
+                    {
+                        "table": "issues",
+                        "pk": 2,
+                        "type": "insert",
+                        "fields": [("id", 2), ("name", "new")],
+                    },
+                ]
+            )
+        assert "Expected insert" in str(excinfo.value)
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_expect_only_v2_completeness_zero_changes_delete_fails():
+    """Zero DB changes + delete spec must fail (row still present)."""
+    before_db, after_db = _write_identical_dbs(
+        "CREATE TABLE issues (id INTEGER PRIMARY KEY, name TEXT)",
+        ["INSERT INTO issues VALUES (1, 'stale')"],
+    )
+    try:
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+        with pytest.raises(AssertionError) as excinfo:
+            before.diff(after).expect_only_v2(
+                [{"table": "issues", "pk": 1, "type": "delete"}]
+            )
+        assert "Expected delete" in str(excinfo.value)
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_expect_only_v2_completeness_seed_already_has_expected_values_passes():
+    """If the seed already has the expected resulting state, completeness passes.
+
+    The resulting state the spec describes is present in the current DB, so the
+    expected change is satisfied even though no row-level change occurred.
+    """
+    before_db, after_db = _write_identical_dbs(
+        "CREATE TABLE issues (id INTEGER PRIMARY KEY, owner TEXT, priority TEXT)",
+        ["INSERT INTO issues VALUES (1, 'ob-1', 'High')"],
+    )
+    try:
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+        # No AssertionError: expected resulting_fields are present in current DB.
+        before.diff(after).expect_only_v2(
+            [
+                {
+                    "table": "issues",
+                    "pk": 1,
+                    "type": "modify",
+                    "resulting_fields": [("owner", "ob-1"), ("priority", "High")],
+                    "no_other_changes": True,
+                },
+            ]
+        )
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_expect_only_v2_require_completeness_false_preserves_vacuous_pass():
+    """Opting out of completeness preserves the legacy vacuous-pass behaviour."""
+    before_db, after_db = _write_identical_dbs(
+        "CREATE TABLE issues (id INTEGER PRIMARY KEY, owner TEXT, priority TEXT)",
+        ["INSERT INTO issues VALUES (1, NULL, 'Medium')"],
+    )
+    try:
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+        # No AssertionError: legacy no-side-effects-only behaviour.
+        before.diff(after).expect_only_v2(
+            [
+                {
+                    "table": "issues",
+                    "pk": 1,
+                    "type": "modify",
+                    "resulting_fields": [("owner", "ob-1"), ("priority", "High")],
+                    "no_other_changes": True,
+                },
+            ],
+            require_completeness=False,
+        )
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_expect_only_v2_completeness_partial_changes_fails():
+    """Making only some expected changes must fail for the missing ones."""
+    before_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+    after_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute(
+            "CREATE TABLE issues (id INTEGER PRIMARY KEY, owner TEXT, priority TEXT)"
+        )
+        conn.execute("INSERT INTO issues VALUES (1, NULL, 'Medium')")
+        conn.execute("INSERT INTO issues VALUES (2, NULL, 'Medium')")
+        conn.commit()
+        conn.close()
+
+        # After: only issue 1 was changed; issue 2 left unchanged.
+        conn = sqlite3.connect(after_db)
+        conn.execute(
+            "CREATE TABLE issues (id INTEGER PRIMARY KEY, owner TEXT, priority TEXT)"
+        )
+        conn.execute("INSERT INTO issues VALUES (1, 'ob-1', 'High')")
+        conn.execute("INSERT INTO issues VALUES (2, NULL, 'Medium')")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+        with pytest.raises(AssertionError) as excinfo:
+            before.diff(after).expect_only_v2(
+                [
+                    {
+                        "table": "issues",
+                        "pk": 1,
+                        "type": "modify",
+                        "resulting_fields": [("owner", "ob-1"), ("priority", "High")],
+                        "no_other_changes": True,
+                    },
+                    {
+                        "table": "issues",
+                        "pk": 2,
+                        "type": "modify",
+                        "resulting_fields": [("owner", "rb-2"), ("priority", "High")],
+                        "no_other_changes": True,
+                    },
+                ]
+            )
+        assert "completeness check failed" in str(excinfo.value)
+        # The missing change (issue 2) must be reported; the satisfied one (issue 1) not.
+        assert "pk=2" in str(excinfo.value)
+        assert "pk=1" not in str(excinfo.value)
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_expect_only_v2_completeness_legacy_specs_skipped():
+    """Legacy specs without an explicit type are not subject to completeness."""
+    before_db, after_db = _write_identical_dbs(
+        "CREATE TABLE issues (id INTEGER PRIMARY KEY, owner TEXT)",
+        ["INSERT INTO issues VALUES (1, 'alice')"],
+    )
+    try:
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+        # Legacy whole-row spec (no "type") — completeness pass is skipped, so
+        # the no-side-effects check alone governs and passes on an empty diff.
+        before.diff(after).expect_only_v2(
+            [{"table": "issues", "pk": 1, "fields": None, "after": "__added__"}]
+        )
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)

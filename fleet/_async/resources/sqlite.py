@@ -1753,11 +1753,25 @@ class AsyncSnapshotDiff:
         diff = await self._collect()
         return await self._validate_diff_against_allowed_changes(diff, allowed_changes)
 
-    async def expect_only_v2(self, allowed_changes: List[Dict[str, Any]]):
+    async def expect_only_v2(
+        self,
+        allowed_changes: List[Dict[str, Any]],
+        require_completeness: bool = True,
+    ):
         """Ensure only specified changes occurred, with field-level spec support.
 
         This version supports field-level specifications for added/removed rows,
         allowing users to specify expected field values instead of just whole-row specs.
+
+        When ``require_completeness`` is True (the default), every spec that carries
+        an explicit ``type`` (``insert``/``modify``/``delete``) must also be realised
+        in the current database — an empty diff no longer vacuously passes a non-empty
+        expected-changes list. This closes the "0.5 credit for zero changes" gap where
+        an agent that does nothing satisfies the no-side-effects half of the contract
+        while skipping the completeness half. Set ``require_completeness=False`` to
+        preserve the legacy no-side-effects-only behaviour. Specs without an explicit
+        ``type`` (legacy whole-row / single-field specs) are not subject to the
+        completeness pass.
         """
         # Normalize pk values: convert lists to tuples for hashability and consistency
         for change in allowed_changes:
@@ -1796,17 +1810,145 @@ class AsyncSnapshotDiff:
 
             # Validate outside try block so AssertionError propagates
             if api_diff is not None:
-                return await self._validate_diff_against_allowed_changes_v2(api_diff, allowed_changes)
+                await self._validate_diff_against_allowed_changes_v2(api_diff, allowed_changes)
+                if require_completeness:
+                    await self._verify_completeness_v2(allowed_changes)
+                return self
 
         # For expect_only_v2, we can optimize by only checking the specific rows mentioned
         if self._can_use_targeted_queries(allowed_changes):
-            return await self._expect_only_targeted_v2(allowed_changes)
+            await self._expect_only_targeted_v2(allowed_changes)
+            if require_completeness:
+                await self._verify_completeness_v2(allowed_changes)
+            return self
 
         # Fall back to full diff for complex cases
         diff = await self._collect()
-        return await self._validate_diff_against_allowed_changes_v2(
+        await self._validate_diff_against_allowed_changes_v2(
             diff, allowed_changes
         )
+        if require_completeness:
+            await self._verify_completeness_v2(allowed_changes)
+        return self
+
+    async def _verify_completeness_v2(self, allowed_changes: List[Dict[str, Any]]):
+        """Verify every spec with an explicit ``type`` was realised in the current DB.
+
+        ``expect_only_v2``'s no-side-effects check passes vacuously when the diff is
+        empty (the agent made zero changes). This completeness pass closes that gap by
+        requiring that each expected ``insert``/``modify``/``delete`` actually
+        occurred, mirroring the completeness half of ``expect_exactly``. Specs without
+        an explicit ``type`` (legacy whole-row / single-field specs) are skipped so the
+        stricter behaviour only applies to the v2 spec format.
+
+        Raises ``AssertionError`` listing every missing or mismatched expected change.
+        """
+        import asyncio
+
+        missing: List[str] = []
+
+        specs_by_table: Dict[str, List[Dict[str, Any]]] = {}
+        for spec in allowed_changes:
+            if spec.get("type") is None:
+                continue
+            table = spec.get("table")
+            if table is None or self.ignore_config.should_ignore_table(table):
+                continue
+            specs_by_table.setdefault(table, []).append(spec)
+
+        if not specs_by_table:
+            return self
+
+        async def check_spec(table: str, spec: Dict[str, Any], pk_columns: List[str]) -> None:
+            try:
+                pk = spec.get("pk")
+                where_sql = self._build_pk_where_clause(pk_columns, pk)
+                select_sql = f"SELECT * FROM {_quote_identifier(table)} WHERE {where_sql}"
+                after_response = await self.after.resource.query(select_sql)
+                after_row = (
+                    dict(zip(after_response.columns, after_response.rows[0]))
+                    if after_response.rows
+                    else None
+                )
+                spec_type = spec.get("type")
+                pk_label = repr(pk)
+
+                if spec_type == "insert":
+                    if after_row is None:
+                        missing.append(
+                            f"Expected insert in table '{table}' pk={pk_label} "
+                            f"did not occur (row absent in current DB)"
+                        )
+                        return
+                    fields_spec = spec.get("fields")
+                    if fields_spec is not None:
+                        for field_name, expected_value in fields_spec:
+                            if expected_value is ...:
+                                continue
+                            if self.ignore_config.should_ignore_field(table, field_name):
+                                continue
+                            actual = after_row.get(field_name)
+                            if not _values_equivalent(expected_value, actual):
+                                missing.append(
+                                    f"Expected insert in table '{table}' pk={pk_label} "
+                                    f"field '{field_name}': expected {repr(expected_value)}, "
+                                    f"got {repr(actual)}"
+                                )
+                    return
+
+                if spec_type == "delete":
+                    if after_row is not None:
+                        missing.append(
+                            f"Expected delete in table '{table}' pk={pk_label} "
+                            f"did not occur (row still present in current DB)"
+                        )
+                    return
+
+                if spec_type == "modify":
+                    if after_row is None:
+                        missing.append(
+                            f"Expected modify in table '{table}' pk={pk_label} "
+                            f"did not occur (row absent in current DB)"
+                        )
+                        return
+                    resulting_fields = spec.get("resulting_fields")
+                    if resulting_fields is None:
+                        return
+                    for field_name, expected_value in resulting_fields:
+                        if expected_value is ...:
+                            continue
+                        if self.ignore_config.should_ignore_field(table, field_name):
+                            continue
+                        actual = after_row.get(field_name)
+                        if not _values_equivalent(expected_value, actual):
+                            missing.append(
+                                f"Expected modify in table '{table}' pk={pk_label} "
+                                f"field '{field_name}': expected {repr(expected_value)}, "
+                                f"got {repr(actual)}"
+                            )
+                    return
+
+            except Exception as e:
+                missing.append(
+                    f"Completeness check error for table '{table}' "
+                    f"pk={spec.get('pk')}: {e}"
+                )
+
+        coros = []
+        for table, table_specs in specs_by_table.items():
+            pk_columns = self._get_primary_key_columns(table)
+            for spec in table_specs:
+                coros.append(check_spec(table, spec, pk_columns))
+
+        await asyncio.gather(*coros)
+
+        if missing:
+            raise AssertionError(
+                "expect_only_v2 completeness check failed — expected changes "
+                "did not occur:\n" + "\n".join(f"  - {m}" for m in missing)
+            )
+
+        return self
 
     async def expect_exactly(self, expected_changes: List[Dict[str, Any]]):
         """Verify that EXACTLY the specified changes occurred.
