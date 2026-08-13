@@ -2591,3 +2591,261 @@ def test_targeted_row_exists_both_sides_no_change():
     finally:
         os.unlink(before_db)
         os.unlink(after_db)
+
+
+# ============================================================================
+# Tests for incidental side-effect table handling (ENVT-139728)
+# Verifiers must not fail when apps write incidental session/tracking/login/
+# audit rows during normal interaction, as long as those tables are not listed
+# in allowed_changes. A verifier that DOES list an incidental table in
+# allowed_changes still gets full per-row validation.
+# ============================================================================
+
+
+def _make_tmp_dbs():
+    before_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+    after_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
+    return before_db, after_db
+
+
+def test_expect_only_v2_ignores_incidental_session_writes():
+    """Incidental session/tracking writes not in allowed_changes must not fail the diff."""
+    before_db, after_db = _make_tmp_dbs()
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute("CREATE TABLE account (id INTEGER PRIMARY KEY, balance REAL)")
+        conn.execute("CREATE TABLE transaction_record (id INTEGER PRIMARY KEY, account_id INTEGER, amount REAL)")
+        conn.execute("CREATE TABLE login_activities (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT)")
+        conn.execute("CREATE TABLE search_history (id INTEGER PRIMARY KEY, query TEXT)")
+        conn.execute("INSERT INTO account VALUES (1, 100.0)")
+        conn.execute("INSERT INTO transaction_record VALUES (1, 1, 50.0)")
+        conn.execute("INSERT INTO login_activities VALUES (1, 1, 'login')")
+        conn.execute("INSERT INTO search_history VALUES (1, 'home')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute("CREATE TABLE account (id INTEGER PRIMARY KEY, balance REAL)")
+        conn.execute("CREATE TABLE transaction_record (id INTEGER PRIMARY KEY, account_id INTEGER, amount REAL)")
+        conn.execute("CREATE TABLE login_activities (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT)")
+        conn.execute("CREATE TABLE search_history (id INTEGER PRIMARY KEY, query TEXT)")
+        conn.execute("INSERT INTO account VALUES (1, 90.0)")
+        conn.execute("INSERT INTO transaction_record VALUES (1, 1, 50.0)")
+        conn.execute("INSERT INTO transaction_record VALUES (2, 1, -60.0)")
+        conn.execute("INSERT INTO login_activities VALUES (1, 1, 'login')")
+        conn.execute("INSERT INTO login_activities VALUES (2, 1, 'login')")
+        conn.execute("INSERT INTO search_history VALUES (1, 'home')")
+        conn.execute("INSERT INTO search_history VALUES (2, 'rewards')")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # Legitimate business writes are enumerated; incidental login/session
+        # writes are NOT listed and must be tolerated.
+        before.diff(after).expect_only_v2(
+            [
+                {
+                    "table": "account",
+                    "pk": 1,
+                    "type": "modify",
+                    "resulting_fields": [("balance", 90.0)],
+                    "no_other_changes": True,
+                },
+                {
+                    "table": "transaction_record",
+                    "pk": 2,
+                    "type": "insert",
+                    "fields": [("id", 2), ("account_id", 1), ("amount", -60.0)],
+                },
+            ]
+        )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_expect_only_v2_empty_changes_ignores_incidental_writes():
+    """Harbor-style empty allowed_changes tolerates incidental writes."""
+    before_db, after_db = _make_tmp_dbs()
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute("CREATE TABLE login_activities (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT)")
+        conn.execute("CREATE TABLE search_history (id INTEGER PRIMARY KEY, query TEXT)")
+        conn.execute("INSERT INTO login_activities VALUES (1, 1, 'login')")
+        conn.execute("INSERT INTO search_history VALUES (1, 'home')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute("CREATE TABLE login_activities (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT)")
+        conn.execute("CREATE TABLE search_history (id INTEGER PRIMARY KEY, query TEXT)")
+        conn.execute("INSERT INTO login_activities VALUES (1, 1, 'login')")
+        conn.execute("INSERT INTO login_activities VALUES (2, 1, 'login')")
+        conn.execute("INSERT INTO search_history VALUES (1, 'home')")
+        conn.execute("INSERT INTO search_history VALUES (2, 'rewards')")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # No business changes expected; only incidental writes happened.
+        before.diff(after).expect_only_v2([])
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_expect_only_v2_empty_changes_still_flags_business_writes():
+    """Empty allowed_changes must still flag writes to non-incidental tables."""
+    before_db, after_db = _make_tmp_dbs()
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute("CREATE TABLE account (id INTEGER PRIMARY KEY, balance REAL)")
+        conn.execute("INSERT INTO account VALUES (1, 100.0)")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute("CREATE TABLE account (id INTEGER PRIMARY KEY, balance REAL)")
+        conn.execute("INSERT INTO account VALUES (1, 100.0)")
+        conn.execute("INSERT INTO account VALUES (2, 50.0)")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        with pytest.raises(AssertionError):
+            before.diff(after).expect_only_v2([])
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_expect_only_v2_incidental_opt_out_is_strict():
+    """IgnoreConfig(incidental_tables=set()) restores strict behavior for unmentioned tables."""
+    before_db, after_db = _make_tmp_dbs()
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute("CREATE TABLE account (id INTEGER PRIMARY KEY, balance REAL)")
+        conn.execute("CREATE TABLE login_activities (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT)")
+        conn.execute("INSERT INTO account VALUES (1, 100.0)")
+        conn.execute("INSERT INTO login_activities VALUES (1, 1, 'login')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute("CREATE TABLE account (id INTEGER PRIMARY KEY, balance REAL)")
+        conn.execute("CREATE TABLE login_activities (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT)")
+        conn.execute("INSERT INTO account VALUES (1, 90.0)")
+        conn.execute("INSERT INTO login_activities VALUES (1, 1, 'login')")
+        conn.execute("INSERT INTO login_activities VALUES (2, 1, 'login')")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        with pytest.raises(AssertionError):
+            before.diff(after, IgnoreConfig(incidental_tables=set())).expect_only_v2(
+                [
+                    {
+                        "table": "account",
+                        "pk": 1,
+                        "type": "modify",
+                        "resulting_fields": [("balance", 90.0)],
+                        "no_other_changes": True,
+                    },
+                ]
+            )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_expect_only_v2_incidental_table_mentioned_still_validated():
+    """Listing an incidental table in allowed_changes still runs per-row validation."""
+    before_db, after_db = _make_tmp_dbs()
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute("CREATE TABLE login_activities (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT)")
+        conn.execute("INSERT INTO login_activities VALUES (1, 1, 'login')")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute("CREATE TABLE login_activities (id INTEGER PRIMARY KEY, user_id INTEGER, action TEXT)")
+        conn.execute("INSERT INTO login_activities VALUES (1, 1, 'login')")
+        conn.execute("INSERT INTO login_activities VALUES (2, 1, 'login')")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        # The verifier explicitly asserts on login_activities, so per-row
+        # validation must run and catch the wrong field value.
+        with pytest.raises(AssertionError):
+            before.diff(after).expect_only_v2(
+                [
+                    {
+                        "table": "login_activities",
+                        "pk": 2,
+                        "type": "insert",
+                        "fields": [("id", 2), ("user_id", 1), ("action", "WRONG_VALUE")],
+                    },
+                ]
+            )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
+
+
+def test_expect_only_v2_still_flags_unexpected_business_writes():
+    """The incidental relaxation must not mask unexpected writes to business tables."""
+    before_db, after_db = _make_tmp_dbs()
+    try:
+        conn = sqlite3.connect(before_db)
+        conn.execute("CREATE TABLE account (id INTEGER PRIMARY KEY, balance REAL)")
+        conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL)")
+        conn.execute("INSERT INTO account VALUES (1, 100.0)")
+        conn.execute("INSERT INTO orders VALUES (1, 10.0)")
+        conn.commit()
+        conn.close()
+
+        conn = sqlite3.connect(after_db)
+        conn.execute("CREATE TABLE account (id INTEGER PRIMARY KEY, balance REAL)")
+        conn.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, total REAL)")
+        conn.execute("INSERT INTO account VALUES (1, 90.0)")
+        conn.execute("INSERT INTO orders VALUES (1, 10.0)")
+        conn.execute("INSERT INTO orders VALUES (2, 99.0)")
+        conn.commit()
+        conn.close()
+
+        before = DatabaseSnapshot(before_db)
+        after = DatabaseSnapshot(after_db)
+
+        with pytest.raises(AssertionError):
+            before.diff(after).expect_only_v2(
+                [
+                    {
+                        "table": "account",
+                        "pk": 1,
+                        "type": "modify",
+                        "resulting_fields": [("balance", 90.0)],
+                        "no_other_changes": True,
+                    },
+                ]
+            )
+
+    finally:
+        os.unlink(before_db)
+        os.unlink(after_db)
