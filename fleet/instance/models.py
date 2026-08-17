@@ -129,19 +129,6 @@ class Resource(BaseModel):
     label: Optional[str] = Field(None, title="Label")
 
 
-class ExecuteFunctionRequest(BaseModel):
-    function_code: str
-    function_name: str
-    text_solution: Optional[str] = None
-
-
-class ExecuteFunctionResponse(BaseModel):
-    success: bool
-    result: Optional[Any] = None
-    error: Optional[str] = None
-    message: str
-
-
 class FsDiffRequest(BaseModel):
     include_content: bool = Field(True, title="Include Content")
     max_content_size: int = Field(102400, title="Max Content Size")

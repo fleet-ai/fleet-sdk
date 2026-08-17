@@ -8,7 +8,6 @@ from google.genai import types
 import fleet
 from dotenv import load_dotenv
 import base64
-import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -243,13 +242,6 @@ class GeminiAgent:
             return False, f"Error during task execution: {str(e)}"
 
 
-def extract_function_name(function_str: str) -> str:
-    match = re.search(r"(?:async\s+)?def\s+(\w+)\s*\(", function_str)
-    if match:
-        return match.group(1)
-    raise ValueError(f"No function name found in {function_str}")
-
-
 def evaluate_problem(
     problem: Problem,
     problem_idx: int,
@@ -287,11 +279,15 @@ def evaluate_problem(
             # return problem["id"], False, message
 
         # Verify the solution
-        function_name = extract_function_name(problem["verifier_func"])
         print(
-            f"[Problem {problem_idx + 1}/{total_problems}] Verifying {function_name} ({problem['id']})..."
+            f"[Problem {problem_idx + 1}/{total_problems}] Verifying {problem['id']}..."
         )
-        response = env.verify_raw(problem["verifier_func"], function_name)
+        verifier = fleet.tasks.verifier_from_string(
+            problem["verifier_func"],
+            verifier_id=problem["id"],
+            verifier_key=problem["id"],
+        )
+        response = verifier.remote_with_response(env)
 
         print(
             f"[Problem {problem_idx + 1}/{total_problems}] Result for {problem['id']}: {'✓' if response.success else '✗'}"

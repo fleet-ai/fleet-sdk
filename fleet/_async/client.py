@@ -159,7 +159,6 @@ from .instance import (
     AsyncInstanceClient,
     ResetRequest,
     ResetResponse,
-    ExecuteFunctionResponse,
 )
 from ..instance.models import (
     Resource as ResourceModel,
@@ -176,7 +175,6 @@ from ..config import (
 )
 from .exceptions import FleetConflictError, FleetTimeoutError
 from .instance.base import default_httpx_client
-from .instance.client import ValidatorType
 from .resources.base import Resource
 from .resources.sqlite import AsyncSQLiteResource
 from .resources.browser import AsyncBrowserResource
@@ -484,14 +482,6 @@ class AsyncEnv(EnvironmentBase):
             "POST", f"/v1/env/instances/{self.instance_id}/heartbeat", json=body
         )
         return HeartbeatResponse(**response.json())
-
-    async def verify(self, validator: ValidatorType) -> ExecuteFunctionResponse:
-        return await self.instance.verify(validator)
-
-    async def verify_raw(
-        self, function_code: str, function_name: Optional[str] = None
-    ) -> ExecuteFunctionResponse:
-        return await self.instance.verify_raw(function_code, function_name)
 
     async def check_bundle_exists(self, bundle_hash: str) -> VerifiersCheckResponse:
         return await _check_bundle_exists(self._load_client, bundle_hash)

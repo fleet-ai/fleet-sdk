@@ -1,6 +1,6 @@
 """Fleet SDK Environment Module."""
 
-from .client import AsyncInstanceClient, ValidatorType
+from .client import AsyncInstanceClient
 from ...instance.models import (
     ResetRequest,
     ResetResponse,
@@ -8,7 +8,6 @@ from ...instance.models import (
     ChromeStartRequest,
     ChromeStartResponse,
     ChromeStatusResponse,
-    ExecuteFunctionResponse,
 )
 
 __all__ = [
@@ -19,5 +18,4 @@ __all__ = [
     "ChromeStartRequest",
     "ChromeStartResponse",
     "ChromeStatusResponse",
-    "ExecuteFunctionResponse",
 ]

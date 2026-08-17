@@ -1,10 +1,10 @@
-import re
 import asyncio
 import argparse
 import json
 from typing import TypedDict, List, Optional, Tuple
 from pathlib import Path
 import fleet
+from fleet._async.tasks import verifier_from_string
 from nova_act import NovaAct, ActResult
 from dotenv import load_dotenv
 
@@ -21,13 +21,6 @@ class Problem(TypedDict):
     category: str
     difficulty: str
     verifier_func: str
-
-
-def extract_function_name(function_str: str) -> str | None:
-    match = re.search(r"(?:async\s+)?def\s+(\w+)\s*\(", function_str)
-    if match:
-        return match.group(1)
-    raise ValueError(f"No function name found in {function_str}")
 
 
 async def process_problem(
@@ -60,11 +53,15 @@ async def process_problem(
             error_msg = None
 
         # Verify the solution
-        function_name = extract_function_name(problem["verifier_func"])
         print(
-            f"[Problem {problem_idx + 1}/{total_problems}] Verifying {function_name} ({problem['id']})..."
+            f"[Problem {problem_idx + 1}/{total_problems}] Verifying {problem['id']}..."
         )
-        response = await env.verify_raw(problem["verifier_func"], function_name)
+        verifier = verifier_from_string(
+            problem["verifier_func"],
+            verifier_id=problem["id"],
+            verifier_key=problem["id"],
+        )
+        response = await verifier.remote_with_response(env)
 
         print(
             f"[Problem {problem_idx + 1}/{total_problems}] Result for {problem['id']}: {'✓' if response.success else '✗'}"
