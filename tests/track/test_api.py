@@ -10,6 +10,9 @@ import httpx
 import pytest
 
 from fleet.track.api import (
+    BulkSessionUpsert,
+    BulkUpsertPartialFailure,
+    SERVER_BULK_UPSERT_BATCH_CAP,
     SERVER_UPLOAD_URL_BATCH_CAP,
     TrackAPIClient,
     TrackAPIError,
@@ -184,6 +187,131 @@ def test_upsert_session_posts_relative_path_and_session_payload():
     assert captured["body"]["content_codec"] == "gzip"
     assert captured["body"]["raw_bytes"] == 1000
     assert captured["body"]["stored_bytes"] == 200
+
+
+def test_upsert_sessions_bulk_posts_items_to_bulk_endpoint():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(204)
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    api.upsert_sessions_bulk(
+        device_id="dev1",
+        items=[
+            BulkSessionUpsert(
+                path=".codex/sessions/a.jsonl",
+                session={"id": "sa", "tool": "codex"},
+                content_codec="gzip",
+                raw_bytes=1000,
+                stored_bytes=200,
+            ),
+            BulkSessionUpsert(
+                path=".cursor/projects/b.jsonl",
+                session={"id": "sb", "tool": "cursor"},
+            ),
+        ],
+    )
+
+    assert captured["url"] == "http://test/v1/track/sessions/bulk"
+    assert captured["body"]["device_id"] == "dev1"
+    items = captured["body"]["items"]
+    assert len(items) == 2
+    assert items[0]["path"] == ".codex/sessions/a.jsonl"
+    assert items[0]["session"]["tool"] == "codex"
+    assert items[0]["content_codec"] == "gzip"
+    assert items[0]["raw_bytes"] == 1000
+    assert items[0]["stored_bytes"] == 200
+    # Item 2 omitted content metadata; bulk payload must too.
+    assert items[1]["path"] == ".cursor/projects/b.jsonl"
+    assert "content_codec" not in items[1]
+    assert "raw_bytes" not in items[1]
+    assert "stored_bytes" not in items[1]
+
+
+def test_upsert_sessions_bulk_empty_list_skips_request():
+    called = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        called["n"] += 1
+        return httpx.Response(204)
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    api.upsert_sessions_bulk(device_id="dev1", items=[])
+    assert called["n"] == 0
+
+
+def test_upsert_sessions_bulk_chunks_above_server_cap():
+    """Caller may pass more than the server cap; client splits into multiple POSTs."""
+    sizes_received: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        sizes_received.append(len(body["items"]))
+        return httpx.Response(204)
+
+    items = [
+        BulkSessionUpsert(path=f"{i}.jsonl", session={"id": f"s{i}"})
+        for i in range(SERVER_BULK_UPSERT_BATCH_CAP * 2 + 7)
+    ]
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    api.upsert_sessions_bulk(device_id="dev1", items=items)
+
+    assert sizes_received == [
+        SERVER_BULK_UPSERT_BATCH_CAP,
+        SERVER_BULK_UPSERT_BATCH_CAP,
+        7,
+    ]
+
+
+def test_upsert_sessions_bulk_partial_failure_carries_unsent_tail():
+    """If chunk N fails after chunks 0..N-1 succeed, the raised exception
+    must expose only the unsent tail so the caller doesn't re-send items
+    the server already accepted."""
+    call_count = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return httpx.Response(204)  # first chunk succeeds
+        return httpx.Response(503, text="boom")  # second chunk fails
+
+    items = [
+        BulkSessionUpsert(path=f"{i}.jsonl", session={"id": f"s{i}"})
+        for i in range(SERVER_BULK_UPSERT_BATCH_CAP + 5)
+    ]
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    with pytest.raises(BulkUpsertPartialFailure) as exc:
+        api.upsert_sessions_bulk(device_id="dev1", items=items)
+
+    # The first SERVER_BULK_UPSERT_BATCH_CAP items were sent successfully;
+    # only the last 5 should be reported unsent.
+    assert len(exc.value.unsent_items) == 5
+    assert exc.value.unsent_items == items[SERVER_BULK_UPSERT_BATCH_CAP:]
+    assert exc.value.status_code == 503
+
+
+def test_upsert_sessions_bulk_first_chunk_failure_marks_all_unsent():
+    """If the very first chunk fails, every item is unsent — no work was
+    committed server-side."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, text="boom")
+
+    items = [
+        BulkSessionUpsert(path=f"{i}.jsonl", session={"id": f"s{i}"})
+        for i in range(10)
+    ]
+
+    api = TrackAPIClient(client=_client_with_handler(handler), auth_provider=_auth)
+    with pytest.raises(BulkUpsertPartialFailure) as exc:
+        api.upsert_sessions_bulk(device_id="dev1", items=items)
+
+    assert exc.value.unsent_items == items
 
 
 def test_upsert_session_can_omit_content_metadata():

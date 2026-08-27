@@ -10,6 +10,7 @@ from fleet.track.scrubber import (
     Rule,
     scrub,
     scrub_bytes,
+    scrub_text,
 )
 
 
@@ -164,3 +165,26 @@ def test_scrub_bytes_handles_invalid_utf8():
     bad = b"\xff\xfe AKIAIOSFODNN7EXAMPLE \x80"
     out = scrub_bytes(bad)
     assert b"AKIA" not in out
+
+
+# ------------------------------------------------------------------ #
+# scrub_text — single-pass equivalence to scrub().text                 #
+# ------------------------------------------------------------------ #
+
+
+def test_scrub_text_matches_scrub_result_text_for_diverse_inputs():
+    """Upload path uses scrub_text (skips hits enumeration). Result must be
+    identical to scrub(text).text — same substitutions in same order."""
+    samples = [
+        '{"k": "AKIAIOSFODNN7EXAMPLE", "key": "sk-abcdef0123456789ABCDEF0123456789"}',
+        "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789 and /Users/alice/x",
+        "postgres://user:pass@host/db\nMY_VAR=longvalueXXXXXXXXXXXXXXXXXXXXX\n",
+        '{"hello": "world"}\n',  # no matches → must be unchanged
+    ]
+    for text in samples:
+        assert scrub_text(text) == scrub(text).text
+
+
+def test_scrub_text_returns_input_unchanged_when_no_rules_fire():
+    text = '{"hello": "world"}\n'
+    assert scrub_text(text) == text

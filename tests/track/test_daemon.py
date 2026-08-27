@@ -20,6 +20,14 @@ def _auth() -> str:
     return "test-api-key"
 
 
+def _expand_bulk_upsert(body: dict) -> list[dict]:
+    """Flatten a /v1/track/sessions/bulk request body into per-row upsert dicts
+    that match the old per-row endpoint shape. Tests use this so the existing
+    per-row assertions continue to work after the daemon switched to bulk."""
+    device_id = body["device_id"]
+    return [{"device_id": device_id, **item} for item in body["items"]]
+
+
 class RecordingTransport:
     def __init__(self) -> None:
         self.calls: list[tuple[str, bytes]] = []
@@ -58,8 +66,8 @@ def test_run_once_reconciles_uploads_file_and_manifest(tmp_path: Path):
                 200,
                 json={"urls": {p: f"https://s3.test/{p}" for p in body["paths"]}},
             )
-        if req.method == "POST" and "/v1/track/sessions/" in req.url.path:
-            metadata_upserts.append(json.loads(req.content))
+        if req.method == "POST" and req.url.path.endswith("/v1/track/sessions/bulk"):
+            metadata_upserts.extend(_expand_bulk_upsert(json.loads(req.content)))
             return httpx.Response(204)
         raise AssertionError(f"unexpected request: {req.method} {req.url}")
 
@@ -144,8 +152,8 @@ def test_run_once_uploads_cursor_transcript_and_indexes_artifact(tmp_path: Path)
                 200,
                 json={"urls": {p: f"https://s3.test/{p}" for p in body["paths"]}},
             )
-        if req.method == "POST" and "/v1/track/sessions/" in req.url.path:
-            metadata_upserts.append(json.loads(req.content))
+        if req.method == "POST" and req.url.path.endswith("/v1/track/sessions/bulk"):
+            metadata_upserts.extend(_expand_bulk_upsert(json.loads(req.content)))
             return httpx.Response(204)
         raise AssertionError(f"unexpected request: {req.method} {req.url}")
 
@@ -316,8 +324,8 @@ def test_upload_done_upserts_exact_uploaded_payload_metadata(tmp_path: Path):
     metadata_upserts: list[dict] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
-        if req.method == "POST" and "/v1/track/sessions/" in req.url.path:
-            metadata_upserts.append(json.loads(req.content))
+        if req.method == "POST" and req.url.path.endswith("/v1/track/sessions/bulk"):
+            metadata_upserts.extend(_expand_bulk_upsert(json.loads(req.content)))
             return httpx.Response(204)
         raise AssertionError(f"unexpected request: {req.method} {req.url}")
 
@@ -339,6 +347,7 @@ def test_upload_done_upserts_exact_uploaded_payload_metadata(tmp_path: Path):
     )
 
     daemon._on_upload_done(rel_path, "fresh-digest", payload)
+    daemon._flush_metadata_buffer()
 
     assert len(metadata_upserts) == 1
     upsert = metadata_upserts[0]
@@ -367,8 +376,8 @@ def test_confirmed_existing_metadata_upsert_omits_content_metadata(tmp_path: Pat
     metadata_upserts: list[dict] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
-        if req.method == "POST" and "/v1/track/sessions/" in req.url.path:
-            metadata_upserts.append(json.loads(req.content))
+        if req.method == "POST" and req.url.path.endswith("/v1/track/sessions/bulk"):
+            metadata_upserts.extend(_expand_bulk_upsert(json.loads(req.content)))
             return httpx.Response(204)
         raise AssertionError(f"unexpected request: {req.method} {req.url}")
 
@@ -384,12 +393,155 @@ def test_confirmed_existing_metadata_upsert_omits_content_metadata(tmp_path: Pat
     daemon = Daemon(paths, queue=queue, cache=cache, tree=tree, api=api)
 
     daemon._upsert_metadata_for_paths({rel_path: "existing-digest"})
+    daemon._flush_metadata_buffer()
 
     assert len(metadata_upserts) == 1
     upsert = metadata_upserts[0]
     assert "content_codec" not in upsert
     assert "raw_bytes" not in upsert
     assert "stored_bytes" not in upsert
+
+    queue.close()
+    cache.close()
+
+
+def test_metadata_buffer_coalesces_many_uploads_into_one_bulk_request(tmp_path: Path):
+    """Workers append per upload; one main-loop flush should batch them all."""
+    paths = TrackPaths.under(tmp_path)
+    paths.ensure_track_dir()
+
+    rel_paths = [
+        ".codex/sessions/"
+        f"rollout-2026-05-05T00-00-00-eeeeeeee-eeee-eeee-eeee-eeeeeeeeee{i:02d}.jsonl"
+        for i in range(3)
+    ]
+    for rel in rel_paths:
+        f = tmp_path / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text('{"type":"session_meta","payload":{"id":"s","cwd":"/tmp"}}\n')
+
+    bulk_calls: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and req.url.path.endswith("/v1/track/sessions/bulk"):
+            bulk_calls.append(json.loads(req.content))
+            return httpx.Response(204)
+        raise AssertionError(f"unexpected request: {req.method} {req.url}")
+
+    api = TrackAPIClient(
+        client=httpx.Client(
+            transport=httpx.MockTransport(handler), base_url="http://test"
+        ),
+        auth_provider=_auth,
+    )
+    queue = UploadQueue(paths)
+    cache = HashCache(paths)
+    tree = MerkleTree(cache, file_iter=[])
+    daemon = Daemon(paths, queue=queue, cache=cache, tree=tree, api=api)
+    daemon._device_id = "dev1"
+
+    for i, rel in enumerate(rel_paths):
+        daemon._on_upload_done(rel, f"sha-{i}", UploadPayload(b"x", "raw", 1, 1))
+
+    # Workers haven't done HTTP yet — only after the flush.
+    assert bulk_calls == []
+
+    daemon._flush_metadata_buffer()
+
+    assert len(bulk_calls) == 1
+    items = bulk_calls[0]["items"]
+    assert {it["path"] for it in items} == set(rel_paths)
+
+    queue.close()
+    cache.close()
+
+
+def test_metadata_buffer_retains_items_when_flush_fails(tmp_path: Path):
+    """A 5xx on bulk upsert must leave items buffered for the next flush."""
+    paths = TrackPaths.under(tmp_path)
+    paths.ensure_track_dir()
+
+    rel_path = (
+        ".codex/sessions/"
+        "rollout-2026-05-05T00-00-00-ffffffff-ffff-ffff-ffff-ffffffffff01.jsonl"
+    )
+    session_file = tmp_path / rel_path
+    session_file.parent.mkdir(parents=True)
+    session_file.write_text(
+        '{"type":"session_meta","payload":{"id":"s","cwd":"/tmp"}}\n'
+    )
+
+    attempts = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST" and req.url.path.endswith("/v1/track/sessions/bulk"):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                return httpx.Response(503, text="boom")
+            return httpx.Response(204)
+        raise AssertionError(f"unexpected request: {req.method} {req.url}")
+
+    api = TrackAPIClient(
+        client=httpx.Client(
+            transport=httpx.MockTransport(handler), base_url="http://test"
+        ),
+        auth_provider=_auth,
+    )
+    queue = UploadQueue(paths)
+    cache = HashCache(paths)
+    tree = MerkleTree(cache, file_iter=[])
+    daemon = Daemon(paths, queue=queue, cache=cache, tree=tree, api=api)
+    daemon._device_id = "dev1"
+
+    daemon._on_upload_done(rel_path, "fresh-sha", UploadPayload(b"x", "raw", 1, 1))
+    daemon._flush_metadata_buffer()  # first attempt 503s
+
+    assert attempts["n"] == 1
+    assert len(daemon._metadata_buffer) == 1  # item retained for retry
+    assert daemon._metadata_indexed.get(rel_path) is None  # not yet marked
+
+    daemon._flush_metadata_buffer()  # second attempt succeeds
+
+    assert attempts["n"] == 2
+    assert daemon._metadata_buffer == []
+    assert daemon._metadata_indexed.get(rel_path) == "fresh-sha"
+
+    queue.close()
+    cache.close()
+
+
+def test_drain_queue_tight_loops_until_drainer_empty(tmp_path: Path):
+    """`_drain_queue` must call `drain_once` until claimed=0 in one main-loop
+    iteration, instead of one drain per 10s sleep. This is the dispatch-throughput
+    fix — without it, a 1000-file backlog needed ~30 main-loop sleeps to dispatch."""
+    paths = TrackPaths.under(tmp_path)
+    paths.ensure_track_dir()
+    queue = UploadQueue(paths)
+    cache = HashCache(paths)
+    tree = MerkleTree(cache, file_iter=[])
+    daemon = Daemon(paths, queue=queue, cache=cache, tree=tree)
+    daemon._device_id = "dev1"
+
+    class CountingDrainer:
+        """Returns claimed=N for the first 3 calls, then 0. Records each call."""
+
+        def __init__(self):
+            self.calls = 0
+
+        def drain_once(self, device_id: str):
+            from fleet.track.drainer import DrainResult
+
+            self.calls += 1
+            if self.calls <= 3:
+                return DrainResult(claimed=10, submitted=10, failed=0)
+            return DrainResult(claimed=0, submitted=0, failed=0)
+
+    counter = CountingDrainer()
+    daemon._drainer = counter  # type: ignore[assignment]
+
+    daemon._drain_queue()
+
+    assert counter.calls == 4, "drain should loop until claimed=0, then stop"
 
     queue.close()
     cache.close()
